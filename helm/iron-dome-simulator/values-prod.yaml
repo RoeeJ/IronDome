@@ -20,6 +20,10 @@ ingress:
       hosts:
         - iron-dome.example.com
 
+# Enable certificate resource (optional if using ingress annotations)
+certificate:
+  enabled: true
+
 resources:
   limits:
     cpu: 500m
