@@ -9,7 +9,7 @@ docker build -t iron-dome-simulator:test .
 
 # Run the container
 echo "Running container..."
-docker run -d --name iron-dome-test -p 8080:80 iron-dome-simulator:test
+docker run -d --name iron-dome-test -p 8080:8080 iron-dome-simulator:test
 
 echo "✅ Container running at http://localhost:8080"
 echo "   Run 'docker logs iron-dome-test' to see logs"
