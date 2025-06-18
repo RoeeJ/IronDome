@@ -5,6 +5,8 @@ import { Threat } from '../entities/Threat'
 import { Projectile } from '../entities/Projectile'
 import { FragmentationSystem } from '../systems/FragmentationSystem'
 import { DebrisSystem } from '../systems/DebrisSystem'
+import { Profiler } from '../utils/Profiler'
+import { debug } from '../utils/DebugLogger'
 
 interface Interception {
   interceptor: Projectile
@@ -24,6 +26,7 @@ export class InterceptionSystem {
   private fragmentationSystem: FragmentationSystem
   private debrisSystem: DebrisSystem
   private currentThreats: Threat[] = []
+  private profiler?: Profiler
 
   constructor(scene: THREE.Scene, world: CANNON.World) {
     this.scene = scene
@@ -35,6 +38,10 @@ export class InterceptionSystem {
   addBattery(battery: IronDomeBattery): void {
     this.batteries.push(battery)
   }
+  
+  setProfiler(profiler: Profiler): void {
+    this.profiler = profiler
+  }
 
   update(threats: Threat[]): Projectile[] {
     const deltaTime = 1/60
@@ -43,22 +50,31 @@ export class InterceptionSystem {
     this.currentThreats = threats
     
     // Update batteries with threat information
+    if (this.profiler) this.profiler.startSection('Battery Updates')
     this.batteries.forEach(battery => battery.update(deltaTime, threats))
+    if (this.profiler) this.profiler.endSection('Battery Updates')
     
     // Update fragmentation system
+    if (this.profiler) this.profiler.startSection('Fragmentation System')
     const { fragmentPositions } = this.fragmentationSystem.update(deltaTime)
+    if (this.profiler) this.profiler.endSection('Fragmentation System')
     
     // Update debris system
+    if (this.profiler) this.profiler.startSection('Debris System')
     this.debrisSystem.update(deltaTime)
+    if (this.profiler) this.profiler.endSection('Debris System')
     
     // Check if fragments hit any threats
+    if (this.profiler) this.profiler.startSection('Fragment Hit Detection')
     for (const threat of threats) {
       if (threat.isActive && this.fragmentationSystem.checkFragmentHits(threat.getPosition(), 3)) {
         this.handleFragmentHit(threat)
       }
     }
+    if (this.profiler) this.profiler.endSection('Fragment Hit Detection')
 
     // Update interceptors
+    if (this.profiler) this.profiler.startSection('Interceptor Updates')
     for (let i = this.interceptors.length - 1; i >= 0; i--) {
       const interceptor = this.interceptors[i]
       interceptor.update(deltaTime)
@@ -69,20 +85,33 @@ export class InterceptionSystem {
         this.interceptors.splice(i, 1)
       }
     }
+    if (this.profiler) this.profiler.endSection('Interceptor Updates')
 
     // Check for new threats to intercept
+    if (this.profiler) this.profiler.startSection('Evaluate Threats')
     this.evaluateThreats(threats)
+    if (this.profiler) this.profiler.endSection('Evaluate Threats')
 
     // Check for successful interceptions
+    if (this.profiler) this.profiler.startSection('Check Interceptions')
     this.checkInterceptions()
+    if (this.profiler) this.profiler.endSection('Check Interceptions')
 
     // Clean up completed interceptions
+    if (this.profiler) this.profiler.startSection('Cleanup')
     this.cleanupInterceptions()
+    if (this.profiler) this.profiler.endSection('Cleanup')
 
     return this.interceptors
   }
 
   private evaluateThreats(threats: Threat[]): void {
+    // Performance check: limit total active interceptors
+    const maxActiveInterceptors = 8  // Prevent triangle count spikes
+    if (this.interceptors.length >= maxActiveInterceptors) {
+      return  // Skip launching more until some are destroyed
+    }
+    
     // Sort threats by time to impact (most urgent first)
     const sortedThreats = threats
       .filter(t => t.isActive && t.getTimeToImpact() > 0)
@@ -102,7 +131,7 @@ export class InterceptionSystem {
       const interceptorsToFire = battery.calculateInterceptorCount(threat, existingInterceptors)
       
       if (interceptorsToFire > 0) {
-        console.log(`Firing ${interceptorsToFire} interceptor(s) at threat. Already tracking: ${existingInterceptors}`)
+        debug.category('Interception', `Firing ${interceptorsToFire} interceptor(s) at threat. Already tracking: ${existingInterceptors}`)
         
         // Fire multiple interceptors with callback to handle delayed launches
         battery.fireInterceptors(threat, interceptorsToFire, (interceptor) => {
@@ -166,7 +195,7 @@ export class InterceptionSystem {
     position: THREE.Vector3, 
     quality: number
   ): void {
-    console.log(`Proximity detonation! Quality: ${(quality * 100).toFixed(0)}%`)
+    debug.category('Combat', `Proximity detonation! Quality: ${(quality * 100).toFixed(0)}%`)
     
     // Create simple explosion instead of cone fragmentation
     // Higher quality = larger explosion
@@ -196,7 +225,7 @@ export class InterceptionSystem {
       }
     } else {
       this.failedInterceptions++
-      console.log('Proximity detonation failed to destroy threat')
+      debug.category('Combat', 'Proximity detonation failed to destroy threat')
       
       // Create some debris even on failed interception
       const threatVelocity = threat.getVelocity()
@@ -205,7 +234,7 @@ export class InterceptionSystem {
   }
   
   private handleFragmentHit(threat: Threat): void {
-    console.log('Threat destroyed by fragments!')
+    debug.category('Combat', 'Threat destroyed by fragments!')
     this.successfulInterceptions++
     threat.destroy(this.scene, this.world)
     
@@ -224,7 +253,7 @@ export class InterceptionSystem {
     
     if (interceptorsToRepurpose.length === 0) return
     
-    console.log(`Repurposing ${interceptorsToRepurpose.length} interceptor(s)`)
+    debug.category('Interception', `Repurposing ${interceptorsToRepurpose.length} interceptor(s)`)
     
     // Use all active threats from the system
     const activeThreats = this.currentThreats.filter(t => t.isActive && t !== destroyedThreat)
@@ -262,10 +291,10 @@ export class InterceptionSystem {
         interception.interceptor.retarget(bestNewTarget.mesh)
         interception.threat = bestNewTarget
         interception.targetPoint = bestNewTarget.getImpactPoint() || bestNewTarget.getPosition()
-        console.log('Interceptor successfully retargeted')
+        debug.category('Interception', 'Interceptor successfully retargeted')
       } else {
         // No suitable target found - self-destruct to avoid friendly fire
-        console.log('No suitable retarget found - interceptor will self-destruct')
+        debug.category('Interception', 'No suitable retarget found - interceptor will self-destruct')
         interception.interceptor.isActive = false
         this.createExplosion(interception.interceptor.getPosition(), 0.2)
       }

@@ -284,8 +284,8 @@ export class ThreatManager {
     shockwave.position.y = 0.1
     this.scene.add(shockwave)
 
-    // Debris particles
-    const debrisCount = 15
+    // Debris particles (reduced for performance)
+    const debrisCount = 8
     const debris: THREE.Mesh[] = []
     
     for (let i = 0; i < debrisCount; i++) {

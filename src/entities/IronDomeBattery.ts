@@ -309,8 +309,9 @@ export class IronDomeBattery {
     const loadedTubes = this.launcherTubes.filter(tube => tube.isLoaded).length
     count = Math.min(count, loadedTubes)
     
-    // Never fire more than 3 at once
-    return Math.min(count, 3)
+    // Performance optimization: limit to 2 simultaneous interceptors
+    // to prevent triangle count spikes (each adds ~100 tris + particles)
+    return Math.min(count, 2)
   }
 
   fireInterceptors(threat: Threat, count: number = 1, onLaunch?: (interceptor: Projectile) => void): Projectile[] {

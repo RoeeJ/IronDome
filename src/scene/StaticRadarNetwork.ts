@@ -36,10 +36,10 @@ export class StaticRadarNetwork {
   private setupRadarStations(): void {
     // Place radars at four corners of the ground plane (400x400 plane)
     const positions = [
-      new THREE.Vector3(-200, 0, -200),  // Front-left
-      new THREE.Vector3(200, 0, -200),   // Front-right
-      new THREE.Vector3(-200, 0, 200),   // Back-left
-      new THREE.Vector3(200, 0, 200)     // Back-right
+      new THREE.Vector3(-188, 0, -188),  // Front-left
+      new THREE.Vector3(188, 0, -188),   // Front-right
+      new THREE.Vector3(-188, 0, 188),   // Back-left
+      new THREE.Vector3(188, 0, 188)     // Back-right
     ]
     
     positions.forEach((position, index) => {
@@ -291,10 +291,10 @@ export class StaticRadarNetwork {
     })
   }
 
-  update(threats: THREE.Object3D[]): void {
+  update(threats: Array<{ getPosition(): THREE.Vector3 }>): void {
     // Visual feedback for detected threats
     threats.forEach(threat => {
-      if (this.checkDetection(threat.position)) {
+      if (this.checkDetection(threat.getPosition())) {
         // Could add visual indication here
       }
     })

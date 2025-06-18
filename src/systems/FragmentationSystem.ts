@@ -43,11 +43,11 @@ export class FragmentationSystem {
     config: Partial<FragmentationConfig> = {}
   ): void {
     const fullConfig: FragmentationConfig = {
-      fragmentCount: Math.floor(200 * quality),
+      fragmentCount: Math.floor(30 * quality),  // Further reduced
       coneAngle: 45,
       coneDirection: targetDirection.normalize(),
       fragmentSpeed: 150,
-      fragmentLifetime: 0.5,
+      fragmentLifetime: 0.3,  // Reduced from 0.5
       damageRadius: 15,
       visualScale: 1,
       ...config
@@ -64,7 +64,7 @@ export class FragmentationSystem {
   }
   
   private createShrapnelCloud(position: THREE.Vector3, config: FragmentationConfig): void {
-    const particleCount = config.fragmentCount * 3
+    const particleCount = config.fragmentCount  // Use same count as fragments
     const geometry = new THREE.BufferGeometry()
     const positions = new Float32Array(particleCount * 3)
     const velocities = new Float32Array(particleCount * 3)

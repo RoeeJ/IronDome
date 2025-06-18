@@ -11,6 +11,12 @@ export class TacticalDisplay {
   private nextId: number = 1
   private radarPings: { position: THREE.Vector2, time: number }[] = []
   
+  // Performance optimizations
+  private lastSweepAngle: number = 0
+  private frameSkip: number = 0
+  private readonly TRACK_HISTORY_LENGTH = 10 // Reduced from 20
+  private readonly UPDATE_SKIP_FRAMES = 0 // Update every frame for smooth display
+  
   constructor() {
     // Create canvas overlay
     this.canvas = document.createElement('canvas')
@@ -37,6 +43,17 @@ export class TacticalDisplay {
     interceptorCount: number,
     successRate: number
   ): void {
+    // Update sweep angle
+    this.lastSweepAngle = (Date.now() / 1000) % (Math.PI * 2)
+    
+    // Skip frames if configured (0 = no skip)
+    if (this.UPDATE_SKIP_FRAMES > 0) {
+      this.frameSkip++
+      if (this.frameSkip % (this.UPDATE_SKIP_FRAMES + 1) !== 0) {
+        return
+      }
+    }
+    
     // Clear canvas
     this.ctx.fillStyle = 'rgba(0, 0, 0, 0.8)'
     this.ctx.fillRect(0, 0, this.canvas.width, this.canvas.height)
@@ -85,27 +102,32 @@ export class TacticalDisplay {
     ctx.fillText('100m', this.radarCenter.x + this.radarRadius / 2 - 15, this.radarCenter.y - 5)
     ctx.fillText('150m', this.radarCenter.x + this.radarRadius * 3/4 - 15, this.radarCenter.y - 5)
     
-    // Draw rotating sweep line
-    const sweepAngle = (Date.now() / 1000) % (Math.PI * 2)
-    const sweepGradient = ctx.createLinearGradient(
-      this.radarCenter.x,
-      this.radarCenter.y,
-      this.radarCenter.x + Math.cos(sweepAngle) * this.radarRadius,
-      this.radarCenter.y + Math.sin(sweepAngle) * this.radarRadius
-    )
-    sweepGradient.addColorStop(0, 'rgba(0, 255, 0, 0)')
-    sweepGradient.addColorStop(0.5, 'rgba(0, 255, 0, 0.3)')
-    sweepGradient.addColorStop(1, 'rgba(0, 255, 0, 0.6)')
+    // Draw rotating sweep line - use simple line instead of gradient for performance
+    this.lastSweepAngle = (Date.now() / 1000) % (Math.PI * 2)
     
-    ctx.strokeStyle = sweepGradient
+    ctx.strokeStyle = 'rgba(0, 255, 0, 0.6)'
     ctx.lineWidth = 2
     ctx.beginPath()
     ctx.moveTo(this.radarCenter.x, this.radarCenter.y)
     ctx.lineTo(
-      this.radarCenter.x + Math.cos(sweepAngle) * this.radarRadius,
-      this.radarCenter.y + Math.sin(sweepAngle) * this.radarRadius
+      this.radarCenter.x + Math.cos(this.lastSweepAngle) * this.radarRadius,
+      this.radarCenter.y + Math.sin(this.lastSweepAngle) * this.radarRadius
     )
     ctx.stroke()
+    
+    // Add a fading trail
+    for (let i = 1; i <= 3; i++) {
+      const trailAngle = this.lastSweepAngle - (i * Math.PI / 12)
+      ctx.strokeStyle = `rgba(0, 255, 0, ${0.3 - i * 0.1})`
+      ctx.lineWidth = 2 - i * 0.5
+      ctx.beginPath()
+      ctx.moveTo(this.radarCenter.x, this.radarCenter.y)
+      ctx.lineTo(
+        this.radarCenter.x + Math.cos(trailAngle) * this.radarRadius,
+        this.radarCenter.y + Math.sin(trailAngle) * this.radarRadius
+      )
+      ctx.stroke()
+    }
   }
   
   private drawBattery(): void {
@@ -167,7 +189,7 @@ export class TacticalDisplay {
       
       // Add to track history
       track.positions.push(screenPos.clone())
-      if (track.positions.length > 20) {
+      if (track.positions.length > this.TRACK_HISTORY_LENGTH) {
         track.positions.shift()
       }
       

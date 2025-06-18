@@ -14,7 +14,7 @@ export class LaunchEffectsSystem {
   private scene: THREE.Scene
   private activeEffects: Array<{ update: () => boolean }> = []
   private lastEffectTime: number = 0
-  private effectCooldown: number = 50 // Minimum ms between effects
+  private effectCooldown: number = 100 // Increased cooldown to reduce particle creation
   
   constructor(scene: THREE.Scene) {
     this.scene = scene
@@ -122,7 +122,7 @@ export class LaunchEffectsSystem {
     direction: THREE.Vector3,
     config: LaunchEffectConfig
   ): void {
-    const particleCount = 20  // Reduced from 50
+    const particleCount = 10  // Further reduced for performance
     const geometry = new THREE.BufferGeometry()
     const positions = new Float32Array(particleCount * 3)
     const velocities = new Float32Array(particleCount * 3)
@@ -248,7 +248,7 @@ export class LaunchEffectsSystem {
     this.scene.add(ring)
     
     // Create dust particles
-    const particleCount = 15  // Reduced from 30
+    const particleCount = 8  // Further reduced for performance
     const dustGeometry = new THREE.BufferGeometry()
     const dustPositions = new Float32Array(particleCount * 3)
     const dustVelocities = new Float32Array(particleCount * 3)

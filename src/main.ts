@@ -9,6 +9,12 @@ import { IronDomeBattery } from './entities/IronDomeBattery'
 import { InterceptionSystem } from './scene/InterceptionSystem'
 import { StaticRadarNetwork } from './scene/StaticRadarNetwork'
 import { TacticalDisplay } from './ui/TacticalDisplay'
+import { PerformanceMonitor } from './utils/PerformanceMonitor'
+import { Profiler } from './utils/Profiler'
+import { ProfilerDisplay } from './ui/ProfilerDisplay'
+import { RenderProfiler } from './utils/RenderProfiler'
+import { ModelCache } from './utils/ModelCache'
+import { debug } from './utils/DebugLogger'
 
 // Scene setup
 const scene = new THREE.Scene()
@@ -149,6 +155,12 @@ debugFolder.add(debugInfo, 'successRate').listen().disable()
 debugFolder.add(debugInfo, 'showRadarCoverage').name('Show Radar Coverage').onChange((value: boolean) => {
   radarNetwork.setShowCoverage(value)
 })
+debugFolder.add({ profiler: '⚡ Press P for Performance Profiler' }, 'profiler').disable()
+if (debug.isEnabled()) {
+  debugFolder.add({ debugUrl: '🐛 Debug mode active (add ?debug to URL)' }, 'debugUrl').disable()
+} else {
+  debugFolder.add({ debugUrl: '💡 Add ?debug to URL for debug logs' }, 'debugUrl').disable()
+}
 
 const simulationFolder = gui.addFolder('Simulation')
 
@@ -177,7 +189,9 @@ const simulationControls = {
   },
   pause: false,
   timeScale: 1.0,
-  showTrajectories: true
+  showTrajectories: true,
+  enableFog: false,
+  interceptorModel: 'ultra'  // 'none', 'ultra', 'simple'
 }
 
 // Threat spawning control
@@ -207,6 +221,17 @@ simulationFolder.add(simulationControls, 'autoIntercept').name('Auto Intercept')
 simulationFolder.add(simulationControls, 'pause').name('Pause Simulation')
 simulationFolder.add(simulationControls, 'timeScale', 0.1, 3.0, 0.1).name('Time Scale')
 simulationFolder.add(simulationControls, 'showTrajectories').name('Show Trajectories')
+simulationFolder.add(simulationControls, 'enableFog').name('Enable Fog').onChange((value: boolean) => {
+  if (value) {
+    scene.fog = new THREE.Fog(0x87CEEB, 50, 500)
+  } else {
+    scene.fog = null
+  }
+})
+simulationFolder.add(simulationControls, 'interceptorModel', ['none', 'ultra', 'simple']).name('Interceptor Model').onChange((value: string) => {
+  // Store preference globally for new interceptors
+  ;(window as any).__interceptorModelQuality = value
+})
 simulationFolder.add(simulationControls, 'clearAll').name('Clear All')
 
 // Start spawning threats immediately
@@ -317,8 +342,23 @@ function onWindowResize() {
 }
 window.addEventListener('resize', onWindowResize)
 
-// Hide loading screen when ready
-window.addEventListener('load', () => {
+// Preload models and hide loading screen when ready
+window.addEventListener('load', async () => {
+  // Set initial model quality preference
+  ;(window as any).__interceptorModelQuality = simulationControls.interceptorModel
+  
+  try {
+    // Preload the optimized Tamir models
+    const modelCache = ModelCache.getInstance()
+    await modelCache.preloadModels([
+      'assets/tamir/scene_ultra_simple.glb',
+      'assets/tamir/scene_simple.glb'
+    ])
+    debug.log('Models preloaded successfully')
+  } catch (error) {
+    debug.error('Failed to preload models:', error)
+  }
+  
   const loadingEl = document.getElementById('loading')
   if (loadingEl) {
     loadingEl.style.display = 'none'
@@ -329,52 +369,101 @@ window.addEventListener('load', () => {
 const clock = new THREE.Clock()
 let previousTime = 0
 
+// Performance monitoring
+const performanceMonitor = new PerformanceMonitor()
+const profiler = new Profiler()
+const profilerDisplay = new ProfilerDisplay(profiler)
+const renderProfiler = new RenderProfiler(renderer)
+renderProfiler.setProfiler(profiler)
+
+// Render bottleneck tracking
+let frameCount = 0
+let renderBottleneckLogged = false
+
 function animate() {
   requestAnimationFrame(animate)
+  
+  // Store camera reference for LOD optimizations
+  ;(scene as any).__camera = camera
+  
+  profiler.startSection('Frame')
 
   const deltaTime = clock.getDelta()
   const currentTime = clock.getElapsedTime()
   const fps = 1 / deltaTime
 
+  // Update performance monitor
+  profiler.startSection('Performance Monitor')
+  performanceMonitor.update(fps)
+  const perfStats = performanceMonitor.getStats()
+  profiler.endSection('Performance Monitor')
+  
+  // Adjust quality based on performance
+  if (perfStats.isCritical) {
+    // Skip tactical display updates in critical performance situations
+    // Will be handled by reducing update frequency
+  }
+
   // Update physics with time scale and pause
   if (!simulationControls.pause) {
+    profiler.startSection('Physics')
     const scaledDelta = deltaTime * simulationControls.timeScale
     world.step(1 / 60, scaledDelta, 3)
+    profiler.endSection('Physics')
   }
 
   // Update threat manager
+  profiler.startSection('Threat Manager')
   threatManager.update()
+  profiler.endSection('Threat Manager')
   
-  // Update radar network
-  const threats = threatManager.getActiveThreats()
-  radarNetwork.update(threats.map(t => t.mesh))
+  // Cache active threats to avoid multiple calls
+  const activeThreats = threatManager.getActiveThreats()
+  
+  // Update radar network - pass threats directly instead of mapping
+  if (activeThreats.length > 0) {
+    profiler.startSection('Radar Network')
+    radarNetwork.update(activeThreats)
+    profiler.endSection('Radar Network')
+  }
 
   // Update projectiles
-  for (let i = projectiles.length - 1; i >= 0; i--) {
-    const projectile = projectiles[i]
-    projectile.update()
+  profiler.startSection('Projectiles')
+  const projectileCount = projectiles.length
+  if (projectileCount > 0) {
+    profiler.startSection(`Update ${projectileCount} projectiles`)
+    for (let i = projectiles.length - 1; i >= 0; i--) {
+      const projectile = projectiles[i]
+      projectile.update()
 
-    // Remove projectiles that fall below ground
-    if (projectile.body.position.y < -10) {
-      projectile.destroy(scene, world)
-      projectiles.splice(i, 1)
+      // Remove projectiles that fall below ground
+      if (projectile.body.position.y < -10) {
+        projectile.destroy(scene, world)
+        projectiles.splice(i, 1)
+      }
     }
+    profiler.endSection(`Update ${projectileCount} projectiles`)
   }
+  profiler.endSection('Projectiles')
 
   // Update interception system
+  let systemInterceptors: Projectile[] = []
   if (simulationControls.autoIntercept) {
-    const systemInterceptors = interceptionSystem.update(threatManager.getActiveThreats())
-    // Merge system interceptors with manually launched projectiles
-    const allProjectiles = [...projectiles, ...systemInterceptors]
-    debugInfo.interceptors = allProjectiles.length
+    profiler.startSection('Interception System')
+    interceptionSystem.setProfiler(profiler) // Pass profiler for detailed tracking
+    systemInterceptors = interceptionSystem.update(activeThreats)
+    profiler.endSection('Interception System')
   }
 
-  // Update GUI
-  if (currentTime - previousTime > 0.1) {
+  // Update GUI at 30 Hz (33ms) for smooth tactical display
+  if (currentTime - previousTime > 0.033) {
+    profiler.startSection('GUI Update')
     const stats = interceptionSystem.getStats()
+    const allProjectiles = [...projectiles, ...systemInterceptors]
+    
     debugInfo.fps = Math.round(fps)
-    debugInfo.threats = threatManager.getActiveThreats().length
-    debugInfo.interceptors = projectiles.length
+    debugInfo.threats = activeThreats.length
+    debugInfo.interceptors = allProjectiles.length
     debugInfo.interceptions = stats.successful
     debugInfo.successRate = stats.successful + stats.failed > 0 
       ? Math.round((stats.successful / (stats.successful + stats.failed)) * 100)
@@ -384,22 +473,109 @@ function animate() {
     batteryInfo.loadedTubes = loadedCount
     batteryInfo.reloading = 20 - loadedCount
     
-    // Update tactical display
-    tacticalDisplay.update(
-      threatManager.getActiveThreats(),
-      battery.getPosition(),
-      loadedCount,
-      batteryInfo.successRate
-    )
+    // Update tactical display only if performance allows
+    if (!perfStats.isCritical) {
+      profiler.startSection('Tactical Display')
+      tacticalDisplay.update(
+        activeThreats,
+        battery.getPosition(),
+        loadedCount,
+        batteryInfo.successRate
+      )
+      profiler.endSection('Tactical Display')
+    }
     
+    // Check for performance warnings
+    const perfCheck = performanceMonitor.checkPerformance()
+    if (perfCheck.warning) {
+      console.warn(perfCheck.message)
+    }
+    
+    profiler.endSection('GUI Update')
     previousTime = currentTime
   }
 
   // Update controls
+  profiler.startSection('Controls')
   controls.update()
+  profiler.endSection('Controls')
 
   // Render
-  renderer.render(scene, camera)
+  profiler.startSection('Render')
+  renderProfiler.profiledRender(scene, camera)
+  profiler.endSection('Render')
+  
+  // Update profiler display
+  profiler.endSection('Frame')
+  profilerDisplay.setRenderStats(renderProfiler.getLastStats())
+  profilerDisplay.update()
+  
+  // Log render bottleneck analysis periodically
+  frameCount++
+  if (!renderBottleneckLogged && frameCount > 120 && frameCount % 60 === 0) {
+    const averages = profiler.getAverages()
+    const renderTime = averages.get('Render') || 0
+    const frameTime = averages.get('Frame') || 0
+    
+    if (renderTime > 5 && renderTime / frameTime > 0.8) {
+      renderBottleneckLogged = true
+      debug.log('=== RENDER BOTTLENECK ANALYSIS ===')
+      debug.performance('Render time', renderTime)
+      debug.log(`Render is ${((renderTime/frameTime)*100).toFixed(0)}% of frame time`)
+      
+      // Count active effects
+      let exhaustTrailCount = 0
+      let particleSystemCount = 0
+      let meshCount = 0
+      let transparentCount = 0
+      
+      scene.traverse((obj) => {
+        if (obj instanceof THREE.Mesh) {
+          meshCount++
+          if (obj.material && (obj.material as any).transparent) transparentCount++
+        } else if (obj instanceof THREE.Points) {
+          particleSystemCount++
+        }
+      })
+      
+      // Count exhaust trails
+      const allProjectiles = [...projectiles, ...systemInterceptors]
+      allProjectiles.forEach(p => {
+        if (p.exhaustTrail) exhaustTrailCount++
+      })
+      
+      debug.category('Scene', 'Contents:', {
+        meshes: meshCount,
+        particleSystems: particleSystemCount,
+        transparentObjects: transparentCount,
+        exhaustTrails: exhaustTrailCount,
+        threats: activeThreats.length,
+        interceptors: systemInterceptors.length
+      })
+      
+      debug.log('Check profiler (P key) for detailed breakdown')
+      debug.log('================================')
+    }
+  }
+  
+  profiler.endFrame()
+}
+
+// Add debug mode indicator
+if (debug.isEnabled()) {
+  const debugIndicator = document.createElement('div')
+  debugIndicator.style.position = 'absolute'
+  debugIndicator.style.top = '10px'
+  debugIndicator.style.right = '10px'
+  debugIndicator.style.padding = '5px 10px'
+  debugIndicator.style.backgroundColor = 'rgba(0, 255, 0, 0.2)'
+  debugIndicator.style.border = '1px solid #00ff00'
+  debugIndicator.style.color = '#00ff00'
+  debugIndicator.style.fontFamily = 'monospace'
+  debugIndicator.style.fontSize = '12px'
+  debugIndicator.style.zIndex = '1000'
+  debugIndicator.textContent = 'DEBUG MODE'
+  document.body.appendChild(debugIndicator)
 }
 
 animate()

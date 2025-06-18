@@ -44,10 +44,10 @@ export class ExhaustTrailSystem {
     
     // Default configuration for missile exhaust
     this.config = {
-      particleCount: 200,  // Reduced from 500
-      particleSize: 0.5,
-      particleLifetime: 1.5,  // Reduced from 2.0
-      emissionRate: 60,  // Reduced from 100
+      particleCount: 100,  // Further reduced for performance
+      particleSize: 0.8,  // Slightly larger to compensate
+      particleLifetime: 1.0,  // Shorter lifetime
+      emissionRate: 30,  // Much lower emission rate
       startColor: new THREE.Color(0xffaa00),
       endColor: new THREE.Color(0x666666),
       startOpacity: 0.8,
@@ -117,6 +117,7 @@ export class ExhaustTrailSystem {
     }
     
     this.particleSystem = new THREE.Points(this.particleGeometry, this.particleMaterial)
+    this.particleSystem.frustumCulled = true // Enable frustum culling
     this.scene.add(this.particleSystem)
   }
   
@@ -141,12 +142,22 @@ export class ExhaustTrailSystem {
     return texture
   }
   
-  emit(position: THREE.Vector3, velocity: THREE.Vector3, currentTime: number): void {
+  emit(position: THREE.Vector3, velocity: THREE.Vector3, currentTime: number, camera?: THREE.Camera): void {
     if (!this.isActive) return
+    
+    // LOD: Reduce particles for distant objects
+    let lodMultiplier = 1.0
+    if (camera) {
+      const distance = position.distanceTo(camera.position)
+      if (distance > 200) return // Don't emit if too far
+      if (distance > 100) lodMultiplier = 0.3
+      else if (distance > 50) lodMultiplier = 0.6
+    }
     
     // Check emission rate
     const timeSinceLastEmission = currentTime - this.lastEmissionTime
-    const particlesToEmit = Math.floor(timeSinceLastEmission * this.config.emissionRate / 1000)
+    const adjustedEmissionRate = this.config.emissionRate * lodMultiplier
+    const particlesToEmit = Math.floor(timeSinceLastEmission * adjustedEmissionRate / 1000)
     
     if (particlesToEmit <= 0) return
     
@@ -283,30 +294,30 @@ export class ExhaustTrailSystem {
   // Factory methods for different trail types
   static createMissileTrail(scene: THREE.Scene): ExhaustTrailSystem {
     return new ExhaustTrailSystem(scene, {
-      particleCount: 300,
-      particleSize: 0.8,
-      particleLifetime: 1.5,
-      emissionRate: 150,
+      particleCount: 120,  // Reduced
+      particleSize: 1.0,  // Larger particles
+      particleLifetime: 1.0,
+      emissionRate: 40,  // Much lower
       startColor: new THREE.Color(0xffcc00),
       endColor: new THREE.Color(0x444444),
-      startOpacity: 0.9,
+      startOpacity: 0.8,
       endOpacity: 0.1,
-      spread: 0.2,
+      spread: 0.3,
       velocityFactor: -0.5
     })
   }
   
   static createInterceptorTrail(scene: THREE.Scene): ExhaustTrailSystem {
     return new ExhaustTrailSystem(scene, {
-      particleCount: 200,
-      particleSize: 0.6,
-      particleLifetime: 1.0,
-      emissionRate: 200,
+      particleCount: 80,  // Much lower
+      particleSize: 0.8,
+      particleLifetime: 0.8,
+      emissionRate: 50,  // Much lower
       startColor: new THREE.Color(0x00ffff),
       endColor: new THREE.Color(0x0066aa),
-      startOpacity: 0.7,
+      startOpacity: 0.6,
       endOpacity: 0,
-      spread: 0.15,
+      spread: 0.2,
       velocityFactor: -0.8,
       gravity: false  // Less gravity effect for interceptor trails
     })

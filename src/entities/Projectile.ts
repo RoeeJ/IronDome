@@ -3,6 +3,8 @@ import * as CANNON from 'cannon-es'
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js'
 import { ProximityFuse } from '../systems/ProximityFuse'
 import { ExhaustTrailSystem } from '../systems/ExhaustTrailSystem'
+import { ModelCache } from '../utils/ModelCache'
+import { debug } from '../utils/DebugLogger'
 
 export interface ProjectileOptions {
   position: THREE.Vector3
@@ -79,7 +81,7 @@ export class Projectile {
     // Create mesh - use model for interceptor, simple geometry for threats
     if (isInterceptor) {
       // Create temporary cone while model loads
-      const geometry = new THREE.ConeGeometry(radius * 0.8, radius * 5, 8)
+      const geometry = new THREE.ConeGeometry(radius * 0.8, radius * 5, 6) // Reduced from 8 segments
       const material = new THREE.MeshStandardMaterial({
         color,
         emissive: color,
@@ -90,11 +92,14 @@ export class Projectile {
       this.mesh = new THREE.Mesh(geometry, material)
       this.mesh.rotation.x = Math.PI / 2 // Point forward
       
-      // Load Tamir model
-      this.loadTamirModel(scene, radius)
+      // Load optimized Tamir model using shared cache (if enabled)
+      const modelQuality = (window as any).__interceptorModelQuality || 'ultra'
+      if (modelQuality !== 'none') {
+        this.loadTamirModelOptimized(scene, radius, modelQuality)
+      }
     } else {
       // Threat missile - simple sphere
-      const geometry = new THREE.SphereGeometry(radius, 16, 8)
+      const geometry = new THREE.SphereGeometry(radius, 12, 6) // Reduced segments
       const material = new THREE.MeshStandardMaterial({
         color,
         emissive: color,
@@ -164,7 +169,7 @@ export class Projectile {
     // Check max lifetime for self-destruct
     const flightTime = (Date.now() - this.launchTime) / 1000
     if (flightTime >= this.maxLifetime) {
-      console.log(`${this.isInterceptor ? 'Interceptor' : 'Threat'} self-destructing after ${flightTime.toFixed(1)}s`)
+      debug.category('Projectile', `${this.isInterceptor ? 'Interceptor' : 'Threat'} self-destructing after ${flightTime.toFixed(1)}s`)
       
       // Trigger detonation callback if available (for visual explosion)
       if (this.detonationCallback) {
@@ -211,7 +216,9 @@ export class Projectile {
       const velocityNormalized = velocity.clone().normalize()
       emitPosition.sub(velocityNormalized.multiplyScalar(this.radius))
       
-      this.exhaustTrail.emit(emitPosition, velocity, currentTime)
+      // Pass camera for LOD optimization (will be set in main loop)
+      const camera = (this.scene as any).__camera
+      this.exhaustTrail.emit(emitPosition, velocity, currentTime, camera)
       this.exhaustTrail.update(deltaTime)
     }
     
@@ -258,10 +265,11 @@ export class Projectile {
       this.mesh.geometry.dispose()
       ;(this.mesh.material as THREE.Material).dispose()
     } else if (this.mesh instanceof THREE.Group) {
-      // For GLTF models, traverse and dispose all meshes
+      // For GLTF models, we're using shared geometry so only dispose materials
       this.mesh.traverse((child) => {
         if (child instanceof THREE.Mesh) {
-          child.geometry.dispose()
+          // Don't dispose geometry - it's shared!
+          // Only dispose materials which were cloned
           if (child.material) {
             if (Array.isArray(child.material)) {
               child.material.forEach(mat => mat.dispose())
@@ -335,9 +343,25 @@ export class Projectile {
           // For GLTF models, traverse and update materials
           this.mesh.traverse((child) => {
             if (child instanceof THREE.Mesh && child.material) {
-              const material = child.material as THREE.MeshStandardMaterial
-              material.color.setHex(0x666666)
-              material.emissiveIntensity = 0
+              // Handle different material types safely
+              if (Array.isArray(child.material)) {
+                child.material.forEach(mat => {
+                  if ('color' in mat && mat.color) {
+                    mat.color.setHex(0x666666)
+                  }
+                  if ('emissiveIntensity' in mat) {
+                    mat.emissiveIntensity = 0
+                  }
+                })
+              } else {
+                const material = child.material
+                if ('color' in material && material.color) {
+                  material.color.setHex(0x666666)
+                }
+                if ('emissiveIntensity' in material) {
+                  material.emissiveIntensity = 0
+                }
+              }
             }
           })
         }
@@ -496,59 +520,102 @@ export class Projectile {
     }
   }
   
-  private loadTamirModel(scene: THREE.Scene, scale: number): void {
-    const loader = new GLTFLoader()
-    loader.load(
-      '/assets/tamir/scene.gltf',
-      (gltf) => {
-        // Remove temporary cone
-        scene.remove(this.mesh)
-        this.mesh.geometry.dispose()
-        ;(this.mesh.material as THREE.Material).dispose()
-        
-        // Use the loaded model
-        this.mesh = gltf.scene
-        
-        // Calculate model bounds and scale appropriately
-        const box = new THREE.Box3().setFromObject(this.mesh)
-        const size = box.getSize(new THREE.Vector3())
-        const maxDimension = Math.max(size.x, size.y, size.z)
-        
-        // Scale to match the desired size (based on radius parameter)
-        const targetSize = scale * 8 // Make it proportional to original cone size
-        const scaleFactor = targetSize / maxDimension
-        this.mesh.scale.setScalar(scaleFactor)
-        
-        // Apply materials and properties
-        this.mesh.traverse((child) => {
-          if (child instanceof THREE.Mesh) {
-            child.castShadow = true
-            child.receiveShadow = true
-            
-            // Enhance the material
-            if (child.material) {
-              const material = child.material as THREE.MeshStandardMaterial
-              material.metalness = 0.8
-              material.roughness = 0.2
-              // Add slight emissive for visibility
-              material.emissive = new THREE.Color(0x0066aa)
-              material.emissiveIntensity = 0.1
-            }
+  private async loadTamirModelOptimized(scene: THREE.Scene, scale: number, quality: string = 'ultra'): Promise<void> {
+    try {
+      const modelCache = ModelCache.getInstance()
+      // Choose model quality based on performance needs
+      // Ultra simple: ~10% triangles, Simple: ~20% triangles
+      const modelPath = quality === 'simple' 
+        ? 'assets/tamir/scene_simple.glb'
+        : 'assets/tamir/scene_ultra_simple.glb'
+      const model = await modelCache.createInstance(modelPath)
+      
+      // Store reference to old mesh
+      const oldMesh = this.mesh
+      
+      // Use the loaded model
+      this.mesh = model
+      
+      // Calculate model bounds and scale appropriately
+      const box = new THREE.Box3().setFromObject(this.mesh)
+      const size = box.getSize(new THREE.Vector3())
+      const maxDimension = Math.max(size.x, size.y, size.z)
+      debug.asset('Model dimensions', `${size.x.toFixed(2)}x${size.y.toFixed(2)}x${size.z.toFixed(2)}`, { max: maxDimension })
+      
+      // Scale to match the desired size (based on radius parameter)
+      const targetSize = scale * 15 // Increased size - model might be too small
+      const scaleFactor = maxDimension > 0 ? targetSize / maxDimension : 1
+      this.mesh.scale.setScalar(scaleFactor)
+      debug.asset('Scaling model', `${scaleFactor.toFixed(3)}x to target size ${targetSize.toFixed(2)}`)
+      
+      // Set initial rotation to match the cone's orientation
+      this.mesh.rotation.x = Math.PI / 2 // Point forward
+      
+      // Apply materials and properties
+      this.mesh.traverse((child) => {
+        if (child instanceof THREE.Mesh) {
+          child.castShadow = true
+          child.receiveShadow = true
+          child.frustumCulled = true  // Enable frustum culling
+          child.visible = true  // Ensure visible
+          
+          // Simplify material for performance
+          if (child.material) {
+            const materials = Array.isArray(child.material) ? child.material : [child.material]
+            materials.forEach(material => {
+              // Only modify properties that exist
+              if ('metalness' in material) {
+                material.metalness = 0.7
+              }
+              if ('roughness' in material) {
+                material.roughness = 0.3
+              }
+              // Only set emissive if the property exists
+              if ('emissive' in material && material.emissive) {
+                material.emissive = new THREE.Color(0x0066ff)
+              }
+              if ('emissiveIntensity' in material) {
+                material.emissiveIntensity = 0.2  // Increased for visibility
+              }
+              // Ensure material is visible
+              if ('opacity' in material) {
+                material.opacity = 1.0
+              }
+              if ('visible' in material) {
+                material.visible = true
+              }
+            })
           }
-        })
-        
-        // Position and add to scene
-        this.mesh.position.copy(this.body.position as any)
-        scene.add(this.mesh)
-        
-        console.log('Tamir interceptor model loaded')
-      },
-      (xhr) => {
-        // Progress callback
-      },
-      (error) => {
-        console.error('Failed to load Tamir model:', error)
+        }
+      })
+      
+      // Position and add to scene
+      this.mesh.position.copy(this.body.position as any)
+      scene.add(this.mesh)
+      
+      // Now remove old mesh after new one is added
+      scene.remove(oldMesh)
+      if (oldMesh instanceof THREE.Mesh) {
+        oldMesh.geometry.dispose()
+        ;(oldMesh.material as THREE.Material).dispose()
       }
-    )
+      
+      debug.asset('Tamir model loaded', `at position ${this.mesh.position.toArray().map(n => n.toFixed(2)).join(', ')}`)
+      
+      // Debug: Add a bright box to show where the model should be
+      if (debug.isEnabled()) {
+        const debugBox = new THREE.Mesh(
+          new THREE.BoxGeometry(scale * 2, scale * 2, scale * 10),
+          new THREE.MeshBasicMaterial({ color: 0xff00ff, wireframe: true })
+        )
+        debugBox.position.copy(this.mesh.position)
+        debugBox.rotation.copy(this.mesh.rotation)
+        scene.add(debugBox)
+        setTimeout(() => scene.remove(debugBox), 5000) // Remove after 5 seconds
+      }
+    } catch (error) {
+      console.error('Failed to load optimized Tamir model:', error)
+      // Keep using the simple cone on error
+    }
   }
 }
