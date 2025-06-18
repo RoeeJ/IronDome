@@ -1,5 +1,6 @@
 import * as THREE from 'three'
 import { Threat } from '../entities/Threat'
+import { DeviceCapabilities } from '../utils/DeviceCapabilities'
 
 export class TacticalDisplay {
   private canvas: HTMLCanvasElement
@@ -18,23 +19,41 @@ export class TacticalDisplay {
   private readonly UPDATE_SKIP_FRAMES = 0 // Update every frame for smooth display
   
   constructor() {
+    const deviceCaps = DeviceCapabilities.getInstance()
+    const deviceInfo = deviceCaps.getDeviceInfo()
+    
+    // Adjust size based on device
+    const baseSize = deviceInfo.isMobile ? 200 : deviceInfo.isTablet ? 250 : 300
+    const scale = deviceInfo.devicePixelRatio > 2 ? 2 : 1
+    
     // Create canvas overlay
     this.canvas = document.createElement('canvas')
     this.canvas.style.position = 'absolute'
     this.canvas.style.top = '10px'
     this.canvas.style.left = '10px'  // Changed from right to left
-    this.canvas.style.width = '300px'
-    this.canvas.style.height = '300px'
+    this.canvas.style.width = `${baseSize}px`
+    this.canvas.style.height = `${baseSize}px`
     this.canvas.style.pointerEvents = 'none'
     this.canvas.style.zIndex = '1000'
-    this.canvas.width = 300
-    this.canvas.height = 300
+    this.canvas.width = baseSize * scale
+    this.canvas.height = baseSize * scale
+    
+    // Mobile-specific adjustments
+    if (deviceInfo.isMobile) {
+      this.canvas.style.opacity = '0.8'
+      this.canvas.style.borderRadius = '10px'
+    }
     
     document.body.appendChild(this.canvas)
     this.ctx = this.canvas.getContext('2d')!
     
-    this.radarCenter = { x: 150, y: 150 }
-    this.radarRadius = 140
+    // Scale context for high DPI
+    if (scale > 1) {
+      this.ctx.scale(scale, scale)
+    }
+    
+    this.radarCenter = { x: baseSize / 2, y: baseSize / 2 }
+    this.radarRadius = (baseSize / 2) - 10
   }
   
   update(

@@ -120,8 +120,18 @@ export class TrajectoryCalculator {
     threatPos: THREE.Vector3,
     threatVel: THREE.Vector3,
     interceptorPos: THREE.Vector3,
-    interceptorSpeed: number
+    interceptorSpeed: number,
+    isDrone: boolean = false
   ): { point: THREE.Vector3; time: number } | null {
+    if (isDrone) {
+      console.log(`[TRAJECTORY] Calculating drone interception:`, {
+        threatPos: threatPos.toArray().map(n => n.toFixed(1)),
+        threatVel: threatVel.toArray().map(n => n.toFixed(1)),
+        speed: threatVel.length().toFixed(1),
+        interceptorSpeed
+      })
+    }
+    
     // Iterative solution for interception
     let t = 0
     const dt = 0.1
@@ -129,14 +139,31 @@ export class TrajectoryCalculator {
     
     while (t < maxTime) {
       // Predict threat position at time t
-      const futurePos = new THREE.Vector3(
-        threatPos.x + threatVel.x * t,
-        threatPos.y + threatVel.y * t - 0.5 * this.GRAVITY * t * t,
-        threatPos.z + threatVel.z * t
-      )
+      let futurePos: THREE.Vector3
+      
+      if (isDrone) {
+        // For drones, assume constant velocity (no gravity effect)
+        futurePos = new THREE.Vector3(
+          threatPos.x + threatVel.x * t,
+          threatPos.y + threatVel.y * t,
+          threatPos.z + threatVel.z * t
+        )
+      } else {
+        // For ballistic threats, include gravity
+        futurePos = new THREE.Vector3(
+          threatPos.x + threatVel.x * t,
+          threatPos.y + threatVel.y * t - 0.5 * this.GRAVITY * t * t,
+          threatPos.z + threatVel.z * t
+        )
+      }
       
       // Check if threat has hit ground
-      if (futurePos.y <= 0) return null
+      if (futurePos.y <= 0) {
+        if (isDrone) {
+          console.log(`[TRAJECTORY] Drone would hit ground at t=${t.toFixed(1)}`)
+        }
+        return null
+      }
       
       // Calculate time for interceptor to reach this position
       const distance = futurePos.distanceTo(interceptorPos)
@@ -144,12 +171,18 @@ export class TrajectoryCalculator {
       
       // Check if times match (within tolerance)
       if (Math.abs(t - interceptorTime) < 0.01) {
+        if (isDrone) {
+          console.log(`[TRAJECTORY] Found drone interception point at t=${t.toFixed(1)}s, distance=${distance.toFixed(1)}m`)
+        }
         return { point: futurePos, time: t }
       }
       
       t += dt
     }
     
+    if (isDrone) {
+      console.log(`[TRAJECTORY] Failed to find drone interception solution`)
+    }
     return null
   }
 }

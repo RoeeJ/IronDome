@@ -1,6 +1,6 @@
 import * as THREE from 'three'
 import * as CANNON from 'cannon-es'
-import { Threat, ThreatType } from '../entities/Threat'
+import { Threat, ThreatType, THREAT_CONFIGS } from '../entities/Threat'
 import { TrajectoryCalculator } from '../utils/TrajectoryCalculator'
 import { LaunchEffectsSystem } from '../systems/LaunchEffectsSystem'
 
@@ -30,20 +30,67 @@ export class ThreatManager {
     // Initialize launch effects system
     this.launchEffects = new LaunchEffectsSystem(scene)
     
-    // Default spawn configurations
+    // Default spawn configurations with all threat types
     this.spawnConfigs = [
+      // Original rockets
       {
         type: ThreatType.SHORT_RANGE,
-        spawnRadius: 150,  // Increased from 80
+        spawnRadius: 150,
         targetRadius: 40,
         minInterval: 3000,
         maxInterval: 8000
       },
       {
         type: ThreatType.MEDIUM_RANGE,
-        spawnRadius: 180,  // Increased from 150
+        spawnRadius: 180,
         targetRadius: 60,
         minInterval: 5000,
+        maxInterval: 15000
+      },
+      // Mortars - frequent, close range
+      {
+        type: ThreatType.MORTAR,
+        spawnRadius: 80,
+        targetRadius: 20,
+        minInterval: 2000,
+        maxInterval: 5000
+      },
+      // Drones - less frequent, varied approach
+      {
+        type: ThreatType.DRONE_SLOW,
+        spawnRadius: 200,
+        targetRadius: 30,
+        minInterval: 10000,
+        maxInterval: 20000
+      },
+      {
+        type: ThreatType.DRONE_FAST,
+        spawnRadius: 250,
+        targetRadius: 40,
+        minInterval: 15000,
+        maxInterval: 30000
+      },
+      // Cruise missiles - rare, long range
+      {
+        type: ThreatType.CRUISE_MISSILE,
+        spawnRadius: 300,
+        targetRadius: 50,
+        minInterval: 30000,
+        maxInterval: 60000
+      },
+      // Specific rocket variants
+      {
+        type: ThreatType.QASSAM_1,
+        spawnRadius: 100,
+        targetRadius: 30,
+        minInterval: 4000,
+        maxInterval: 8000
+      },
+      {
+        type: ThreatType.GRAD_ROCKET,
+        spawnRadius: 150,
+        targetRadius: 40,
+        minInterval: 8000,
         maxInterval: 15000
       }
     ]
@@ -59,6 +106,12 @@ export class ThreatManager {
   }
 
   private scheduleNextSpawn(): void {
+    if (this.spawnConfigs.length === 0) {
+      // If no spawn configs available, schedule a check in 5 seconds
+      this.nextSpawnTime = Date.now() + 5000
+      return
+    }
+    
     const config = this.spawnConfigs[Math.floor(Math.random() * this.spawnConfigs.length)]
     const interval = config.minInterval + Math.random() * (config.maxInterval - config.minInterval)
     this.nextSpawnTime = Date.now() + interval
@@ -73,14 +126,40 @@ export class ThreatManager {
       const threat = this.threats[i]
       threat.update()
 
-      // Check if threat has hit ground
-      if (threat.body.position.y <= 0.5 && threat.isActive) {
-        // Create explosion at impact point
-        this.createGroundExplosion(threat.getPosition())
-        this.removeThreat(i)
-      } else if (threat.body.position.y < -5) {
-        // Remove if somehow went too far below ground
-        this.removeThreat(i)
+      // Check if threat has hit ground or reached target
+      const threatConfig = THREAT_CONFIGS[threat.type]
+      
+      if (threatConfig.isDrone) {
+        // For drones, check if they've reached their target position
+        const distanceToTarget = threat.getPosition().distanceTo(threat.targetPosition)
+        const velocity = threat.getVelocity()
+        const speed = velocity.length()
+        const timeSinceLaunch = (Date.now() - threat.launchTime) / 1000
+        
+        // Remove if: reached target, stuck (low speed), or timeout
+        if ((distanceToTarget < 5 && threat.isActive) || 
+            (speed < 5 && timeSinceLaunch > 5) || 
+            timeSinceLaunch > 60) {
+          // Drone reached target or got stuck
+          if (distanceToTarget < 5) {
+            // Reached target - explosion at ground
+            this.createGroundExplosion(threat.targetPosition)
+          } else {
+            // Stuck or timeout - explosion at current position (in air)
+            this.createAirExplosion(threat.getPosition())
+          }
+          this.removeThreat(i)
+        }
+      } else {
+        // For other threats, check ground impact
+        if (threat.body.position.y <= 0.5 && threat.isActive) {
+          // Create explosion at impact point
+          this.createGroundExplosion(threat.getPosition())
+          this.removeThreat(i)
+        } else if (threat.body.position.y < -5) {
+          // Remove if somehow went too far below ground
+          this.removeThreat(i)
+        }
       }
     }
 
@@ -124,39 +203,89 @@ export class ThreatManager {
     
     const targetPosition = new THREE.Vector3(targetX, 0, targetZ)
     
-    // Calculate launch parameters for ballistic trajectory
-    const threatConfig = {
-      [ThreatType.SHORT_RANGE]: { velocity: 200, minAngle: 60, maxAngle: 75 },
-      [ThreatType.MEDIUM_RANGE]: { velocity: 400, minAngle: 70, maxAngle: 80 },
-      [ThreatType.LONG_RANGE]: { velocity: 600, minAngle: 75, maxAngle: 85 }
-    }[config.type]
+    // Get threat configuration
+    const threatStats = THREAT_CONFIGS[config.type]
     
-    // For ballistic missiles, we want high angle launches (60-85 degrees)
-    const launchParams = TrajectoryCalculator.calculateLaunchParameters(
-      spawnPosition,
-      targetPosition,
-      threatConfig.velocity
-    )
+    // Calculate launch parameters based on threat type
+    let launchParams: any
+    let velocity: THREE.Vector3
     
-    if (!launchParams) return  // Target out of range
+    if (threatStats.isDrone) {
+      // Drones launch horizontally towards target
+      const direction = new THREE.Vector3()
+        .subVectors(targetPosition, spawnPosition)
+        .normalize()
+      
+      // Start at higher altitude for drones
+      spawnPosition.y = threatStats.cruiseAltitude || 100
+      
+      velocity = direction.multiplyScalar(threatStats.velocity)
+    } else if (threatStats.isMortar) {
+      // Mortars use very high angle
+      const distance = spawnPosition.distanceTo(targetPosition)
+      const mortarAngle = 80 + Math.random() * 5 // 80-85 degrees
+      const angleRad = mortarAngle * Math.PI / 180
+      
+      // Calculate velocity for mortar trajectory
+      const g = 9.82
+      const mortarVelocity = Math.sqrt((distance * g) / Math.sin(2 * angleRad))
+      
+      launchParams = {
+        angle: mortarAngle,
+        azimuth: Math.atan2(targetPosition.z - spawnPosition.z, targetPosition.x - spawnPosition.x),
+        velocity: Math.min(mortarVelocity, threatStats.velocity)
+      }
+      velocity = TrajectoryCalculator.getVelocityVector(launchParams)
+    } else if (config.type === ThreatType.CRUISE_MISSILE) {
+      // Cruise missiles launch at low angle
+      const direction = new THREE.Vector3()
+        .subVectors(targetPosition, spawnPosition)
+        .normalize()
+      
+      // Launch at slight upward angle
+      direction.y = 0.2
+      direction.normalize()
+      
+      velocity = direction.multiplyScalar(threatStats.velocity)
+    } else {
+      // Regular rockets - use existing ballistic calculation
+      const threatConfig = {
+        [ThreatType.SHORT_RANGE]: { velocity: 200, minAngle: 60, maxAngle: 75 },
+        [ThreatType.MEDIUM_RANGE]: { velocity: 400, minAngle: 70, maxAngle: 80 },
+        [ThreatType.LONG_RANGE]: { velocity: 600, minAngle: 75, maxAngle: 85 },
+        [ThreatType.QASSAM_1]: { velocity: 200, minAngle: 65, maxAngle: 75 },
+        [ThreatType.QASSAM_2]: { velocity: 280, minAngle: 65, maxAngle: 75 },
+        [ThreatType.QASSAM_3]: { velocity: 350, minAngle: 65, maxAngle: 75 },
+        [ThreatType.GRAD_ROCKET]: { velocity: 450, minAngle: 70, maxAngle: 80 }
+      }[config.type] || { velocity: threatStats.velocity, minAngle: 65, maxAngle: 80 }
     
-    // Force high angle for ballistic trajectory
-    launchParams.angle = threatConfig.minAngle + Math.random() * (threatConfig.maxAngle - threatConfig.minAngle)
-    
-    // Recalculate velocity to hit target with the high angle
-    const distance = spawnPosition.distanceTo(targetPosition)
-    const angleRad = launchParams.angle * Math.PI / 180
-    const g = 9.82
-    
-    // Calculate required velocity for the given angle
-    const requiredVelocity = Math.sqrt((distance * g) / Math.sin(2 * angleRad))
-    
-    // Use the calculated velocity if it's reasonable
-    if (requiredVelocity < threatConfig.velocity * 1.5) {
-      launchParams.velocity = requiredVelocity
+      // For ballistic missiles, we want high angle launches (60-85 degrees)
+      launchParams = TrajectoryCalculator.calculateLaunchParameters(
+        spawnPosition,
+        targetPosition,
+        threatConfig.velocity
+      )
+      
+      if (!launchParams) return  // Target out of range
+      
+      // Force high angle for ballistic trajectory
+      launchParams.angle = threatConfig.minAngle + Math.random() * (threatConfig.maxAngle - threatConfig.minAngle)
+      
+      // Recalculate velocity to hit target with the high angle
+      const distance = spawnPosition.distanceTo(targetPosition)
+      const angleRad = launchParams.angle * Math.PI / 180
+      const g = 9.82
+      
+      // Calculate required velocity for the given angle
+      const requiredVelocity = Math.sqrt((distance * g) / Math.sin(2 * angleRad))
+      
+      // Use the calculated velocity if it's reasonable
+      if (requiredVelocity < threatConfig.velocity * 1.5) {
+        launchParams.velocity = requiredVelocity
+      }
+      
+      velocity = TrajectoryCalculator.getVelocityVector(launchParams)
     }
-    
-    const velocity = TrajectoryCalculator.getVelocityVector(launchParams)
     
     const threat = new Threat(this.scene, this.world, {
       type: config.type,
@@ -408,5 +537,144 @@ export class ThreatManager {
       
       fadeCrater()
     }, 3000)
+  }
+  
+  private createAirExplosion(position: THREE.Vector3): void {
+    // Create explosion effect in air (for drones)
+    const explosionGeometry = new THREE.SphereGeometry(3, 16, 8)
+    const explosionMaterial = new THREE.MeshBasicMaterial({
+      color: 0xff6600,
+      opacity: 0.8,
+      transparent: true
+    })
+    const explosion = new THREE.Mesh(explosionGeometry, explosionMaterial)
+    explosion.position.copy(position)
+    this.scene.add(explosion)
+    
+    // Flash effect
+    const flash = new THREE.PointLight(0xffaa00, 10, 50)
+    flash.position.copy(position)
+    this.scene.add(flash)
+    
+    // Animate explosion
+    const startTime = Date.now()
+    const animate = () => {
+      const elapsed = Date.now() - startTime
+      const progress = elapsed / 800
+      
+      if (progress >= 1) {
+        this.scene.remove(explosion)
+        this.scene.remove(flash)
+        explosion.geometry.dispose()
+        explosionMaterial.dispose()
+        return
+      }
+      
+      // Expand and fade
+      const scale = 1 + progress * 3
+      explosion.scale.set(scale, scale, scale)
+      explosionMaterial.opacity = 0.8 * (1 - progress)
+      flash.intensity = 10 * (1 - progress)
+      
+      requestAnimationFrame(animate)
+    }
+    animate()
+    
+    // Create falling debris for drone
+    const debrisCount = 5
+    for (let i = 0; i < debrisCount; i++) {
+      const debrisGeometry = new THREE.BoxGeometry(0.3, 0.3, 0.3)
+      const debrisMaterial = new THREE.MeshBasicMaterial({
+        color: 0x333333
+      })
+      const debris = new THREE.Mesh(debrisGeometry, debrisMaterial)
+      debris.position.copy(position)
+      debris.position.x += (Math.random() - 0.5) * 2
+      debris.position.z += (Math.random() - 0.5) * 2
+      
+      this.scene.add(debris)
+      
+      // Animate falling debris
+      const fallSpeed = 5 + Math.random() * 5
+      const rotSpeed = new THREE.Vector3(
+        (Math.random() - 0.5) * 10,
+        (Math.random() - 0.5) * 10,
+        (Math.random() - 0.5) * 10
+      )
+      
+      const animateDebris = () => {
+        debris.position.y -= fallSpeed * 0.016
+        debris.rotation.x += rotSpeed.x * 0.016
+        debris.rotation.y += rotSpeed.y * 0.016
+        debris.rotation.z += rotSpeed.z * 0.016
+        
+        if (debris.position.y < 0) {
+          this.scene.remove(debris)
+          debris.geometry.dispose()
+          debrisMaterial.dispose()
+        } else {
+          requestAnimationFrame(animateDebris)
+        }
+      }
+      animateDebris()
+    }
+  }
+  
+  // Control which threat types to spawn
+  setThreatMix(threatTypes: 'rockets' | 'mixed' | 'drones' | 'mortars' | 'all'): void {
+    // Store all configs for filtering
+    const allConfigs = [
+      { type: ThreatType.SHORT_RANGE, spawnRadius: 150, targetRadius: 40, minInterval: 3000, maxInterval: 8000 },
+      { type: ThreatType.MEDIUM_RANGE, spawnRadius: 180, targetRadius: 60, minInterval: 5000, maxInterval: 15000 },
+      { type: ThreatType.MORTAR, spawnRadius: 80, targetRadius: 20, minInterval: 2000, maxInterval: 5000 },
+      { type: ThreatType.DRONE_SLOW, spawnRadius: 200, targetRadius: 30, minInterval: 10000, maxInterval: 20000 },
+      { type: ThreatType.DRONE_FAST, spawnRadius: 250, targetRadius: 40, minInterval: 15000, maxInterval: 30000 },
+      { type: ThreatType.CRUISE_MISSILE, spawnRadius: 300, targetRadius: 50, minInterval: 30000, maxInterval: 60000 },
+      { type: ThreatType.QASSAM_1, spawnRadius: 100, targetRadius: 30, minInterval: 4000, maxInterval: 8000 },
+      { type: ThreatType.GRAD_ROCKET, spawnRadius: 150, targetRadius: 40, minInterval: 8000, maxInterval: 15000 }
+    ]
+    
+    switch(threatTypes) {
+      case 'rockets':
+        this.spawnConfigs = allConfigs.filter(config => 
+          [ThreatType.SHORT_RANGE, ThreatType.MEDIUM_RANGE, ThreatType.LONG_RANGE,
+           ThreatType.QASSAM_1, ThreatType.QASSAM_2, ThreatType.QASSAM_3, 
+           ThreatType.GRAD_ROCKET].includes(config.type)
+        )
+        break
+      case 'drones':
+        this.spawnConfigs = allConfigs.filter(config => 
+          [ThreatType.DRONE_SLOW, ThreatType.DRONE_FAST].includes(config.type)
+        )
+        break
+      case 'mortars':
+        this.spawnConfigs = allConfigs.filter(config => 
+          config.type === ThreatType.MORTAR
+        )
+        break
+      case 'mixed':
+        // Keep a balanced mix
+        this.spawnConfigs = [
+          { type: ThreatType.SHORT_RANGE, spawnRadius: 150, targetRadius: 40, minInterval: 3000, maxInterval: 8000 },
+          { type: ThreatType.MORTAR, spawnRadius: 80, targetRadius: 20, minInterval: 2000, maxInterval: 5000 },
+          { type: ThreatType.DRONE_SLOW, spawnRadius: 200, targetRadius: 30, minInterval: 10000, maxInterval: 20000 },
+          { type: ThreatType.QASSAM_2, spawnRadius: 100, targetRadius: 30, minInterval: 4000, maxInterval: 8000 }
+        ]
+        break
+      case 'all':
+      default:
+        // Reset to all threat types
+        this.spawnConfigs = [
+          { type: ThreatType.SHORT_RANGE, spawnRadius: 150, targetRadius: 40, minInterval: 3000, maxInterval: 8000 },
+          { type: ThreatType.MEDIUM_RANGE, spawnRadius: 180, targetRadius: 60, minInterval: 5000, maxInterval: 15000 },
+          { type: ThreatType.MORTAR, spawnRadius: 80, targetRadius: 20, minInterval: 2000, maxInterval: 5000 },
+          { type: ThreatType.DRONE_SLOW, spawnRadius: 200, targetRadius: 30, minInterval: 10000, maxInterval: 20000 },
+          { type: ThreatType.DRONE_FAST, spawnRadius: 250, targetRadius: 40, minInterval: 15000, maxInterval: 30000 },
+          { type: ThreatType.CRUISE_MISSILE, spawnRadius: 300, targetRadius: 50, minInterval: 30000, maxInterval: 60000 },
+          { type: ThreatType.QASSAM_1, spawnRadius: 100, targetRadius: 30, minInterval: 4000, maxInterval: 8000 },
+          { type: ThreatType.GRAD_ROCKET, spawnRadius: 150, targetRadius: 40, minInterval: 8000, maxInterval: 15000 }
+        ]
+        break
+    }
   }
 }

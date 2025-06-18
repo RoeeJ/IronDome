@@ -19,6 +19,7 @@ export interface ProjectileOptions {
   failureMode?: 'none' | 'motor' | 'guidance' | 'premature'
   failureTime?: number
   maxLifetime?: number  // Maximum flight time before self-destruct (seconds)
+  batteryPosition?: THREE.Vector3  // Battery position for self-destruct check
 }
 
 export class Projectile {
@@ -183,6 +184,47 @@ export class Projectile {
       
       this.isActive = false
       return
+    }
+    
+    // Check for interceptor self-destruct near battery
+    if (this.isInterceptor && this.batteryPosition) {
+      // Calculate predicted landing position
+      const velocity = this.getVelocity()
+      const position = this.getPosition()
+      
+      // Only check if projectile is descending
+      if (velocity.y < 0) {
+        // Calculate time to ground impact
+        const timeToGround = -position.y / velocity.y
+        
+        // Predict landing position
+        const landingPos = new THREE.Vector3(
+          position.x + velocity.x * timeToGround,
+          0,
+          position.z + velocity.z * timeToGround
+        )
+        
+        // Check distance to battery
+        const distanceToBattery = landingPos.distanceTo(this.batteryPosition)
+        const dangerRadius = 15 // Self-destruct if landing within 15m of battery
+        
+        if (distanceToBattery < dangerRadius && position.y < 50) { // Only when low altitude
+          debug.category('Projectile', `Interceptor self-destructing to protect battery (${distanceToBattery.toFixed(1)}m from battery)`)
+          
+          // Trigger detonation
+          if (this.detonationCallback) {
+            this.detonationCallback(this.mesh.position.clone(), 0.5) // Medium quality explosion
+          }
+          
+          // Stop exhaust trail
+          if (this.exhaustTrail) {
+            this.exhaustTrail.stop()
+          }
+          
+          this.isActive = false
+          return
+        }
+      }
     }
 
     // Sync mesh with physics body

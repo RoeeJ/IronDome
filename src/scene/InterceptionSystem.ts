@@ -112,15 +112,28 @@ export class InterceptionSystem {
       return  // Skip launching more until some are destroyed
     }
     
+    console.log(`[INTERCEPTION] Evaluating ${threats.length} threats`)
+    
     // Sort threats by time to impact (most urgent first)
     const sortedThreats = threats
       .filter(t => t.isActive && t.getTimeToImpact() > 0)
       .sort((a, b) => a.getTimeToImpact() - b.getTimeToImpact())
+    
+    console.log(`[INTERCEPTION] Active threats with positive time to impact: ${sortedThreats.length}`)
 
     for (const threat of sortedThreats) {
+      const threatConfig = (threat as any).config
+      const isDrone = threatConfig?.isDrone || false
+      console.log(`[INTERCEPTION] Evaluating ${isDrone ? 'DRONE' : 'threat'} ${threat.id}`)
+      
       // Find best battery to intercept
       const battery = this.findBestBattery(threat)
-      if (!battery || battery.getInterceptorCount() === 0) {
+      if (!battery) {
+        console.log(`[INTERCEPTION] No capable battery for ${isDrone ? 'DRONE' : 'threat'} ${threat.id}`)
+        continue
+      }
+      if (battery.getInterceptorCount() === 0) {
+        console.log(`[INTERCEPTION] Battery has no loaded interceptors`)
         continue
       }
       
@@ -451,5 +464,9 @@ export class InterceptionSystem {
       totalInterceptors: this.batteries.reduce((sum, b) => sum + b.getInterceptorCount(), 0),
       activeInterceptors: this.interceptors.length
     }
+  }
+  
+  getActiveInterceptorCount(): number {
+    return this.activeInterceptions.length
   }
 }

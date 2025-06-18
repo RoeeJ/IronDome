@@ -2,10 +2,11 @@ import * as THREE from 'three'
 import * as CANNON from 'cannon-es'
 import { OBJLoader } from 'three/examples/jsm/loaders/OBJLoader.js'
 import { Projectile } from './Projectile'
-import { Threat } from './Threat'
+import { Threat, THREAT_CONFIGS } from './Threat'
 import { TrajectoryCalculator } from '../utils/TrajectoryCalculator'
 import { StaticRadarNetwork } from '../scene/StaticRadarNetwork'
 import { LaunchEffectsSystem } from '../systems/LaunchEffectsSystem'
+import { debug } from '../utils/DebugLogger'
 
 export interface BatteryConfig {
   position: THREE.Vector3
@@ -17,6 +18,7 @@ export interface BatteryConfig {
   successRate: number  // 0.0 to 1.0, default 0.9 (90%)
   aggressiveness: number  // 1.0 to 3.0, how many interceptors per high-value threat
   firingDelay: number  // ms between shots when firing multiple interceptors
+  interceptorLimit?: number  // Max interceptors allowed (for mobile performance)
 }
 
 interface LauncherTube {
@@ -232,32 +234,59 @@ export class IronDomeBattery {
   }
 
   canIntercept(threat: Threat): boolean {
+    const threatConfig = THREAT_CONFIGS[threat.type]
+    
+    console.log(`[BATTERY] Checking if can intercept ${threatConfig.isDrone ? 'DRONE' : 'threat'} ${threat.id}:`, {
+      type: threat.type,
+      position: threat.getPosition(),
+      velocity: threat.getVelocity().length(),
+      isDrone: threatConfig.isDrone
+    })
+    
     // Check if detected by radar network
     if (!this.radarNetwork || !this.radarNetwork.checkDetection(threat.getPosition())) {
+      console.log(`[BATTERY] ${threatConfig.isDrone ? 'DRONE' : 'Threat'} ${threat.id} NOT detected by radar at position:`, threat.getPosition())
       return false
     }
+    console.log(`[BATTERY] ${threatConfig.isDrone ? 'DRONE' : 'Threat'} ${threat.id} detected by radar ✓`)
     
     // Check if any tube is loaded
     const hasLoadedTube = this.launcherTubes.some(tube => tube.isLoaded)
     if (!hasLoadedTube) {
+      console.log(`[BATTERY] No loaded tubes for ${threatConfig.isDrone ? 'DRONE' : 'threat'} ${threat.id}`)
       return false
     }
+    console.log(`[BATTERY] Loaded tubes available ✓`)
     
     // Check range
     const distance = threat.getPosition().distanceTo(this.config.position)
     if (distance > this.config.maxRange || distance < this.config.minRange) {
+      console.log(`[BATTERY] ${threatConfig.isDrone ? 'DRONE' : 'Threat'} ${threat.id} out of range: ${distance.toFixed(1)}m (min: ${this.config.minRange}, max: ${this.config.maxRange})`)
       return false
     }
+    console.log(`[BATTERY] ${threatConfig.isDrone ? 'DRONE' : 'Threat'} ${threat.id} in range: ${distance.toFixed(1)}m ✓`)
     
     // Check if we can reach the threat in time
     const interceptionPoint = TrajectoryCalculator.calculateInterceptionPoint(
       threat.getPosition(),
       threat.getVelocity(),
       this.config.position,
-      this.config.interceptorSpeed
+      this.config.interceptorSpeed,
+      threatConfig.isDrone || false
     )
     
-    return interceptionPoint !== null
+    if (!interceptionPoint) {
+      console.log(`[BATTERY] Cannot calculate interception for ${threatConfig.isDrone ? 'DRONE' : 'threat'} ${threat.id}:`, {
+        position: threat.getPosition(),
+        velocity: threat.getVelocity(),
+        speed: threat.getVelocity().length(),
+        isDrone: threatConfig.isDrone
+      })
+      return false
+    }
+    
+    console.log(`[BATTERY] CAN INTERCEPT ${threatConfig.isDrone ? 'DRONE' : 'threat'} ${threat.id} ✓✓✓`)
+    return true
   }
 
   assessThreatLevel(threat: Threat): number {
@@ -356,8 +385,12 @@ export class IronDomeBattery {
       const tube = loadedTubes[i]
       if (!tube) break
       
+      // Mark tube as reserved immediately to prevent reuse
+      tube.isLoaded = false
+      
       if (i === 0) {
         // Fire first one immediately
+        tube.isLoaded = true // Temporarily restore for launch
         const interceptor = this.launchFromTube(tube, threat)
         if (interceptor) {
           interceptors.push(interceptor)
@@ -365,12 +398,17 @@ export class IronDomeBattery {
         }
       } else {
         // Fire subsequent ones with delay
+        const delayMs = i * adjustedDelay
         setTimeout(() => {
-          const interceptor = this.launchFromTube(tube, threat)
-          if (interceptor && onLaunch) {
-            onLaunch(interceptor)
+          // Check if tube hasn't been reloaded in the meantime
+          if (!tube.isLoaded && tube.lastFiredTime < Date.now() - this.config.reloadTime) {
+            tube.isLoaded = true // Temporarily restore for launch
+            const interceptor = this.launchFromTube(tube, threat)
+            if (interceptor && onLaunch) {
+              onLaunch(interceptor)
+            }
           }
-        }, i * adjustedDelay)
+        }, delayMs)
       }
     }
     
@@ -385,11 +423,13 @@ export class IronDomeBattery {
   
   private launchFromTube(tube: LauncherTube, threat: Threat): Projectile | null {
     // Calculate interception point
+    const threatConfig = THREAT_CONFIGS[threat.type]
     const interceptionData = TrajectoryCalculator.calculateInterceptionPoint(
       threat.getPosition(),
       threat.getVelocity(),
       this.config.position,
-      this.config.interceptorSpeed
+      this.config.interceptorSpeed,
+      threatConfig.isDrone || false
     )
     
     if (!interceptionData) {
@@ -456,7 +496,8 @@ export class IronDomeBattery {
       target: threat.mesh,
       failureMode,
       failureTime,
-      maxLifetime: 10  // 10 second max flight time
+      maxLifetime: 10,  // 10 second max flight time
+      batteryPosition: this.config.position  // Pass battery position for self-destruct check
     })
     
     // Update tube state
