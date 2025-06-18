@@ -40,10 +40,8 @@ service:
 
 ingress:
   enabled: false
-  className: ""
+  className: "traefik"
   annotations: {}
-    # kubernetes.io/ingress.class: nginx
-    # kubernetes.io/tls-acme: "true"
     # cert-manager.io/cluster-issuer: letsencrypt-prod
   hosts:
     - host: iron-dome.example.com

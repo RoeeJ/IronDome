@@ -15,16 +15,12 @@ export class StaticRadarNetwork {
   private coverageMaterial: THREE.MeshBasicMaterial
   private showCoverage: boolean = false
   private coverageMeshes: THREE.Mesh[] = []
-  private rotationOffset: number = 0
-  private debugHelpers: THREE.ArrowHelper[] = []
-  private modelFacingDirection: THREE.Vector3 = new THREE.Vector3(0, 0, -1)
-  private radarCorrections: number[] = [0, 0, 0, 0]
+  private modelFacingDirection: THREE.Vector3 = new THREE.Vector3(1, 0, 0) // Model faces +X
 
   constructor(scene: THREE.Scene, detectionRadius: number = 100) {
     this.scene = scene
     this.detectionRadius = detectionRadius
     
-    console.log('StaticRadarNetwork constructor called with radius:', detectionRadius)
     
     // Material for coverage visualization
     this.coverageMaterial = new THREE.MeshBasicMaterial({
@@ -35,7 +31,6 @@ export class StaticRadarNetwork {
     })
     
     this.setupRadarStations()
-    console.log('Total radars created:', this.radars.length)
   }
 
   private setupRadarStations(): void {
@@ -61,8 +56,6 @@ export class StaticRadarNetwork {
     group.rotation.y = angle
     
     // Determine corner name
-    const cornerName = this.getCornerName(position)
-    console.log(`Creating radar station ${index} (${cornerName}) at position:`, position, 'rotation:', angle)
     
     const radar: RadarStation = {
       position,
@@ -82,7 +75,6 @@ export class StaticRadarNetwork {
     this.scene.add(group)
     this.radars.push(radar)
     
-    console.log(`Radar station ${index} added to scene. Group children:`, group.children.length, 'Group position:', group.position)
   }
 
   private createCoverageDome(radar: RadarStation): void {
@@ -188,18 +180,6 @@ export class StaticRadarNetwork {
     light.position.y = 15
     radar.group.add(light)
     
-    // Add debug arrow for procedural model too
-    const arrowGroup = new THREE.Group()
-    const arrowHelper = new THREE.ArrowHelper(
-      this.modelFacingDirection,
-      new THREE.Vector3(0, 10, 0),
-      20,
-      0x00ff00
-    )
-    arrowGroup.add(arrowHelper)
-    arrowGroup.name = 'debugArrowGroup'
-    radar.group.add(arrowGroup)
-    this.debugHelpers.push(arrowHelper)
     
     // Add a tall antenna for extra visibility
     const antennaGeometry = new THREE.CylinderGeometry(0.2, 0.3, 20)
@@ -213,8 +193,6 @@ export class StaticRadarNetwork {
     antenna.userData.isProcedural = true
     radar.group.add(antenna)
     
-    // Add corner label
-    this.createCornerLabel(radar, index)
   }
 
   private loadRadarModel(radar: RadarStation, index: number): void {
@@ -222,22 +200,18 @@ export class StaticRadarNetwork {
     loader.load(
       '/assets/Radar.obj',
       (object) => {
-        console.log('Radar model loaded successfully:', object)
         
         // Log what we loaded
         let meshCount = 0
         object.traverse((child) => {
           if (child instanceof THREE.Mesh) {
             meshCount++
-            console.log('Found mesh:', child.name, 'vertices:', child.geometry.attributes.position?.count)
           }
         })
-        console.log('Total meshes in model:', meshCount)
         
         // Calculate scale
         const box = new THREE.Box3().setFromObject(object)
         const size = box.getSize(new THREE.Vector3())
-        console.log('Model size before scaling:', size)
         
         // Check if model has valid size
         if (size.x === 0 || size.y === 0 || size.z === 0) {
@@ -248,14 +222,12 @@ export class StaticRadarNetwork {
         const targetHeight = 15
         const scaleFactor = targetHeight / size.y
         object.scale.set(scaleFactor, scaleFactor, scaleFactor)
-        console.log('Scale factor:', scaleFactor)
         
         // Center and position model on ground
         box.setFromObject(object)
         const center = box.getCenter(new THREE.Vector3())
         const minY = box.min.y
         object.position.set(-center.x, -minY, -center.z)
-        console.log('Model positioned at:', object.position)
         
         // Apply materials
         object.traverse((child) => {
@@ -282,31 +254,13 @@ export class StaticRadarNetwork {
         radar.model = object
         radar.group.add(object)
         
-        // Add corner label to loaded model
-        this.createCornerLabel(radar, index)
         
-        // Add a debug arrow to show radar facing direction
-        // Create arrow in a sub-group so it doesn't rotate with the radar
-        const arrowGroup = new THREE.Group()
-        const arrowHelper = new THREE.ArrowHelper(
-          new THREE.Vector3(0, 0, -1), // Forward direction (negative Z)
-          new THREE.Vector3(0, 10, 0), // Position at radar height
-          20, // Length
-          0x00ff00 // Green color
-        )
-        arrowGroup.add(arrowHelper)
-        arrowGroup.name = 'debugArrowGroup'
-        radar.group.add(arrowGroup)
-        this.debugHelpers.push(arrowHelper)
         
-        console.log('Model added to radar group with directional indicator')
       },
       (xhr) => {
-        console.log('Loading radar model:', (xhr.loaded / xhr.total * 100) + '%')
       },
       (error) => {
         console.error('Failed to load radar model:', error)
-        console.log('Using procedural radar model')
       }
     )
   }
@@ -346,36 +300,9 @@ export class StaticRadarNetwork {
     })
   }
   
-  setRotationOffset(offset: number): void {
-    // Deprecated - keeping for compatibility
-    // Use setModelFacingDirection instead
-    this.rotationOffset = offset
-  }
-  
-  setShowDebugHelpers(show: boolean): void {
-    this.debugHelpers.forEach(helper => {
-      helper.visible = show
-    })
-  }
   
   setModelFacingDirection(direction: THREE.Vector3): void {
     this.modelFacingDirection = direction.clone().normalize()
-    
-    // Update all debug helpers to show the model facing direction in local space
-    this.radars.forEach((radar, index) => {
-      // Find the arrow group
-      const arrowGroup = radar.group.getObjectByName('debugArrowGroup')
-      if (arrowGroup) {
-        // Reset the arrow group rotation to show model-relative direction
-        arrowGroup.rotation.y = 0
-        
-        // Update the arrow direction
-        if (this.debugHelpers[index]) {
-          this.debugHelpers[index].setDirection(this.modelFacingDirection)
-        }
-      }
-    })
-    
     // Update all radar rotations
     this.updateAllRadarRotations()
   }
@@ -407,18 +334,11 @@ export class StaticRadarNetwork {
         autoCorrection = Math.PI
       }
       
-      // Apply rotation with automatic and manual corrections
-      const manualCorrectionRad = (this.radarCorrections[index] || 0) * Math.PI / 180
-      radar.group.rotation.y = rotationNeeded + autoCorrection + manualCorrectionRad
-      
-      console.log(`Radar ${index} (${cornerName}): rotation=${rotationNeeded.toFixed(2)} + auto=${autoCorrection.toFixed(2)} + manual=${manualCorrectionRad.toFixed(2)}`)
+      // Apply rotation with automatic correction
+      radar.group.rotation.y = rotationNeeded + autoCorrection
     })
   }
   
-  setRadarCorrections(corrections: number[]): void {
-    this.radarCorrections = [...corrections]
-    this.updateAllRadarRotations()
-  }
   
   private getCornerName(position: THREE.Vector3): string {
     const x = position.x > 0 ? 'Right' : 'Left'
@@ -426,29 +346,4 @@ export class StaticRadarNetwork {
     return `${z}-${x}`
   }
   
-  private createCornerLabel(radar: RadarStation, index: number): void {
-    // Create a sprite with text
-    const canvas = document.createElement('canvas')
-    canvas.width = 256
-    canvas.height = 64
-    const context = canvas.getContext('2d')!
-    
-    context.fillStyle = 'rgba(0, 0, 0, 0.7)'
-    context.fillRect(0, 0, 256, 64)
-    
-    context.font = 'Bold 24px Arial'
-    context.fillStyle = 'white'
-    context.textAlign = 'center'
-    context.textBaseline = 'middle'
-    
-    const cornerName = this.getCornerName(radar.position)
-    context.fillText(`Radar ${index}: ${cornerName}`, 128, 32)
-    
-    const texture = new THREE.CanvasTexture(canvas)
-    const spriteMaterial = new THREE.SpriteMaterial({ map: texture })
-    const sprite = new THREE.Sprite(spriteMaterial)
-    sprite.scale.set(20, 5, 1)
-    sprite.position.y = 25
-    radar.group.add(sprite)
-  }
 }

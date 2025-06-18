@@ -36,10 +36,8 @@ export class IronDomeBattery {
   private rangeIndicator: THREE.Line
   private radarNetwork?: StaticRadarNetwork
   private launchEffects: LaunchEffectsSystem
-  private launchOffset: THREE.Vector3 = new THREE.Vector3(0, 3, 0)
-  private launchDirection: THREE.Vector3 = new THREE.Vector3(0, 1, 0)
-  private debugHelper?: THREE.Mesh
-  private debugArrow?: THREE.ArrowHelper
+  private launchOffset: THREE.Vector3 = new THREE.Vector3(-2, 14.5, -0.1)
+  private launchDirection: THREE.Vector3 = new THREE.Vector3(0.6, 1, 0.15).normalize()
 
   constructor(scene: THREE.Scene, world: CANNON.World, config: Partial<BatteryConfig> = {}) {
     this.scene = scene
@@ -425,64 +423,10 @@ export class IronDomeBattery {
   
   setLaunchOffset(offset: THREE.Vector3): void {
     this.launchOffset = offset.clone()
-    this.updateDebugHelper()
   }
   
   setLaunchDirection(direction: THREE.Vector3): void {
     this.launchDirection = direction.clone().normalize()
-    this.updateDebugHelper()
-  }
-  
-  setShowDebugHelpers(show: boolean): void {
-    if (show) {
-      if (!this.debugHelper) {
-        // Create debug helper sphere at launch position
-        const geometry = new THREE.SphereGeometry(1, 16, 8)
-        const material = new THREE.MeshBasicMaterial({ 
-          color: 0xff00ff, 
-          wireframe: true 
-        })
-        this.debugHelper = new THREE.Mesh(geometry, material)
-        this.group.add(this.debugHelper)
-      }
-      
-      if (!this.debugArrow) {
-        // Create arrow showing launch direction
-        this.debugArrow = new THREE.ArrowHelper(
-          this.launchDirection,
-          this.launchOffset,
-          10,  // Length
-          0xff00ff  // Purple color
-        )
-        this.group.add(this.debugArrow)
-      }
-      
-      this.updateDebugHelper()
-    } else {
-      if (this.debugHelper) {
-        this.group.remove(this.debugHelper)
-        this.debugHelper.geometry.dispose()
-        ;(this.debugHelper.material as THREE.Material).dispose()
-        this.debugHelper = undefined
-      }
-      
-      if (this.debugArrow) {
-        this.group.remove(this.debugArrow)
-        this.debugArrow.dispose()
-        this.debugArrow = undefined
-      }
-    }
-  }
-  
-  private updateDebugHelper(): void {
-    if (this.debugHelper) {
-      this.debugHelper.position.copy(this.launchOffset)
-    }
-    
-    if (this.debugArrow) {
-      this.debugArrow.position.copy(this.launchOffset)
-      this.debugArrow.setDirection(this.launchDirection)
-    }
   }
 
   private loadBatteryModel(): void {

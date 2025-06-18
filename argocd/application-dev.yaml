@@ -14,6 +14,9 @@ spec:
     helm:
       valueFiles:
         - values-dev.yaml
+      parameters:
+        - name: ingress.hosts[0].host
+          value: iron-dome-dev.example.com
   destination:
     server: https://kubernetes.default.svc
     namespace: iron-dome-dev

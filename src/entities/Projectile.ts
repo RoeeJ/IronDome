@@ -271,18 +271,6 @@ export class Projectile {
     )
   }
   
-  // Static methods for debugging model orientation
-  static setModelOrientation(forwardVector: THREE.Vector3, rotationAdjustment: THREE.Euler): void {
-    Projectile.modelForwardVector = forwardVector.clone().normalize()
-    Projectile.modelRotationAdjustment = rotationAdjustment.clone()
-  }
-  
-  static getModelOrientation(): { forward: THREE.Vector3, adjustment: THREE.Euler } {
-    return {
-      forward: Projectile.modelForwardVector.clone(),
-      adjustment: Projectile.modelRotationAdjustment.clone()
-    }
-  }
   
   private handleFailure(): void {
     this.hasFailed = true
@@ -299,8 +287,19 @@ export class Projectile {
         this.body.velocity.y *= 0.3
         this.body.velocity.z *= 0.3
         // Change color to indicate failure
-        ;(this.mesh.material as THREE.MeshStandardMaterial).color.setHex(0x666666)
-        ;(this.mesh.material as THREE.MeshStandardMaterial).emissiveIntensity = 0
+        if (this.mesh instanceof THREE.Mesh) {
+          ;(this.mesh.material as THREE.MeshStandardMaterial).color.setHex(0x666666)
+          ;(this.mesh.material as THREE.MeshStandardMaterial).emissiveIntensity = 0
+        } else if (this.mesh instanceof THREE.Group) {
+          // For GLTF models, traverse and update materials
+          this.mesh.traverse((child) => {
+            if (child instanceof THREE.Mesh && child.material) {
+              const material = child.material as THREE.MeshStandardMaterial
+              material.color.setHex(0x666666)
+              material.emissiveIntensity = 0
+            }
+          })
+        }
         break
         
       case 'guidance':

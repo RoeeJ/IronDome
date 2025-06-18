@@ -82,13 +82,13 @@ env:
 ### Ingress
 
 The chart supports Kubernetes Ingress with:
-- TLS termination
-- cert-manager integration
-- Rate limiting (production)
+- Traefik ingress controller
+- TLS termination via cert-manager
+- Automatic certificate generation
 
-Update the hostname in values files:
-- `values-dev.yaml`: iron-dome-dev.example.com
-- `values-prod.yaml`: iron-dome.example.com
+Default hostnames:
+- `values-dev.yaml`: iron-dome-dev.example.com (staging cert)
+- `values-prod.yaml`: iron-dome.example.com (production cert)
 
 ### Resources
 
