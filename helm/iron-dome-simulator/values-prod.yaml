@@ -1,0 +1,50 @@
+# Production environment values
+replicaCount: 3
+
+image:
+  pullPolicy: IfNotPresent
+  # tag will be set by CI/CD pipeline
+
+ingress:
+  enabled: true
+  className: "nginx"
+  annotations:
+    cert-manager.io/cluster-issuer: letsencrypt-prod
+    nginx.ingress.kubernetes.io/rate-limit: "100"
+  hosts:
+    - host: iron-dome.example.com
+      paths:
+        - path: /
+          pathType: Prefix
+  tls:
+    - secretName: iron-dome-tls
+      hosts:
+        - iron-dome.example.com
+
+resources:
+  limits:
+    cpu: 500m
+    memory: 512Mi
+  requests:
+    cpu: 200m
+    memory: 256Mi
+
+autoscaling:
+  enabled: true
+  minReplicas: 3
+  maxReplicas: 10
+  targetCPUUtilizationPercentage: 70
+  targetMemoryUtilizationPercentage: 80
+
+affinity:
+  podAntiAffinity:
+    preferredDuringSchedulingIgnoredDuringExecution:
+      - weight: 100
+        podAffinityTerm:
+          labelSelector:
+            matchExpressions:
+              - key: app.kubernetes.io/name
+                operator: In
+                values:
+                  - iron-dome-simulator
+          topologyKey: kubernetes.io/hostname

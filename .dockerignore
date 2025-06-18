@@ -1,0 +1,44 @@
+# Git
+.git
+.gitignore
+
+# Node modules
+node_modules
+
+# Build output
+dist
+out
+
+# Development files
+.env*
+!.env.example
+
+# Documentation
+*.md
+LICENSE
+roadmap/
+notes/
+
+# CI/CD
+.github
+helm/
+
+# Editor
+.vscode
+.cursor
+.idea
+.DS_Store
+
+# Logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Testing
+coverage/
+.nyc_output
+
+# Misc
+.eslintcache
+*.tsbuildinfo

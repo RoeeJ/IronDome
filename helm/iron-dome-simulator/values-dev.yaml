@@ -1,0 +1,32 @@
+# Development environment values
+replicaCount: 1
+
+image:
+  pullPolicy: Always
+  tag: "develop"
+
+ingress:
+  enabled: true
+  className: "nginx"
+  annotations:
+    cert-manager.io/cluster-issuer: letsencrypt-staging
+  hosts:
+    - host: iron-dome-dev.example.com
+      paths:
+        - path: /
+          pathType: Prefix
+  tls:
+    - secretName: iron-dome-dev-tls
+      hosts:
+        - iron-dome-dev.example.com
+
+resources:
+  limits:
+    cpu: 100m
+    memory: 128Mi
+  requests:
+    cpu: 50m
+    memory: 64Mi
+
+autoscaling:
+  enabled: false

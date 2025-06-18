@@ -1,0 +1,17 @@
+apiVersion: v2
+name: iron-dome-simulator
+description: A Helm chart for Iron Dome Simulator - A realistic 3D missile defense simulation
+type: application
+version: 0.1.0
+appVersion: "0.1.0"
+keywords:
+  - iron-dome
+  - simulator
+  - three.js
+  - web-application
+home: https://github.com/roeej/iron-dome-simulator
+sources:
+  - https://github.com/roeej/iron-dome-simulator
+maintainers:
+  - name: roeej
+    email: your-email@example.com
