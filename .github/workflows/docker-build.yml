@@ -78,7 +78,7 @@ jobs:
           
       - name: Upload Helm Chart
         if: startsWith(github.ref, 'refs/tags/v')
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: helm-chart
           path: iron-dome-simulator-*.tgz
