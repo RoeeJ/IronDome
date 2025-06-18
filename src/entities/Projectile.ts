@@ -16,6 +16,7 @@ export interface ProjectileOptions {
   useExhaustTrail?: boolean
   failureMode?: 'none' | 'motor' | 'guidance' | 'premature'
   failureTime?: number
+  maxLifetime?: number  // Maximum flight time before self-destruct (seconds)
 }
 
 export class Projectile {
@@ -37,6 +38,7 @@ export class Projectile {
   private launchTime: number
   private hasFailed: boolean = false
   private radius: number
+  private maxLifetime: number
   
   // Physics scaling factor for simulator world
   private static readonly WORLD_SCALE = 0.3 // 30% of real-world values
@@ -61,7 +63,8 @@ export class Projectile {
       target,
       useExhaustTrail = true,
       failureMode = 'none',
-      failureTime = 0
+      failureTime = 0,
+      maxLifetime = isInterceptor ? 10 : 30  // 10s for interceptors, 30s for threats
     } = options
     
     this.scene = scene
@@ -71,6 +74,7 @@ export class Projectile {
     this.failureTime = failureTime
     this.launchTime = Date.now()
     this.radius = radius
+    this.maxLifetime = maxLifetime
 
     // Create mesh - use model for interceptor, simple geometry for threats
     if (isInterceptor) {
@@ -155,6 +159,25 @@ export class Projectile {
       if (elapsed >= this.failureTime) {
         this.handleFailure()
       }
+    }
+    
+    // Check max lifetime for self-destruct
+    const flightTime = (Date.now() - this.launchTime) / 1000
+    if (flightTime >= this.maxLifetime) {
+      console.log(`${this.isInterceptor ? 'Interceptor' : 'Threat'} self-destructing after ${flightTime.toFixed(1)}s`)
+      
+      // Trigger detonation callback if available (for visual explosion)
+      if (this.detonationCallback) {
+        this.detonationCallback(this.mesh.position.clone(), 0.3) // Low quality explosion
+      }
+      
+      // Stop exhaust trail
+      if (this.exhaustTrail) {
+        this.exhaustTrail.stop()
+      }
+      
+      this.isActive = false
+      return
     }
 
     // Sync mesh with physics body
@@ -269,6 +292,24 @@ export class Projectile {
       this.body.velocity.y,
       this.body.velocity.z
     )
+  }
+  
+  retarget(newTarget: THREE.Object3D): void {
+    // Change target for an interceptor mid-flight
+    if (!this.isInterceptor || this.hasFailed) return
+    
+    console.log('Interceptor retargeting to new threat')
+    this.target = newTarget
+    
+    // Reset proximity fuse for new target with current position
+    if (this.proximityFuse) {
+      this.proximityFuse = new ProximityFuse(this.mesh.position, {
+        armingDistance: 30,      // Shorter arming distance since already in flight
+        detonationRadius: 10,    // 10 meters
+        optimalRadius: 5,        // 5 meters for best quality
+        scanRate: 16            // Check every frame
+      })
+    }
   }
   
   

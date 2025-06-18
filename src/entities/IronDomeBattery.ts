@@ -15,6 +15,8 @@ export interface BatteryConfig {
   interceptorSpeed: number  // m/s
   launcherCount: number  // Number of launch tubes
   successRate: number  // 0.0 to 1.0, default 0.9 (90%)
+  aggressiveness: number  // 1.0 to 3.0, how many interceptors per high-value threat
+  firingDelay: number  // ms between shots when firing multiple interceptors
 }
 
 interface LauncherTube {
@@ -52,6 +54,8 @@ export class IronDomeBattery {
       interceptorSpeed: 100,
       launcherCount: 6,
       successRate: 0.95,  // 95% success rate
+      aggressiveness: 1.3,  // Default to firing 1-2 interceptors per threat (reduced from 1.5)
+      firingDelay: 800,  // 800ms between launches for staggered impacts (increased from 150ms)
       ...config
     }
     
@@ -256,17 +260,129 @@ export class IronDomeBattery {
     return interceptionPoint !== null
   }
 
-  fireInterceptor(threat: Threat): Projectile | null {
+  assessThreatLevel(threat: Threat): number {
+    // Returns a threat level from 0 to 1
+    let threatLevel = 0.5  // Base threat level
+    
+    // Factor 1: Speed (faster threats are more dangerous)
+    const speed = threat.getVelocity().length()
+    if (speed > 300) threatLevel += 0.2
+    else if (speed > 200) threatLevel += 0.1
+    
+    // Factor 2: Time to impact (less time = more urgent)
+    const timeToImpact = threat.getTimeToImpact()
+    if (timeToImpact < 5) threatLevel += 0.3
+    else if (timeToImpact < 10) threatLevel += 0.2
+    else if (timeToImpact < 15) threatLevel += 0.1
+    
+    // Factor 3: Altitude (lower altitude = harder to intercept)
+    const altitude = threat.getPosition().y
+    if (altitude < 50) threatLevel += 0.1
+    
+    // Factor 4: Distance from battery (closer = more urgent)
+    const distance = threat.getPosition().distanceTo(this.config.position)
+    const rangeRatio = distance / this.config.maxRange
+    if (rangeRatio < 0.3) threatLevel += 0.2
+    else if (rangeRatio < 0.5) threatLevel += 0.1
+    
+    return Math.min(1.0, threatLevel)
+  }
+
+  calculateInterceptorCount(threat: Threat, existingInterceptors: number = 0): number {
+    // Determine how many interceptors to fire based on threat assessment
+    const threatLevel = this.assessThreatLevel(threat)
+    const baseCount = Math.floor(this.config.aggressiveness)
+    
+    // High threat gets extra interceptor
+    let count = threatLevel > 0.7 ? baseCount + 1 : baseCount
+    
+    // Random chance for additional interceptor based on aggressiveness fractional part
+    const extraChance = this.config.aggressiveness % 1
+    if (Math.random() < extraChance) {
+      count++
+    }
+    
+    // Subtract already fired interceptors
+    count = Math.max(0, count - existingInterceptors)
+    
+    // Limit by available loaded tubes
+    const loadedTubes = this.launcherTubes.filter(tube => tube.isLoaded).length
+    count = Math.min(count, loadedTubes)
+    
+    // Never fire more than 3 at once
+    return Math.min(count, 3)
+  }
+
+  fireInterceptors(threat: Threat, count: number = 1, onLaunch?: (interceptor: Projectile) => void): Projectile[] {
     if (!this.canIntercept(threat)) {
-      return null
+      return []
     }
     
-    // Find first loaded tube
-    const loadedTube = this.launcherTubes.find(tube => tube.isLoaded)
-    if (!loadedTube) {
-      return null
+    // Find loaded tubes
+    const loadedTubes = this.launcherTubes.filter(tube => tube.isLoaded)
+    if (loadedTubes.length === 0) {
+      return []
     }
     
+    // Ammo management: adjust firing based on available interceptors
+    const ammoRatio = loadedTubes.length / this.launcherTubes.length
+    const threatLevel = this.assessThreatLevel(threat)
+    
+    // Conservative firing when low on ammo, unless threat is critical
+    if (ammoRatio < 0.3 && threatLevel < 0.8 && count > 1) {
+      console.log('Low ammo - reducing interceptor count')
+      count = 1
+    }
+    
+    // Limit count to available tubes
+    count = Math.min(count, loadedTubes.length)
+    const interceptors: Projectile[] = []
+    
+    // Calculate optimal firing delay for staggered impacts
+    const distance = threat.getPosition().distanceTo(this.config.position)
+    const timeToImpact = distance / this.config.interceptorSpeed
+    
+    // Base delay should be proportional to flight time to ensure staggered arrivals
+    // For a 10 second flight, we want ~1 second between impacts
+    const optimalDelay = Math.max(500, Math.min(2000, timeToImpact * 100))
+    
+    // Adjust firing delay based on threat urgency
+    const urgencyMultiplier = threatLevel > 0.7 ? 0.7 : 1.0
+    const adjustedDelay = optimalDelay * urgencyMultiplier
+    
+    // Fire interceptors with adjusted delay between each
+    for (let i = 0; i < count; i++) {
+      const tube = loadedTubes[i]
+      if (!tube) break
+      
+      if (i === 0) {
+        // Fire first one immediately
+        const interceptor = this.launchFromTube(tube, threat)
+        if (interceptor) {
+          interceptors.push(interceptor)
+          if (onLaunch) onLaunch(interceptor)
+        }
+      } else {
+        // Fire subsequent ones with delay
+        setTimeout(() => {
+          const interceptor = this.launchFromTube(tube, threat)
+          if (interceptor && onLaunch) {
+            onLaunch(interceptor)
+          }
+        }, i * adjustedDelay)
+      }
+    }
+    
+    return interceptors
+  }
+
+  fireInterceptor(threat: Threat): Projectile | null {
+    // Legacy method - fires single interceptor
+    const interceptors = this.fireInterceptors(threat, 1)
+    return interceptors.length > 0 ? interceptors[0] : null
+  }
+  
+  private launchFromTube(tube: LauncherTube, threat: Threat): Projectile | null {
     // Calculate interception point
     const interceptionData = TrajectoryCalculator.calculateInterceptionPoint(
       threat.getPosition(),
@@ -338,23 +454,24 @@ export class IronDomeBattery {
       isInterceptor: true,
       target: threat.mesh,
       failureMode,
-      failureTime
+      failureTime,
+      maxLifetime: 10  // 10 second max flight time
     })
     
     // Update tube state
-    loadedTube.isLoaded = false
-    loadedTube.lastFiredTime = Date.now()
+    tube.isLoaded = false
+    tube.lastFiredTime = Date.now()
     
     // Remove visual missile from tube
-    if (loadedTube.missile) {
-      this.launcherGroup.remove(loadedTube.missile)
-      loadedTube.missile.geometry.dispose()
-      ;(loadedTube.missile.material as THREE.Material).dispose()
-      loadedTube.missile = undefined
+    if (tube.missile) {
+      this.launcherGroup.remove(tube.missile)
+      tube.missile.geometry.dispose()
+      ;(tube.missile.material as THREE.Material).dispose()
+      tube.missile = undefined
     }
     
     // Animate launcher
-    this.animateLaunch(loadedTube)
+    this.animateLaunch(tube)
     
     return interceptor
   }
@@ -398,15 +515,64 @@ export class IronDomeBattery {
     // Update launch effects
     this.launchEffects.update()
     
+    // Ammo management: adjust reload time based on threat environment
+    const reloadTimeMultiplier = this.calculateReloadMultiplier(threats)
+    
     // Reload individual tubes
     const currentTime = Date.now()
     this.launcherTubes.forEach(tube => {
-      if (!tube.isLoaded && currentTime - tube.lastFiredTime >= this.config.reloadTime) {
-        // Reload this tube
-        tube.isLoaded = true
-        this.createMissileInTube(tube, this.launcherGroup)
+      if (!tube.isLoaded) {
+        const adjustedReloadTime = this.config.reloadTime * reloadTimeMultiplier
+        if (currentTime - tube.lastFiredTime >= adjustedReloadTime) {
+          // Reload this tube
+          tube.isLoaded = true
+          this.createMissileInTube(tube, this.launcherGroup)
+        }
       }
     })
+  }
+  
+  private calculateReloadMultiplier(threats: Threat[]): number {
+    // Ammo management: adjust reload speed based on threat situation
+    const activeThreats = threats.filter(t => t.isActive)
+    const loadedTubes = this.launcherTubes.filter(t => t.isLoaded).length
+    const totalTubes = this.launcherTubes.length
+    
+    // Factor 1: Threat density
+    const threatDensity = activeThreats.length
+    
+    // Factor 2: Ammo availability
+    const ammoRatio = loadedTubes / totalTubes
+    
+    // Factor 3: Average threat urgency
+    let avgTimeToImpact = 20 // Default high value
+    if (activeThreats.length > 0) {
+      const totalTime = activeThreats.reduce((sum, t) => sum + t.getTimeToImpact(), 0)
+      avgTimeToImpact = totalTime / activeThreats.length
+    }
+    
+    // Calculate multiplier
+    let multiplier = 1.0
+    
+    // Many threats + low ammo = faster reload (up to 50% faster)
+    if (threatDensity > 5 && ammoRatio < 0.3) {
+      multiplier = 0.5
+    }
+    // Moderate threats = normal to slightly faster
+    else if (threatDensity > 2) {
+      multiplier = 0.7 + ammoRatio * 0.3
+    }
+    // Few threats + high ammo = slower reload (conserve readiness)
+    else if (threatDensity <= 2 && ammoRatio > 0.7) {
+      multiplier = 1.2
+    }
+    
+    // Urgent threats override and speed up reload
+    if (avgTimeToImpact < 10) {
+      multiplier *= 0.7
+    }
+    
+    return Math.max(0.5, Math.min(1.5, multiplier))
   }
 
   getInterceptorCount(): number {

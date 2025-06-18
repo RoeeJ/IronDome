@@ -13,6 +13,8 @@ export interface LaunchEffectConfig {
 export class LaunchEffectsSystem {
   private scene: THREE.Scene
   private activeEffects: Array<{ update: () => boolean }> = []
+  private lastEffectTime: number = 0
+  private effectCooldown: number = 50 // Minimum ms between effects
   
   constructor(scene: THREE.Scene) {
     this.scene = scene
@@ -23,6 +25,10 @@ export class LaunchEffectsSystem {
     direction: THREE.Vector3,
     config: Partial<LaunchEffectConfig> = {}
   ): void {
+    // Throttle effects to prevent performance drops
+    const now = Date.now()
+    const timeSinceLastEffect = now - this.lastEffectTime
+    
     const fullConfig: LaunchEffectConfig = {
       smokeCloudSize: 8,
       smokeDuration: 3000,
@@ -34,14 +40,23 @@ export class LaunchEffectsSystem {
       ...config
     }
     
-    // Create muzzle flash
+    // Always create muzzle flash (lightweight)
     this.createMuzzleFlash(position, direction, fullConfig)
+    
+    // Skip heavy effects if too many recent launches
+    if (timeSinceLastEffect < this.effectCooldown) {
+      return
+    }
+    
+    this.lastEffectTime = now
     
     // Create smoke cloud
     this.createSmokeCloud(position, direction, fullConfig)
     
-    // Create ground dust
-    this.createGroundDust(position, fullConfig)
+    // Create ground dust only if we have capacity
+    if (this.activeEffects.length < 20) {
+      this.createGroundDust(position, fullConfig)
+    }
     
     // Create scorch mark
     this.createScorchMark(position, fullConfig)
@@ -107,7 +122,7 @@ export class LaunchEffectsSystem {
     direction: THREE.Vector3,
     config: LaunchEffectConfig
   ): void {
-    const particleCount = 50
+    const particleCount = 20  // Reduced from 50
     const geometry = new THREE.BufferGeometry()
     const positions = new Float32Array(particleCount * 3)
     const velocities = new Float32Array(particleCount * 3)
@@ -219,7 +234,7 @@ export class LaunchEffectsSystem {
   
   private createGroundDust(position: THREE.Vector3, config: LaunchEffectConfig): void {
     // Create expanding dust ring
-    const ringGeometry = new THREE.RingGeometry(1, config.dustRadius, 32, 1)
+    const ringGeometry = new THREE.RingGeometry(1, config.dustRadius, 16, 1)  // Reduced segments from 32
     const ringMaterial = new THREE.MeshBasicMaterial({
       color: 0x8b7355,
       opacity: 0.6,
@@ -233,7 +248,7 @@ export class LaunchEffectsSystem {
     this.scene.add(ring)
     
     // Create dust particles
-    const particleCount = 30
+    const particleCount = 15  // Reduced from 30
     const dustGeometry = new THREE.BufferGeometry()
     const dustPositions = new Float32Array(particleCount * 3)
     const dustVelocities = new Float32Array(particleCount * 3)

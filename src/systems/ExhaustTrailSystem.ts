@@ -44,10 +44,10 @@ export class ExhaustTrailSystem {
     
     // Default configuration for missile exhaust
     this.config = {
-      particleCount: 500,
+      particleCount: 200,  // Reduced from 500
       particleSize: 0.5,
-      particleLifetime: 2.0,
-      emissionRate: 100,
+      particleLifetime: 1.5,  // Reduced from 2.0
+      emissionRate: 60,  // Reduced from 100
       startColor: new THREE.Color(0xffaa00),
       endColor: new THREE.Color(0x666666),
       startOpacity: 0.8,

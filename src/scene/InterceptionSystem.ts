@@ -23,6 +23,7 @@ export class InterceptionSystem {
   private failedInterceptions: number = 0
   private fragmentationSystem: FragmentationSystem
   private debrisSystem: DebrisSystem
+  private currentThreats: Threat[] = []
 
   constructor(scene: THREE.Scene, world: CANNON.World) {
     this.scene = scene
@@ -37,6 +38,9 @@ export class InterceptionSystem {
 
   update(threats: Threat[]): Projectile[] {
     const deltaTime = 1/60
+    
+    // Store threats for repurposing
+    this.currentThreats = threats
     
     // Update batteries with threat information
     this.batteries.forEach(battery => battery.update(deltaTime, threats))
@@ -85,16 +89,23 @@ export class InterceptionSystem {
       .sort((a, b) => a.getTimeToImpact() - b.getTimeToImpact())
 
     for (const threat of sortedThreats) {
-      // Check if threat is already being intercepted
-      if (this.isBeingIntercepted(threat)) {
-        continue
-      }
-
       // Find best battery to intercept
       const battery = this.findBestBattery(threat)
-      if (battery && battery.getInterceptorCount() > 0) {
-        const interceptor = battery.fireInterceptor(threat)
-        if (interceptor) {
+      if (!battery || battery.getInterceptorCount() === 0) {
+        continue
+      }
+      
+      // Check how many interceptors are already targeting this threat
+      const existingInterceptors = this.getInterceptorCount(threat)
+      
+      // Calculate how many interceptors to fire based on threat assessment
+      const interceptorsToFire = battery.calculateInterceptorCount(threat, existingInterceptors)
+      
+      if (interceptorsToFire > 0) {
+        console.log(`Firing ${interceptorsToFire} interceptor(s) at threat. Already tracking: ${existingInterceptors}`)
+        
+        // Fire multiple interceptors with callback to handle delayed launches
+        battery.fireInterceptors(threat, interceptorsToFire, (interceptor) => {
           // Set up proximity detonation callback
           interceptor.detonationCallback = (position: THREE.Vector3, quality: number) => {
             this.handleProximityDetonation(interceptor, threat, position, quality)
@@ -107,8 +118,7 @@ export class InterceptionSystem {
             targetPoint: threat.getImpactPoint() || threat.getPosition(),
             launchTime: Date.now()
           })
-          // Removed visual line - this.createInterceptionVisual(threat)
-        }
+        })
       }
     }
   }
@@ -176,6 +186,9 @@ export class InterceptionSystem {
       
       threat.destroy(this.scene, this.world)
       
+      // Trigger repurposing check for other interceptors targeting this threat
+      this.repurposeInterceptors(threat)
+      
       // Remove from active interceptions
       const index = this.activeInterceptions.findIndex(i => i.interceptor === interceptor)
       if (index !== -1) {
@@ -196,8 +209,67 @@ export class InterceptionSystem {
     this.successfulInterceptions++
     threat.destroy(this.scene, this.world)
     
+    // Trigger repurposing for interceptors targeting this threat
+    this.repurposeInterceptors(threat)
+    
     // Small explosion at threat position
     this.createExplosion(threat.getPosition(), 0.3)
+  }
+  
+  private repurposeInterceptors(destroyedThreat: Threat): void {
+    // Find all interceptors targeting the destroyed threat
+    const interceptorsToRepurpose = this.activeInterceptions.filter(
+      i => i.threat === destroyedThreat && i.interceptor.isActive
+    )
+    
+    if (interceptorsToRepurpose.length === 0) return
+    
+    console.log(`Repurposing ${interceptorsToRepurpose.length} interceptor(s)`)
+    
+    // Use all active threats from the system
+    const activeThreats = this.currentThreats.filter(t => t.isActive && t !== destroyedThreat)
+    
+    for (const interception of interceptorsToRepurpose) {
+      // Find nearest untargeted or lightly targeted threat
+      let bestNewTarget: Threat | null = null
+      let bestScore = -Infinity
+      
+      for (const threat of activeThreats) {
+        if (!threat.isActive) continue
+        
+        // Calculate retargeting score based on:
+        // - Distance from interceptor
+        // - Time to impact
+        // - Number of interceptors already targeting it
+        const distance = interception.interceptor.getPosition().distanceTo(threat.getPosition())
+        const timeToImpact = threat.getTimeToImpact()
+        const interceptorCount = this.getInterceptorCount(threat)
+        
+        // Skip if too far or too many interceptors already
+        if (distance > 50 || interceptorCount >= 3) continue
+        
+        // Score: prefer closer threats with less time and fewer interceptors
+        const score = (1 / distance) * (1 / Math.max(timeToImpact, 1)) * (1 / (interceptorCount + 1))
+        
+        if (score > bestScore) {
+          bestScore = score
+          bestNewTarget = threat
+        }
+      }
+      
+      if (bestNewTarget) {
+        // Retarget the interceptor
+        interception.interceptor.retarget(bestNewTarget.mesh)
+        interception.threat = bestNewTarget
+        interception.targetPoint = bestNewTarget.getImpactPoint() || bestNewTarget.getPosition()
+        console.log('Interceptor successfully retargeted')
+      } else {
+        // No suitable target found - self-destruct to avoid friendly fire
+        console.log('No suitable retarget found - interceptor will self-destruct')
+        interception.interceptor.isActive = false
+        this.createExplosion(interception.interceptor.getPosition(), 0.2)
+      }
+    }
   }
 
   private handleSuccessfulInterception(interception: Interception): void {

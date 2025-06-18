@@ -223,6 +223,8 @@ const batteryInfo = {
   maxRange: 150,
   successRate: 0.95,
   reloadTime: 3,
+  aggressiveness: 1.3,
+  firingDelay: 800,
   physicsScale: 'Optimized',
   minGuidanceDist: '15m',
   detonationRadius: '8m'
@@ -237,6 +239,12 @@ batteryFolder.add(batteryInfo, 'successRate', 0, 1, 0.05).name('Success Rate').o
 })
 batteryFolder.add(batteryInfo, 'reloadTime', 1, 10, 0.5).name('Reload Time (s)').onChange((value: number) => {
   battery.getConfig().reloadTime = value * 1000
+})
+batteryFolder.add(batteryInfo, 'aggressiveness', 1, 3, 0.1).name('Aggressiveness').onChange((value: number) => {
+  battery.getConfig().aggressiveness = value
+})
+batteryFolder.add(batteryInfo, 'firingDelay', 50, 500, 10).name('Firing Delay (ms)').onChange((value: number) => {
+  battery.getConfig().firingDelay = value
 })
 batteryFolder.add(batteryInfo, 'physicsScale').listen().disable().name('Physics Scale')
 batteryFolder.add(batteryInfo, 'minGuidanceDist').listen().disable().name('Min Guidance Dist')
