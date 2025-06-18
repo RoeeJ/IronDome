@@ -53,6 +53,10 @@ ingress:
   #    hosts:
   #      - iron-dome.example.com
 
+# Certificate generation (optional, only if cert-manager is not handling it via ingress annotations)
+certificate:
+  enabled: false
+
 resources:
   limits:
     cpu: 200m

@@ -1,12 +1,12 @@
-{{- if and .Values.ingress.enabled .Values.ingress.tls }}
+{{- if and .Values.certificate.enabled .Values.ingress.enabled .Values.ingress.tls }}
+{{- $root := . }}
 {{- range .Values.ingress.tls }}
----
 apiVersion: cert-manager.io/v1
 kind: Certificate
 metadata:
   name: {{ .secretName }}
   labels:
-    {{- include "iron-dome-simulator.labels" $ | nindent 4 }}
+    {{- include "iron-dome-simulator.labels" $root | nindent 4 }}
 spec:
   dnsNames:
     {{- range .hosts }}
@@ -15,10 +15,11 @@ spec:
   issuerRef:
     group: cert-manager.io
     kind: ClusterIssuer
-    name: {{ $.Values.ingress.annotations | get "cert-manager.io/cluster-issuer" "letsencrypt-prod" }}
+    name: {{ index $root.Values.ingress.annotations "cert-manager.io/cluster-issuer" | default "letsencrypt-prod" }}
   secretName: {{ .secretName }}
   usages:
     - digital signature
     - key encipherment
+---
 {{- end }}
 {{- end }}

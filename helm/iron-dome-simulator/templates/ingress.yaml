@@ -28,14 +28,14 @@ spec:
     - host: {{ .host | quote }}
       http:
         paths:
-          {{- range .paths }}
-          - path: {{ .path }}
-            pathType: {{ .pathType }}
-            backend:
-              service:
-                name: {{ include "iron-dome-simulator.fullname" $ }}
-                port:
-                  number: {{ $.Values.service.port }}
-          {{- end }}
+        {{- range .paths }}
+        - path: {{ .path }}
+          pathType: {{ .pathType }}
+          backend:
+            service:
+              name: {{ include "iron-dome-simulator.fullname" $ }}
+              port:
+                number: {{ $.Values.service.port }}
+        {{- end }}
     {{- end }}
 {{- end }}
