@@ -7,6 +7,8 @@ import { TrajectoryCalculator } from '../utils/TrajectoryCalculator'
 import { StaticRadarNetwork } from '../scene/StaticRadarNetwork'
 import { LaunchEffectsSystem } from '../systems/LaunchEffectsSystem'
 import { debug } from '../utils/DebugLogger'
+import { ResourceManager } from '../game/ResourceManager'
+import { EventEmitter } from 'events'
 
 export interface BatteryConfig {
   position: THREE.Vector3
@@ -19,6 +21,7 @@ export interface BatteryConfig {
   aggressiveness: number  // 1.0 to 3.0, how many interceptors per high-value threat
   firingDelay: number  // ms between shots when firing multiple interceptors
   interceptorLimit?: number  // Max interceptors allowed (for mobile performance)
+  maxHealth?: number  // Maximum health points
 }
 
 interface LauncherTube {
@@ -29,7 +32,7 @@ interface LauncherTube {
   missile?: THREE.Mesh
 }
 
-export class IronDomeBattery {
+export class IronDomeBattery extends EventEmitter {
   private scene: THREE.Scene
   private world: CANNON.World
   private config: BatteryConfig
@@ -42,10 +45,18 @@ export class IronDomeBattery {
   private launchEffects: LaunchEffectsSystem
   private launchOffset: THREE.Vector3 = new THREE.Vector3(-2, 14.5, -0.1)
   private launchDirection: THREE.Vector3 = new THREE.Vector3(0.6, 1, 0.15).normalize()
+  private resourceManager: ResourceManager
+  private useResources: boolean = false
+  private currentHealth: number = 100
+  private maxHealth: number = 100
+  private healthBar?: THREE.Group
+  private isDestroyed: boolean = false
 
   constructor(scene: THREE.Scene, world: CANNON.World, config: Partial<BatteryConfig> = {}) {
+    super()
     this.scene = scene
     this.world = world
+    this.resourceManager = ResourceManager.getInstance()
     
     // Default configuration
     this.config = {
@@ -58,8 +69,12 @@ export class IronDomeBattery {
       successRate: 0.95,  // 95% success rate
       aggressiveness: 1.3,  // Default to firing 1-2 interceptors per threat (reduced from 1.5)
       firingDelay: 800,  // 800ms between launches for staggered impacts (increased from 150ms)
+      maxHealth: 100,  // Default 100 HP
       ...config
     }
+    
+    this.maxHealth = this.config.maxHealth || 100
+    this.currentHealth = this.maxHealth
     
     this.group = new THREE.Group()
     this.group.position.copy(this.config.position)
@@ -81,6 +96,9 @@ export class IronDomeBattery {
     this.launchEffects = new LaunchEffectsSystem(scene)
     
     // Radar system will be set externally
+    
+    // Create health bar
+    this.createHealthBar()
     
     scene.add(this.group)
   }
@@ -318,7 +336,19 @@ export class IronDomeBattery {
   }
 
   calculateInterceptorCount(threat: Threat, existingInterceptors: number = 0): number {
-    // Determine how many interceptors to fire based on threat assessment
+    // If threat already has interceptors, be very conservative
+    if (existingInterceptors > 0) {
+      // Only fire more if it's a critical threat and we have very few interceptors
+      const threatLevel = this.assessThreatLevel(threat)
+      if (threatLevel < 0.9 || existingInterceptors >= 2) {
+        return 0 // Let existing interceptors handle it
+      }
+      // For critical threats with only 1 interceptor, maybe add one more
+      const loadedTubes = this.launcherTubes.filter(tube => tube.isLoaded).length
+      return loadedTubes > 0 ? 1 : 0
+    }
+    
+    // For new interceptions, determine how many interceptors to fire
     const threatLevel = this.assessThreatLevel(threat)
     const baseCount = Math.floor(this.config.aggressiveness)
     
@@ -330,9 +360,6 @@ export class IronDomeBattery {
     if (Math.random() < extraChance) {
       count++
     }
-    
-    // Subtract already fired interceptors
-    count = Math.max(0, count - existingInterceptors)
     
     // Limit by available loaded tubes
     const loadedTubes = this.launcherTubes.filter(tube => tube.isLoaded).length
@@ -346,6 +373,26 @@ export class IronDomeBattery {
   fireInterceptors(threat: Threat, count: number = 1, onLaunch?: (interceptor: Projectile) => void): Projectile[] {
     if (!this.canIntercept(threat)) {
       return []
+    }
+    
+    // Check resources if resource management is enabled
+    if (this.useResources) {
+      // Check if we have enough interceptors in stock
+      let availableCount = 0
+      for (let i = 0; i < count; i++) {
+        if (this.resourceManager.hasInterceptors()) {
+          availableCount++
+        } else {
+          break
+        }
+      }
+      
+      if (availableCount === 0) {
+        debug.warn('No interceptors in stock!')
+        return []
+      }
+      
+      count = availableCount
     }
     
     // Find loaded tubes
@@ -393,6 +440,10 @@ export class IronDomeBattery {
         tube.isLoaded = true // Temporarily restore for launch
         const interceptor = this.launchFromTube(tube, threat)
         if (interceptor) {
+          // Consume resource if enabled
+          if (this.useResources) {
+            this.resourceManager.consumeInterceptor()
+          }
           interceptors.push(interceptor)
           if (onLaunch) onLaunch(interceptor)
         }
@@ -404,8 +455,14 @@ export class IronDomeBattery {
           if (!tube.isLoaded && tube.lastFiredTime < Date.now() - this.config.reloadTime) {
             tube.isLoaded = true // Temporarily restore for launch
             const interceptor = this.launchFromTube(tube, threat)
-            if (interceptor && onLaunch) {
-              onLaunch(interceptor)
+            if (interceptor) {
+              // Consume resource if enabled
+              if (this.useResources) {
+                this.resourceManager.consumeInterceptor()
+              }
+              if (onLaunch) {
+                onLaunch(interceptor)
+              }
             }
           }
         }, delayMs)
@@ -548,31 +605,7 @@ export class IronDomeBattery {
     })
   }
 
-  update(deltaTime: number, threats: Threat[]): void {
-    // Rotate radar dome (visual only)
-    if (this.radarDome) {
-      this.radarDome.rotation.y += deltaTime * 0.5
-    }
-    
-    // Update launch effects
-    this.launchEffects.update()
-    
-    // Ammo management: adjust reload time based on threat environment
-    const reloadTimeMultiplier = this.calculateReloadMultiplier(threats)
-    
-    // Reload individual tubes
-    const currentTime = Date.now()
-    this.launcherTubes.forEach(tube => {
-      if (!tube.isLoaded) {
-        const adjustedReloadTime = this.config.reloadTime * reloadTimeMultiplier
-        if (currentTime - tube.lastFiredTime >= adjustedReloadTime) {
-          // Reload this tube
-          tube.isLoaded = true
-          this.createMissileInTube(tube, this.launcherGroup)
-        }
-      }
-    })
-  }
+  // This method has been merged into the update method above
   
   private calculateReloadMultiplier(threats: Threat[]): number {
     // Ammo management: adjust reload speed based on threat situation
@@ -626,7 +659,166 @@ export class IronDomeBattery {
   }
   
   getConfig(): BatteryConfig {
-    return this.config
+    return { ...this.config }
+  }
+  
+  setResourceManagement(enabled: boolean): void {
+    this.useResources = enabled
+  }
+  
+  private createHealthBar(): void {
+    // Remove existing health bar if it exists
+    if (this.healthBar) {
+      this.healthBar.traverse((child) => {
+        if (child instanceof THREE.Mesh) {
+          child.geometry.dispose()
+          if (child.material instanceof THREE.Material) {
+            child.material.dispose()
+          }
+        }
+      })
+      this.scene.remove(this.healthBar)
+    }
+    
+    this.healthBar = new THREE.Group()
+    
+    // Background bar
+    const bgGeometry = new THREE.PlaneGeometry(20, 3)
+    const bgMaterial = new THREE.MeshBasicMaterial({
+      color: 0x333333,
+      transparent: true,
+      opacity: 0.8,
+      side: THREE.DoubleSide
+    })
+    const bgBar = new THREE.Mesh(bgGeometry, bgMaterial)
+    bgBar.position.y = 25
+    this.healthBar.add(bgBar)
+    
+    // Health bar
+    const healthGeometry = new THREE.PlaneGeometry(19, 2)
+    const healthMaterial = new THREE.MeshBasicMaterial({
+      color: 0x00ff00,
+      transparent: true,
+      opacity: 0.9,
+      side: THREE.DoubleSide
+    })
+    const healthFill = new THREE.Mesh(healthGeometry, healthMaterial)
+    healthFill.position.y = 25
+    healthFill.position.z = 0.1
+    healthFill.name = 'health-fill'
+    this.healthBar.add(healthFill)
+    
+    // Add to scene (not group) so it can rotate independently
+    this.scene.add(this.healthBar)
+    this.healthBar.position.copy(this.config.position)
+  }
+  
+  private updateHealthBar(): void {
+    if (!this.healthBar) return
+    
+    const healthFill = this.healthBar.getObjectByName('health-fill') as THREE.Mesh
+    if (!healthFill) return
+    
+    // Update width based on health percentage
+    const healthPercent = this.currentHealth / this.maxHealth
+    healthFill.scale.x = healthPercent
+    healthFill.position.x = -(1 - healthPercent) * 9.5 / 2
+    
+    // Update color based on health
+    const material = healthFill.material as THREE.MeshBasicMaterial
+    if (healthPercent > 0.6) {
+      material.color.setHex(0x00ff00) // Green
+    } else if (healthPercent > 0.3) {
+      material.color.setHex(0xffaa00) // Orange
+    } else {
+      material.color.setHex(0xff0000) // Red
+    }
+    
+    // Face camera
+    const camera = (this.scene as any).__camera
+    if (camera) {
+      this.healthBar.lookAt(camera.position)
+    }
+  }
+  
+  takeDamage(amount: number): void {
+    if (this.isDestroyed) return
+    
+    this.currentHealth = Math.max(0, this.currentHealth - amount)
+    this.updateHealthBar()
+    
+    // Visual feedback
+    const originalColor = (this.radarDome.material as THREE.MeshStandardMaterial).color.getHex()
+    ;(this.radarDome.material as THREE.MeshStandardMaterial).color.setHex(0xff0000)
+    
+    setTimeout(() => {
+      if (this.radarDome && !this.isDestroyed) {
+        (this.radarDome.material as THREE.MeshStandardMaterial).color.setHex(originalColor)
+      }
+    }, 200)
+    
+    // Check if destroyed
+    if (this.currentHealth <= 0) {
+      this.onDestroyed()
+    }
+  }
+  
+  private onDestroyed(): void {
+    // Create explosion effect
+    const explosionGeometry = new THREE.SphereGeometry(15, 16, 16)
+    const explosionMaterial = new THREE.MeshBasicMaterial({
+      color: 0xff6600,
+      transparent: true,
+      opacity: 0.8
+    })
+    const explosion = new THREE.Mesh(explosionGeometry, explosionMaterial)
+    explosion.position.copy(this.config.position)
+    this.scene.add(explosion)
+    
+    // Animate explosion
+    let scale = 1
+    const animateExplosion = () => {
+      scale += 0.5
+      explosion.scale.set(scale, scale, scale)
+      explosionMaterial.opacity -= 0.04
+      
+      if (explosionMaterial.opacity > 0) {
+        requestAnimationFrame(animateExplosion)
+      } else {
+        this.scene.remove(explosion)
+        explosionGeometry.dispose()
+        explosionMaterial.dispose()
+      }
+    }
+    animateExplosion()
+    
+    // Disable battery
+    this.isDestroyed = true
+    this.group.visible = false
+    if (this.healthBar) {
+      this.healthBar.visible = false
+    }
+    
+    // Emit destroyed event
+    this.emit('destroyed', { battery: this })
+  }
+  
+  repair(amount: number): void {
+    if (this.isDestroyed) return
+    
+    this.currentHealth = Math.min(this.maxHealth, this.currentHealth + amount)
+    this.updateHealthBar()
+  }
+  
+  getHealth(): { current: number; max: number } {
+    return {
+      current: this.currentHealth,
+      max: this.maxHealth
+    }
+  }
+  
+  isOperational(): boolean {
+    return !this.isDestroyed && this.currentHealth > 0
   }
   
   setLaunchOffset(offset: THREE.Vector3): void {
@@ -722,5 +914,79 @@ export class IronDomeBattery {
         debug.log('Using procedural model')
       }
     )
+  }
+  
+  update(deltaTime: number = 0, threats: Threat[] = []): void {
+    // Update health bar to face camera
+    if (this.healthBar && !this.isDestroyed) {
+      const camera = (this.scene as any).__camera
+      if (camera) {
+        this.healthBar.lookAt(camera.position)
+      }
+    }
+    
+    // Rotate radar dome (visual only)
+    if (this.radarDome && deltaTime > 0) {
+      this.radarDome.rotation.y += deltaTime * 0.5
+    }
+    
+    // Update launch effects
+    this.launchEffects.update()
+    
+    // Skip reloading if battery is destroyed
+    if (this.isDestroyed) return
+    
+    // Ammo management: adjust reload time based on threat environment
+    const reloadTimeMultiplier = this.calculateReloadMultiplier(threats)
+    
+    // Reload individual tubes
+    const currentTime = Date.now()
+    this.launcherTubes.forEach(tube => {
+      if (!tube.isLoaded) {
+        const adjustedReloadTime = this.config.reloadTime * reloadTimeMultiplier
+        if (currentTime - tube.lastFiredTime >= adjustedReloadTime) {
+          // Reload this tube
+          tube.isLoaded = true
+          this.createMissileInTube(tube, this.launcherGroup)
+        }
+      }
+    })
+  }
+  
+  destroy(): void {
+    this.isDestroyed = true
+    
+    // Remove from scene
+    this.scene.remove(this.group)
+    this.scene.remove(this.rangeIndicator)
+    
+    // Properly dispose health bar
+    if (this.healthBar) {
+      this.healthBar.traverse((child) => {
+        if (child instanceof THREE.Mesh) {
+          child.geometry.dispose()
+          if (child.material instanceof THREE.Material) {
+            child.material.dispose()
+          }
+        }
+      })
+      this.scene.remove(this.healthBar)
+      this.healthBar = undefined
+    }
+    
+    // Dispose geometries and materials
+    this.group.traverse((child) => {
+      if (child instanceof THREE.Mesh) {
+        child.geometry.dispose()
+        if (child.material instanceof THREE.Material) {
+          child.material.dispose()
+        } else if (Array.isArray(child.material)) {
+          child.material.forEach(mat => mat.dispose())
+        }
+      }
+    })
+    
+    // Clean up launcher tubes
+    this.launcherTubes = []
   }
 }

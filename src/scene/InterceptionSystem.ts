@@ -7,6 +7,9 @@ import { FragmentationSystem } from '../systems/FragmentationSystem'
 import { DebrisSystem } from '../systems/DebrisSystem'
 import { Profiler } from '../utils/Profiler'
 import { debug } from '../utils/DebugLogger'
+import { ResourceManager } from '../game/ResourceManager'
+import { GameState } from '../game/GameState'
+import { ThreatManager } from './ThreatManager'
 
 interface Interception {
   interceptor: Projectile
@@ -27,12 +30,23 @@ export class InterceptionSystem {
   private debrisSystem: DebrisSystem
   private currentThreats: Threat[] = []
   private profiler?: Profiler
+  private resourceManager: ResourceManager
+  private gameState: GameState
+  private threatManager?: ThreatManager
+  private comboCount: number = 0
+  private lastInterceptionTime: number = 0
 
   constructor(scene: THREE.Scene, world: CANNON.World) {
     this.scene = scene
     this.world = world
     this.fragmentationSystem = new FragmentationSystem(scene)
     this.debrisSystem = new DebrisSystem(scene, world)
+    this.resourceManager = ResourceManager.getInstance()
+    this.gameState = GameState.getInstance()
+  }
+  
+  setThreatManager(threatManager: ThreatManager): void {
+    this.threatManager = threatManager
   }
 
   addBattery(battery: IronDomeBattery): void {
@@ -222,11 +236,30 @@ export class InterceptionSystem {
     if (Math.random() < destroyProbability) {
       this.successfulInterceptions++
       
+      // Track stats
+      this.gameState.recordInterception()
+      this.gameState.recordThreatDestroyed()
+      
+      // Update combo
+      const now = Date.now()
+      if (now - this.lastInterceptionTime < 5000) { // 5 second combo window
+        this.comboCount++
+        this.resourceManager.awardInterceptionBonus(this.comboCount)
+      } else {
+        this.comboCount = 1
+      }
+      this.lastInterceptionTime = now
+      
       // Create debris from successful interception
       const threatVelocity = threat.getVelocity()
       this.debrisSystem.createInterceptionDebris(position, threatVelocity)
       
-      threat.destroy(this.scene, this.world)
+      // Mark threat as intercepted in ThreatManager
+      if (this.threatManager) {
+        this.threatManager.markThreatIntercepted(threat)
+      } else {
+        threat.destroy(this.scene, this.world)
+      }
       
       // Trigger repurposing check for other interceptors targeting this threat
       this.repurposeInterceptors(threat)
@@ -238,6 +271,7 @@ export class InterceptionSystem {
       }
     } else {
       this.failedInterceptions++
+      this.gameState.recordMiss()
       debug.category('Combat', 'Proximity detonation failed to destroy threat')
       
       // Create some debris even on failed interception
@@ -249,7 +283,17 @@ export class InterceptionSystem {
   private handleFragmentHit(threat: Threat): void {
     debug.category('Combat', 'Threat destroyed by fragments!')
     this.successfulInterceptions++
-    threat.destroy(this.scene, this.world)
+    
+    // Track stats
+    this.gameState.recordInterception()
+    this.gameState.recordThreatDestroyed()
+    
+    // Mark threat as intercepted in ThreatManager
+    if (this.threatManager) {
+      this.threatManager.markThreatIntercepted(threat)
+    } else {
+      threat.destroy(this.scene, this.world)
+    }
     
     // Trigger repurposing for interceptors targeting this threat
     this.repurposeInterceptors(threat)

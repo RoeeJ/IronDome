@@ -1,8 +1,10 @@
 import * as THREE from 'three'
 import * as CANNON from 'cannon-es'
+import { EventEmitter } from 'events'
 import { Threat, ThreatType, THREAT_CONFIGS } from '../entities/Threat'
 import { TrajectoryCalculator } from '../utils/TrajectoryCalculator'
 import { LaunchEffectsSystem } from '../systems/LaunchEffectsSystem'
+import { IronDomeBattery } from '../entities/IronDomeBattery'
 
 export interface ThreatSpawnConfig {
   type: ThreatType
@@ -12,7 +14,7 @@ export interface ThreatSpawnConfig {
   maxInterval: number  // ms
 }
 
-export class ThreatManager {
+export class ThreatManager extends EventEmitter {
   private scene: THREE.Scene
   private world: CANNON.World
   private threats: Threat[] = []
@@ -22,8 +24,11 @@ export class ThreatManager {
   private isSpawning: boolean = false
   private impactMarkers: THREE.Mesh[] = []
   private launchEffects: LaunchEffectsSystem
+  private batteries: IronDomeBattery[] = []
+  private salvoChance: number = 0.3  // Default 30% chance
 
   constructor(scene: THREE.Scene, world: CANNON.World) {
+    super()
     this.scene = scene
     this.world = world
     
@@ -130,35 +135,85 @@ export class ThreatManager {
       const threatConfig = THREAT_CONFIGS[threat.type]
       
       if (threatConfig.isDrone) {
-        // For drones, check if they've reached their target position
+        // For drones, dynamically target nearest operational battery
+        const nearestBattery = this.findNearestOperationalBattery(threat.getPosition())
+        if (nearestBattery) {
+          // Update drone target to battery position
+          threat.targetPosition = nearestBattery.getPosition().clone()
+          
+          // Adjust velocity to aim for battery
+          const currentPos = threat.getPosition()
+          const toTarget = new THREE.Vector3()
+            .subVectors(threat.targetPosition, currentPos)
+          
+          const horizontalDistance = Math.sqrt(toTarget.x * toTarget.x + toTarget.z * toTarget.z)
+          const verticalDistance = toTarget.y
+          
+          // If close to target horizontally, start descending
+          if (horizontalDistance < 20) {
+            // Spiral descent pattern
+            const angle = (Date.now() / 1000) * 2 // 2 radians per second
+            const radius = Math.max(5, horizontalDistance)
+            
+            const targetX = threat.targetPosition.x + Math.cos(angle) * radius
+            const targetZ = threat.targetPosition.z + Math.sin(angle) * radius
+            const targetY = Math.max(threat.targetPosition.y + 5, currentPos.y - 10) // Descend at 10m/s
+            
+            const newVelocity = new THREE.Vector3(
+              targetX - currentPos.x,
+              targetY - currentPos.y,
+              targetZ - currentPos.z
+            ).normalize().multiplyScalar(threatConfig.velocity * 0.7) // Slower during descent
+            
+            threat.body.velocity.set(newVelocity.x, newVelocity.y, newVelocity.z)
+          } else {
+            // Normal flight toward target
+            toTarget.normalize()
+            const newVelocity = toTarget.multiplyScalar(threatConfig.velocity)
+            threat.body.velocity.set(newVelocity.x, 0, newVelocity.z) // Keep altitude constant during approach
+          }
+        }
+        
         const distanceToTarget = threat.getPosition().distanceTo(threat.targetPosition)
-        const velocity = threat.getVelocity()
-        const speed = velocity.length()
         const timeSinceLaunch = (Date.now() - threat.launchTime) / 1000
         
-        // Remove if: reached target, stuck (low speed), or timeout
-        if ((distanceToTarget < 5 && threat.isActive) || 
-            (speed < 5 && timeSinceLaunch > 5) || 
+        // Check if drone hit battery or ground
+        if ((distanceToTarget < 5 && threat.getPosition().y < 10) || 
+            threat.getPosition().y <= 1 || 
             timeSinceLaunch > 60) {
-          // Drone reached target or got stuck
-          if (distanceToTarget < 5) {
-            // Reached target - explosion at ground
-            this.createGroundExplosion(threat.targetPosition)
-          } else {
-            // Stuck or timeout - explosion at current position (in air)
-            this.createAirExplosion(threat.getPosition())
+          
+          // Check for battery hit
+          const hitBattery = this.checkBatteryHit(threat.getPosition())
+          if (hitBattery) {
+            const damageAmount = this.getThreatDamage(threat.type)
+            hitBattery.takeDamage(damageAmount)
+            this.emit('batteryHit', { battery: hitBattery, damage: damageAmount })
           }
-          this.removeThreat(i)
+          
+          // Create explosion
+          this.createGroundExplosion(threat.getPosition())
+          this.removeThreat(i, false) // Drone attack
         }
       } else {
         // For other threats, check ground impact
         if (threat.body.position.y <= 0.5 && threat.isActive) {
+          // Check if hit a battery
+          const impactPosition = threat.getPosition()
+          const hitBattery = this.checkBatteryHit(impactPosition)
+          
+          if (hitBattery) {
+            // Deal damage to battery
+            const damageAmount = this.getThreatDamage(threat.type)
+            hitBattery.takeDamage(damageAmount)
+            this.emit('batteryHit', { battery: hitBattery, damage: damageAmount })
+          }
+          
           // Create explosion at impact point
-          this.createGroundExplosion(threat.getPosition())
-          this.removeThreat(i)
+          this.createGroundExplosion(impactPosition)
+          this.removeThreat(i, false) // Missed - hit ground
         } else if (threat.body.position.y < -5) {
           // Remove if somehow went too far below ground
-          this.removeThreat(i)
+          this.removeThreat(i, false) // Missed - went below ground
         }
       }
     }
@@ -175,11 +230,11 @@ export class ThreatManager {
 
   private spawnThreat(): void {
     // Chance to spawn multiple threats simultaneously (salvo)
-    const isSalvo = Math.random() < 0.3  // 30% chance for salvo
-    const salvoSize = isSalvo ? 2 + Math.floor(Math.random() * 3) : 1  // 2-4 threats in salvo
+    const isSalvo = Math.random() < this.salvoChance
+    const salvoSize = isSalvo ? 2 + Math.floor(Math.random() * 4) : 1  // 2-5 threats in salvo
     
     for (let i = 0; i < salvoSize; i++) {
-      this.spawnSingleThreat(i * 0.5)  // Slight delay between salvo launches
+      this.spawnSingleThreat(i * 0.3)  // Slight delay between salvo launches
     }
   }
   
@@ -195,13 +250,29 @@ export class ThreatManager {
     
     const spawnPosition = new THREE.Vector3(spawnX, spawnY, spawnZ)
     
-    // Random target position within target radius
-    const targetAngle = Math.random() * Math.PI * 2
-    const targetDistance = Math.random() * config.targetRadius
-    const targetX = Math.cos(targetAngle) * targetDistance
-    const targetZ = Math.sin(targetAngle) * targetDistance
+    // Target an active battery if any exist, otherwise random position
+    let targetPosition: THREE.Vector3
+    const operationalBatteries = this.batteries.filter(b => b.isOperational())
     
-    const targetPosition = new THREE.Vector3(targetX, 0, targetZ)
+    if (operationalBatteries.length > 0) {
+      // Pick a random operational battery as target
+      const targetBattery = operationalBatteries[Math.floor(Math.random() * operationalBatteries.length)]
+      targetPosition = targetBattery.getPosition().clone()
+      
+      // Add some spread around the battery
+      const spread = 10 + Math.random() * 20
+      const spreadAngle = Math.random() * Math.PI * 2
+      targetPosition.x += Math.cos(spreadAngle) * spread
+      targetPosition.z += Math.sin(spreadAngle) * spread
+      targetPosition.y = 0
+    } else {
+      // Fallback to random target
+      const targetAngle = Math.random() * Math.PI * 2
+      const targetDistance = Math.random() * config.targetRadius
+      const targetX = Math.cos(targetAngle) * targetDistance
+      const targetZ = Math.sin(targetAngle) * targetDistance
+      targetPosition = new THREE.Vector3(targetX, 0, targetZ)
+    }
     
     // Get threat configuration
     const threatStats = THREAT_CONFIGS[config.type]
@@ -310,10 +381,17 @@ export class ThreatManager {
     }, delay * 1000)
   }
 
-  private removeThreat(index: number): void {
+  private removeThreat(index: number, wasIntercepted: boolean = false): void {
     const threat = this.threats[index]
     threat.destroy(this.scene, this.world)
     this.threats.splice(index, 1)
+    
+    // Emit event based on whether it was intercepted or missed
+    if (wasIntercepted) {
+      this.emit('threatDestroyed', { threat })
+    } else {
+      this.emit('threatMissed', { threat })
+    }
   }
 
   private addImpactMarker(threat: Threat): void {
@@ -374,7 +452,10 @@ export class ThreatManager {
   clearAll(): void {
     // Remove all threats
     while (this.threats.length > 0) {
-      this.removeThreat(0)
+      const threat = this.threats[0]
+      threat.destroy(this.scene, this.world)
+      this.threats.splice(0, 1)
+      // Don't emit events when clearing all
     }
     
     // Remove all impact markers
@@ -384,6 +465,79 @@ export class ThreatManager {
       ;(marker.material as THREE.Material).dispose()
     })
     this.impactMarkers = []
+  }
+  
+  registerBattery(battery: IronDomeBattery): void {
+    if (!this.batteries.includes(battery)) {
+      this.batteries.push(battery)
+    }
+  }
+  
+  unregisterBattery(battery: IronDomeBattery): void {
+    const index = this.batteries.indexOf(battery)
+    if (index !== -1) {
+      this.batteries.splice(index, 1)
+    }
+  }
+  
+  private checkBatteryHit(impactPosition: THREE.Vector3): IronDomeBattery | null {
+    const hitRadius = 15 // Radius within which a battery takes damage
+    
+    for (const battery of this.batteries) {
+      if (battery.isOperational()) {
+        const distance = impactPosition.distanceTo(battery.getPosition())
+        if (distance <= hitRadius) {
+          return battery
+        }
+      }
+    }
+    
+    return null
+  }
+  
+  private getThreatDamage(type: ThreatType): number {
+    // Different threat types deal different damage
+    switch (type) {
+      case ThreatType.GRAD_ROCKET:
+        return 15
+      case ThreatType.QASSAM_ROCKET:
+        return 20
+      case ThreatType.MORTAR:
+        return 10
+      case ThreatType.DRONE:
+        return 25
+      case ThreatType.CRUISE_MISSILE:
+        return 40
+      case ThreatType.BALLISTIC_MISSILE:
+        return 50
+      default:
+        return 20
+    }
+  }
+  
+  private findNearestOperationalBattery(position: THREE.Vector3): IronDomeBattery | null {
+    let nearestBattery: IronDomeBattery | null = null
+    let minDistance = Infinity
+    
+    for (const battery of this.batteries) {
+      if (battery.isOperational()) {
+        const distance = position.distanceTo(battery.getPosition())
+        if (distance < minDistance) {
+          minDistance = distance
+          nearestBattery = battery
+        }
+      }
+    }
+    
+    return nearestBattery
+  }
+  
+  // Called when a threat is intercepted by defense system
+  markThreatIntercepted(threat: Threat): void {
+    const index = this.threats.indexOf(threat)
+    if (index !== -1) {
+      this.removeThreat(index, true)
+    }
   }
 
   private createGroundExplosion(position: THREE.Vector3): void {
@@ -676,5 +830,9 @@ export class ThreatManager {
         ]
         break
     }
+  }
+  
+  setSalvoChance(chance: number): void {
+    this.salvoChance = Math.max(0, Math.min(1, chance))
   }
 }

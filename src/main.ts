@@ -2,6 +2,8 @@ import * as THREE from 'three'
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js'
 import * as CANNON from 'cannon-es'
 import GUI from 'lil-gui'
+import React from 'react'
+import { createRoot } from 'react-dom/client'
 import { Projectile } from './entities/Projectile'
 import { ThreatManager } from './scene/ThreatManager'
 import { TrajectoryCalculator } from './utils/TrajectoryCalculator'
@@ -18,6 +20,11 @@ import { debug } from './utils/DebugLogger'
 import { MobileInputManager } from './input/MobileInputManager'
 import { DeviceCapabilities } from './utils/DeviceCapabilities'
 import { ResponsiveUI } from './ui/ResponsiveUI'
+import { GameState } from './game/GameState'
+import { WaveManager } from './game/WaveManager'
+import { ResourceManager } from './game/ResourceManager'
+import { DomePlacementSystem } from './game/DomePlacementSystem'
+import { GameUI } from './ui/GameUI'
 
 // Initialize device capabilities
 const deviceCaps = DeviceCapabilities.getInstance()
@@ -136,9 +143,9 @@ gridHelper.material.opacity = 0.2
 gridHelper.material.transparent = true
 scene.add(gridHelper)
 
-// Axes helper (for debugging)
-const axesHelper = new THREE.AxesHelper(10)
-scene.add(axesHelper)
+// Axes helper (for debugging) - commented out for production
+// const axesHelper = new THREE.AxesHelper(10)
+// scene.add(axesHelper)
 
 // Physics world
 const world = new CANNON.World({
@@ -156,68 +163,160 @@ const groundBody = new CANNON.Body({
 })
 world.addBody(groundBody)
 
+// Initialize game systems
+const gameState = GameState.getInstance()
+const resourceManager = ResourceManager.getInstance()
+
 // Threat Manager
 const threatManager = new ThreatManager(scene, world)
-
 
 // Static Radar Network (4 corners) with large coverage for high altitude
 const radarNetwork = new StaticRadarNetwork(scene, 300)  // 300m radius for high altitude coverage
 
-
-// Debug: Log all objects in scene
-debug.category('Scene', 'Scene children count:', scene.children.length)
-scene.traverse((child) => {
-  if (child instanceof THREE.Group) {
-    debug.category('Scene', 'Group found at position:', child.position, 'with', child.children.length, 'children')
-  }
-})
-
-// Iron Dome Battery
-const battery = new IronDomeBattery(scene, world, {
-  position: new THREE.Vector3(0, 0, 0),
-  maxRange: 150,  // Increased for high altitude interceptions
-  minRange: 4,
-  reloadTime: 3000,  // 3 seconds per missile reload
-  interceptorSpeed: 150,  // Increased speed for better reach
-  launcherCount: 20
-})
-
-// Connect battery to radar network
-battery.setRadarNetwork(radarNetwork)
+// Dome Placement System
+const domePlacementSystem = new DomePlacementSystem(scene, world)
+domePlacementSystem.setThreatManager(threatManager)
 
 // Interception System
 const interceptionSystem = new InterceptionSystem(scene, world)
-interceptionSystem.addBattery(battery)
+interceptionSystem.setThreatManager(threatManager)
+
+// Connect all systems
+domePlacementSystem.setInterceptionSystem(interceptionSystem)
+domePlacementSystem.setRadarNetwork(radarNetwork)
+
+// Add all batteries from placement system to interception system
+const batteries = domePlacementSystem.getAllBatteries()
+batteries.forEach(battery => {
+  battery.setResourceManagement(true)
+  battery.setRadarNetwork(radarNetwork)
+  interceptionSystem.addBattery(battery)
+  threatManager.registerBattery(battery)
+})
+
+// Wave Manager
+const waveManager = new WaveManager(threatManager)
 
 // Tactical Display
 const tacticalDisplay = new TacticalDisplay()
 
-// Projectile management (defined early for simulationControls)
+// Initial render of tactical display with default values
+tacticalDisplay.update([], new THREE.Vector3(0, 0, 0), 20, 0.95, 20)
+
+// Projectile management
 let projectiles: Projectile[] = []
 
-// Simulation controls (defined early for mobile access)
+// Simulation controls (must be defined before UI)
 const simulationControls = {
-  spawnThreats: true,  // Enable by default
+  gameMode: true,  // Enable game mode by default
   autoIntercept: true,
-  threatRate: 'medium',
-  threatTypes: 'mixed',
-  clearAll: () => {
-    threatManager.clearAll()
-    projectiles.forEach(p => p.destroy(scene, world))
-    projectiles = []
-  },
   pause: false,
   timeScale: 1.0,
   showTrajectories: true,
   enableFog: false,
-  interceptorModel: 'ultra'  // 'none', 'ultra', 'simple'
+  interceptorModel: 'ultra',  // 'none', 'ultra', 'simple'
+  startGame: () => {
+    // Clear any existing projectiles
+    projectiles.forEach(p => p.destroy(scene, world))
+    projectiles = []
+    // Start the wave manager
+    waveManager.startGame()
+  },
+  resetGame: () => {
+    gameState.startNewGame()
+    threatManager.clearAll()
+    projectiles.forEach(p => p.destroy(scene, world))
+    projectiles = []
+    // Recreate initial setup
+    location.reload() // Simple reload for now
+  }
 }
+
+// Create React UI
+const uiContainer = document.createElement('div')
+uiContainer.id = 'game-ui-root'
+document.body.appendChild(uiContainer)
+
+const uiRoot = createRoot(uiContainer)
+
+// Function to update UI when mode changes
+const updateUIMode = () => {
+  uiRoot.render(
+    React.createElement(GameUI, {
+      waveManager: waveManager,
+      placementSystem: domePlacementSystem,
+      isGameMode: simulationControls.gameMode,
+      onModeChange: (gameMode: boolean) => {
+        simulationControls.gameMode = gameMode
+        if (gameMode) {
+          // Switch to game mode
+          threatManager.stopSpawning()
+          gui.hide() // Hide debug controls in game mode
+          // Don't auto-start, wait for user to click start
+        } else {
+          // Switch to sandbox mode  
+          waveManager.pauseWave()
+          threatManager.setThreatMix('mixed')
+          threatManager.startSpawning()
+          gui.show() // Show debug controls in sandbox mode
+        }
+        updateUIMode() // Re-render UI
+      }
+    })
+  )
+}
+
+// Initial render
+updateUIMode()
 
 // GUI
 const gui = new GUI()
+// Start minimized on mobile
+if (deviceInfo.isMobile) {
+  gui.close()
+}
+// Hide GUI in game mode by default
+if (simulationControls.gameMode) {
+  gui.hide()
+}
 
 // Apply responsive UI
 const responsiveUI = new ResponsiveUI(gui)
+
+// Handle dome placement input
+renderer.domElement.addEventListener('click', (event) => {
+  if (domePlacementSystem.isInPlacementMode()) {
+    const mouse = new THREE.Vector2(
+      (event.clientX / window.innerWidth) * 2 - 1,
+      -(event.clientY / window.innerHeight) * 2 + 1
+    )
+    
+    const raycaster = new THREE.Raycaster()
+    raycaster.setFromCamera(mouse, camera)
+    
+    const intersects = raycaster.intersectObject(groundMesh)
+    if (intersects.length > 0) {
+      domePlacementSystem.attemptPlacement(intersects[0].point)
+    }
+  }
+})
+
+renderer.domElement.addEventListener('mousemove', (event) => {
+  if (domePlacementSystem.isInPlacementMode()) {
+    const mouse = new THREE.Vector2(
+      (event.clientX / window.innerWidth) * 2 - 1,
+      -(event.clientY / window.innerHeight) * 2 + 1
+    )
+    
+    const raycaster = new THREE.Raycaster()
+    raycaster.setFromCamera(mouse, camera)
+    
+    const intersects = raycaster.intersectObject(groundMesh)
+    if (intersects.length > 0) {
+      domePlacementSystem.updatePlacementPreview(intersects[0].point)
+    }
+  }
+})
 
 // Initialize mobile input if on touch device
 let mobileInput: MobileInputManager | null = null
@@ -260,12 +359,24 @@ if (deviceInfo.hasTouch) {
     
     // Launch interceptor at target threat if found
     if (targetThreat && simulationControls.autoIntercept) {
-      const interceptor = battery.fireInterceptor(targetThreat)
-      if (interceptor) {
-        responsiveUI.showNotification('Interceptor Launched!', 1500)
-        // Add haptic feedback for successful launch
-        mobileInput.vibrate(20)
-      } else {
+      // Find best battery to intercept
+      const batteries = domePlacementSystem.getAllBatteries()
+      let interceptorFired = false
+      
+      for (const battery of batteries) {
+        if (battery.canIntercept(targetThreat)) {
+          const interceptor = battery.fireInterceptor(targetThreat)
+          if (interceptor) {
+            responsiveUI.showNotification('Interceptor Launched!', 1500)
+            // Add haptic feedback for successful launch
+            mobileInput.vibrate(20)
+            interceptorFired = true
+            break
+          }
+        }
+      }
+      
+      if (!interceptorFired) {
         responsiveUI.showNotification('Cannot Intercept', 1000)
       }
     } else if (!targetThreat) {
@@ -301,17 +412,31 @@ if (deviceInfo.hasTouch) {
         return timeA - timeB
       })
       
-      const interceptor = battery.fireInterceptor(sortedThreats[0])
-      if (interceptor) {
-        responsiveUI.showNotification('Interceptor Launched!', 1500)
-        mobileInput.vibrate(30)
+      // Find best battery to intercept
+      const batteries = domePlacementSystem.getAllBatteries()
+      let interceptorFired = false
+      
+      for (const battery of batteries) {
+        if (battery.canIntercept(sortedThreats[0])) {
+          const interceptor = battery.fireInterceptor(sortedThreats[0])
+          if (interceptor) {
+            responsiveUI.showNotification('Interceptor Launched!', 1500)
+            mobileInput.vibrate(30)
+            interceptorFired = true
+            break
+          }
+        }
+      }
+      
+      if (!interceptorFired) {
+        responsiveUI.showNotification('No interceptors available', 1500)
       }
     } else {
       responsiveUI.showNotification('No threats detected', 1000)
     }
   })
   
-  fireButton.style.bottom = '20px'
+  fireButton.style.bottom = '100px'  // Move up to avoid bottom controls
   fireButton.style.right = '20px'
   document.body.appendChild(fireButton)
 }
@@ -341,11 +466,15 @@ if (debug.isEnabled()) {
 }
 
 
+// No longer need game controls in GUI - they're in the UI now
+
 const simulationFolder = gui.addFolder('Simulation')
 
-// Apply initial settings (hardcoded values from debug testing)
-battery.setLaunchOffset(new THREE.Vector3(-2, 14.5, -0.1))
-battery.setLaunchDirection(new THREE.Vector3(0.6, 1, 0.15).normalize())
+// Apply initial settings to all batteries
+domePlacementSystem.getAllBatteries().forEach(battery => {
+  battery.setLaunchOffset(new THREE.Vector3(-2, 14.5, -0.1))
+  battery.setLaunchDirection(new THREE.Vector3(0.6, 1, 0.15).normalize())
+})
 
 // Set radar model facing direction (90 degrees = +X)
 const radarAngle = (90 * Math.PI) / 180
@@ -355,41 +484,14 @@ radarNetwork.setModelFacingDirection(new THREE.Vector3(
   -Math.cos(radarAngle)
 ))
 
-// Threat spawning control
-simulationFolder.add(simulationControls, 'spawnThreats').name('Spawn Threats').onChange((value: boolean) => {
-  if (value) {
-    threatManager.startSpawning()
-  } else {
-    threatManager.stopSpawning()
-  }
-})
-
-// Set initial threat rate to high for testing
-simulationControls.threatRate = 'extreme'
-
-// Threat rate control
-simulationFolder.add(simulationControls, 'threatRate', ['low', 'medium', 'high', 'extreme']).name('Threat Rate').onChange((value: string) => {
-  const rates = {
-    low: { min: 8000, max: 15000 },
-    medium: { min: 5000, max: 10000 },
-    high: { min: 3000, max: 6000 },
-    extreme: { min: 1000, max: 3000 }
-  }
-  // Update spawn configs in threat manager
-  const spawnConfigs = threatManager['spawnConfigs']
-  spawnConfigs.forEach(config => {
-    config.minInterval = rates[value].min
-    config.maxInterval = rates[value].max
-  })
-})
-
-// Threat type control
-simulationFolder.add(simulationControls, 'threatTypes', ['rockets', 'mixed', 'drones', 'mortars', 'all']).name('Threat Types').onChange((value: string) => {
-  threatManager.setThreatMix(value as any)
-})
-
 simulationFolder.add(simulationControls, 'autoIntercept').name('Auto Intercept')
-simulationFolder.add(simulationControls, 'pause').name('Pause Simulation')
+simulationFolder.add(simulationControls, 'pause').name('Pause Simulation').onChange((value: boolean) => {
+  if (value) {
+    waveManager.pauseWave()
+  } else {
+    waveManager.resumeWave()
+  }
+})
 simulationFolder.add(simulationControls, 'timeScale', 0.1, 3.0, 0.1).name('Time Scale')
 simulationFolder.add(simulationControls, 'showTrajectories').name('Show Trajectories')
 simulationFolder.add(simulationControls, 'enableFog').name('Enable Fog').onChange((value: boolean) => {
@@ -403,77 +505,30 @@ simulationFolder.add(simulationControls, 'interceptorModel', ['none', 'ultra', '
   // Store preference globally for new interceptors
   ;(window as any).__interceptorModelQuality = value
 })
-simulationFolder.add(simulationControls, 'clearAll').name('Clear All')
 
-// Add stress test button
-const stressTest = {
-  spawn100: () => {
-    for (let i = 0; i < 100; i++) {
-      setTimeout(() => {
-        threatManager['spawnSingleThreat']()
-      }, i * 50) // Spawn every 50ms
-    }
-  },
-  spawn1000: () => {
-    for (let i = 0; i < 1000; i++) {
-      setTimeout(() => {
-        threatManager['spawnSingleThreat']()
-      }, i * 20) // Spawn every 20ms
-    }
-  }
-}
-simulationFolder.add(stressTest, 'spawn100').name('Spawn 100 Threats')
-simulationFolder.add(stressTest, 'spawn1000').name('Spawn 1000 Threats!')
-
-// Set initial threat mix and start spawning
-threatManager.setThreatMix('mixed')
-
-// Apply extreme spawn rate for testing
-const spawnConfigs = threatManager['spawnConfigs']
-spawnConfigs.forEach(config => {
-  config.minInterval = 1000
-  config.maxInterval = 3000
-})
-
-if (simulationControls.spawnThreats) {
+// Start game mode by default
+if (simulationControls.gameMode) {
+  // Don't start immediately - wait for user to click start
+  debug.log('Game mode ready - click Start New Game to begin')
+} else {
+  // Sandbox mode - start spawning threats
+  threatManager.setThreatMix('mixed')
   threatManager.startSpawning()
 }
 
-const batteryFolder = gui.addFolder('Battery Status')
+const batteryFolder = gui.addFolder('Battery Network')
 const batteryInfo = {
-  loadedTubes: 20,
-  reloading: 0,
-  radarRange: 300,
-  interceptorSpeed: 150,
-  maxRange: 150,
-  successRate: 0.95,
-  reloadTime: 3,
-  aggressiveness: 1.3,
-  firingDelay: 800,
-  physicsScale: 'Optimized',
-  minGuidanceDist: '15m',
-  detonationRadius: '8m'
+  totalBatteries: 1,
+  totalLoadedTubes: 20,
+  totalReloading: 0,
+  totalInterceptors: 100,
+  placementInfo: '1/1 placed'
 }
-batteryFolder.add(batteryInfo, 'loadedTubes').listen().disable().name('Loaded Tubes')
-batteryFolder.add(batteryInfo, 'reloading').listen().disable().name('Reloading')
-batteryFolder.add(batteryInfo, 'radarRange').listen().disable().name('Radar Range (m)')
-batteryFolder.add(batteryInfo, 'interceptorSpeed').listen().disable().name('Interceptor Speed (m/s)')
-batteryFolder.add(batteryInfo, 'maxRange').listen().disable().name('Max Range (m)')
-batteryFolder.add(batteryInfo, 'successRate', 0, 1, 0.05).name('Success Rate').onChange((value: number) => {
-  battery.getConfig().successRate = value
-})
-batteryFolder.add(batteryInfo, 'reloadTime', 1, 10, 0.5).name('Reload Time (s)').onChange((value: number) => {
-  battery.getConfig().reloadTime = value * 1000
-})
-batteryFolder.add(batteryInfo, 'aggressiveness', 1, 3, 0.1).name('Aggressiveness').onChange((value: number) => {
-  battery.getConfig().aggressiveness = value
-})
-batteryFolder.add(batteryInfo, 'firingDelay', 50, 500, 10).name('Firing Delay (ms)').onChange((value: number) => {
-  battery.getConfig().firingDelay = value
-})
-batteryFolder.add(batteryInfo, 'physicsScale').listen().disable().name('Physics Scale')
-batteryFolder.add(batteryInfo, 'minGuidanceDist').listen().disable().name('Min Guidance Dist')
-batteryFolder.add(batteryInfo, 'detonationRadius').listen().disable().name('Detonation Radius')
+batteryFolder.add(batteryInfo, 'totalBatteries').listen().disable().name('Active Batteries')
+batteryFolder.add(batteryInfo, 'totalLoadedTubes').listen().disable().name('Total Loaded Tubes')
+batteryFolder.add(batteryInfo, 'totalReloading').listen().disable().name('Total Reloading')
+batteryFolder.add(batteryInfo, 'totalInterceptors').listen().disable().name('Interceptor Stock')
+batteryFolder.add(batteryInfo, 'placementInfo').listen().disable().name('Placement Status')
 
 const launchFolder = gui.addFolder('Manual Launch')
 const launchParams = {
@@ -498,7 +553,7 @@ function launchProjectile() {
   const projectile = new Projectile(scene, world, {
     position,
     velocity,
-    color: 0x00ff00,
+    color: 0x0038b8,
     radius: 0.3,
     mass: 10,
     trailLength: 150
@@ -515,7 +570,7 @@ function showTrajectoryPrediction(position: THREE.Vector3, velocity: THREE.Vecto
   
   const geometry = new THREE.BufferGeometry().setFromPoints(points)
   const material = new THREE.LineBasicMaterial({
-    color: 0x00ff00,
+    color: 0x0038b8,
     opacity: 0.3,
     transparent: true
   })
@@ -544,6 +599,26 @@ function onWindowResize() {
 }
 window.addEventListener('resize', onWindowResize)
 
+// Function to hide loading screen with multiple fallbacks
+function hideLoadingScreen() {
+  const loadingEl = document.getElementById('loading')
+  if (loadingEl && loadingEl.style.display !== 'none') {
+    loadingEl.style.display = 'none'
+    debug.log('Loading screen hidden')
+  }
+}
+
+// Check if document is already loaded (for iPad/iOS)
+if (document.readyState === 'complete' || document.readyState === 'interactive') {
+  // Document already loaded, hide immediately
+  setTimeout(hideLoadingScreen, 100)
+}
+
+// Also listen for DOMContentLoaded
+document.addEventListener('DOMContentLoaded', () => {
+  setTimeout(hideLoadingScreen, 100)
+})
+
 // Preload models and hide loading screen when ready
 window.addEventListener('load', async () => {
   // Set initial model quality preference
@@ -561,11 +636,13 @@ window.addEventListener('load', async () => {
     debug.error('Failed to preload models:', error)
   }
   
-  const loadingEl = document.getElementById('loading')
-  if (loadingEl) {
-    loadingEl.style.display = 'none'
-  }
+  // Hide loading screen
+  hideLoadingScreen()
 })
+
+// Add timeout fallbacks for stubborn devices
+setTimeout(hideLoadingScreen, 1000) // 1 second fallback
+setTimeout(hideLoadingScreen, 3000) // 3 second fallback
 
 // Animation loop
 const clock = new THREE.Clock()
@@ -585,7 +662,7 @@ let renderBottleneckLogged = false
 function animate() {
   requestAnimationFrame(animate)
   
-  // Store camera reference for LOD optimizations
+  // Store camera reference for LOD optimizations and health bar orientation
   ;(scene as any).__camera = camera
   
   profiler.startSection('Frame')
@@ -633,6 +710,14 @@ function animate() {
   
   // Cache active threats to avoid multiple calls
   const activeThreats = threatManager.getActiveThreats()
+  
+  // Update all batteries (includes health bar orientation and reloading)
+  profiler.startSection('Batteries Update')
+  const allBatteries = domePlacementSystem.getAllBatteries()
+  allBatteries.forEach(battery => {
+    battery.update(deltaTime, activeThreats)
+  })
+  profiler.endSection('Batteries Update')
   
   // Update radar network - pass threats directly instead of mapping
   if (activeThreats.length > 0) {
@@ -684,18 +769,35 @@ function animate() {
       ? Math.round((stats.successful / (stats.successful + stats.failed)) * 100)
       : 0
     
-    const loadedCount = battery.getInterceptorCount()
-    batteryInfo.loadedTubes = loadedCount
-    batteryInfo.reloading = 20 - loadedCount
+    // Update battery network info
+    const allBatteries = domePlacementSystem.getAllBatteries()
+    let totalLoaded = 0
+    let totalCapacity = 0
+    
+    allBatteries.forEach(battery => {
+      totalLoaded += battery.getInterceptorCount()
+      totalCapacity += battery.getConfig().launcherCount
+    })
+    
+    batteryInfo.totalBatteries = allBatteries.length
+    batteryInfo.totalLoadedTubes = totalLoaded
+    batteryInfo.totalReloading = totalCapacity - totalLoaded
+    batteryInfo.totalInterceptors = gameState.getInterceptorStock()
+    batteryInfo.placementInfo = `${allBatteries.length}/${gameState.getUnlockedDomes()} placed`
     
     // Update tactical display only if performance allows
     if (!perfStats.isCritical) {
       profiler.startSection('Tactical Display')
+      const displayPosition = allBatteries.length > 0 
+        ? allBatteries[0].getPosition() 
+        : new THREE.Vector3(0, 0, 0)
+      
       tacticalDisplay.update(
         activeThreats,
-        battery.getPosition(),
-        loadedCount,
-        batteryInfo.successRate
+        displayPosition,
+        totalLoaded,
+        0.95, // Default success rate
+        totalCapacity // Total launcher capacity
       )
       profiler.endSection('Tactical Display')
     }
@@ -784,9 +886,9 @@ if (debug.isEnabled()) {
   debugIndicator.style.top = '10px'
   debugIndicator.style.right = '10px'
   debugIndicator.style.padding = '5px 10px'
-  debugIndicator.style.backgroundColor = 'rgba(0, 255, 0, 0.2)'
-  debugIndicator.style.border = '1px solid #00ff00'
-  debugIndicator.style.color = '#00ff00'
+  debugIndicator.style.backgroundColor = 'rgba(0, 56, 184, 0.2)'
+  debugIndicator.style.border = '1px solid #0038b8'
+  debugIndicator.style.color = '#0038b8'
   debugIndicator.style.fontFamily = 'monospace'
   debugIndicator.style.fontSize = '12px'
   debugIndicator.style.zIndex = '1000'
@@ -795,4 +897,8 @@ if (debug.isEnabled()) {
 }
 
 
+// Start the animation loop and hide loading screen as final fallback
 animate()
+
+// Final fallback after animation starts
+setTimeout(hideLoadingScreen, 100)

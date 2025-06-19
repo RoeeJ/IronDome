@@ -33,13 +33,13 @@ export class TacticalDisplay {
     
     // Create canvas overlay
     this.canvas = document.createElement('canvas')
-    this.canvas.style.position = 'absolute'
-    this.canvas.style.top = '10px'
-    this.canvas.style.left = '10px'  // Changed from right to left
+    this.canvas.style.position = 'fixed'  // Use fixed for bottom positioning
+    this.canvas.style.bottom = '10px'  // At the very bottom
+    this.canvas.style.left = '10px'
     this.canvas.style.width = `${baseSize}px`
     this.canvas.style.height = `${baseSize}px`
     this.canvas.style.pointerEvents = 'none'
-    this.canvas.style.zIndex = '1000'
+    this.canvas.style.zIndex = '100'  // Below UI but above game
     this.canvas.width = baseSize * scale
     this.canvas.height = baseSize * scale
     
@@ -71,7 +71,8 @@ export class TacticalDisplay {
     threats: Threat[],
     batteryPosition: THREE.Vector3,
     interceptorCount: number,
-    successRate: number
+    successRate: number,
+    totalCapacity: number = 20
   ): void {
     // Update animation time
     this.animationTime = Date.now() / 1000
@@ -115,7 +116,7 @@ export class TacticalDisplay {
     this.drawRadarPings()
     
     // Draw info panel
-    this.drawInfoPanel(threats.length, interceptorCount, successRate)
+    this.drawInfoPanel(threats.length, interceptorCount, successRate, totalCapacity)
     
     // Draw corner decorations
     this.drawCornerDecorations()
@@ -434,34 +435,39 @@ export class TacticalDisplay {
     ctx.fillText(classification, screenPos.x + 45, screenPos.y - 5)
   }
   
-  private drawInfoPanel(threatCount: number, interceptorCount: number, successRate: number): void {
+  private drawInfoPanel(threatCount: number, interceptorCount: number, successRate: number, totalCapacity: number = 20): void {
     const ctx = this.ctx
     
+    // Position info panel to the right of radar to avoid overlap
+    const canvasWidth = this.canvas.width / (this.ctx.getTransform().a || 1)
+    const infoPanelX = canvasWidth - 150  // 150 = panel width + margin
+    const infoPanelY = 5
+    
     // Panel background with gradient
-    const panelGradient = ctx.createLinearGradient(5, 5, 5, 110)
+    const panelGradient = ctx.createLinearGradient(infoPanelX, infoPanelY, infoPanelX, infoPanelY + 105)
     panelGradient.addColorStop(0, 'rgba(0, 20, 40, 0.9)')
     panelGradient.addColorStop(1, 'rgba(0, 10, 30, 0.9)')
     ctx.fillStyle = panelGradient
-    ctx.fillRect(5, 5, 140, 105)
+    ctx.fillRect(infoPanelX, infoPanelY, 140, 105)
     
     // Panel border
     ctx.strokeStyle = 'rgba(0, 255, 255, 0.5)'
     ctx.lineWidth = 1
-    ctx.strokeRect(5, 5, 140, 105)
+    ctx.strokeRect(infoPanelX, infoPanelY, 140, 105)
     
     // Header with glow
     ctx.shadowBlur = 5
     ctx.shadowColor = 'rgba(0, 255, 255, 0.8)'
     ctx.fillStyle = '#00ffff'
     ctx.font = 'bold 11px "Courier New", monospace'
-    ctx.fillText('◆ TACTICAL DISPLAY ◆', 15, 20)
+    ctx.fillText('◆ TACTICAL DISPLAY ◆', infoPanelX + 10, infoPanelY + 15)
     ctx.shadowBlur = 0
     
     // Divider line
     ctx.strokeStyle = 'rgba(0, 255, 255, 0.3)'
     ctx.beginPath()
-    ctx.moveTo(10, 25)
-    ctx.lineTo(140, 25)
+    ctx.moveTo(infoPanelX + 5, infoPanelY + 20)
+    ctx.lineTo(infoPanelX + 135, infoPanelY + 20)
     ctx.stroke()
     
     // System status with animated indicator
@@ -471,38 +477,38 @@ export class TacticalDisplay {
     const pulse = Math.sin(this.animationTime * 5) * 0.5 + 0.5
     
     ctx.fillStyle = statusColor
-    ctx.fillText('SYS STATUS:', 15, 38)
+    ctx.fillText('SYS STATUS:', infoPanelX + 10, infoPanelY + 33)
     ctx.fillStyle = interceptorCount > 0 
       ? `rgba(0, 255, 0, ${0.5 + pulse * 0.5})` 
       : `rgba(255, 0, 0, ${0.5 + pulse * 0.5})`
-    ctx.fillText(statusText, 85, 38)
+    ctx.fillText(statusText, infoPanelX + 80, infoPanelY + 33)
     
     // Stats with icons
     ctx.fillStyle = '#00ffff'
-    ctx.fillText('◈ THREATS:', 15, 52)
+    ctx.fillText('◈ THREATS:', infoPanelX + 10, infoPanelY + 47)
     ctx.fillStyle = threatCount > 0 ? '#ff6666' : '#66ff66'
-    ctx.fillText(String(threatCount).padStart(3, '0'), 85, 52)
+    ctx.fillText(String(threatCount).padStart(3, '0'), infoPanelX + 80, infoPanelY + 47)
     
     ctx.fillStyle = '#00ffff'
-    ctx.fillText('◎ READY:', 15, 65)
+    ctx.fillText('◎ READY:', infoPanelX + 10, infoPanelY + 60)
     ctx.fillStyle = interceptorCount > 10 ? '#66ff66' : interceptorCount > 5 ? '#ffaa00' : '#ff6666'
-    ctx.fillText(`${interceptorCount}/20`, 85, 65)
+    ctx.fillText(`${interceptorCount}/${totalCapacity}`, infoPanelX + 80, infoPanelY + 60)
     
     ctx.fillStyle = '#00ffff'
-    ctx.fillText('◉ P(HIT):', 15, 78)
+    ctx.fillText('◉ P(HIT):', infoPanelX + 10, infoPanelY + 73)
     ctx.fillStyle = successRate > 0.8 ? '#66ff66' : successRate > 0.6 ? '#ffaa00' : '#ff6666'
-    ctx.fillText(`${(successRate * 100).toFixed(0)}%`, 85, 78)
+    ctx.fillText(`${(successRate * 100).toFixed(0)}%`, infoPanelX + 80, infoPanelY + 73)
     
     // Alert level with background
     const alertLevel = threatCount === 0 ? 'GREEN' : threatCount < 3 ? 'YELLOW' : 'RED'
     const alertColor = threatCount === 0 ? '#00ff00' : threatCount < 3 ? '#ffff00' : '#ff0000'
     
     ctx.fillStyle = 'rgba(0, 0, 0, 0.5)'
-    ctx.fillRect(10, 88, 130, 17)
+    ctx.fillRect(infoPanelX + 5, infoPanelY + 83, 130, 17)
     
     ctx.fillStyle = alertColor
     ctx.font = 'bold 10px "Courier New", monospace'
-    ctx.fillText(`DEFCON: ${alertLevel}`, 15, 100)
+    ctx.fillText(`DEFCON: ${alertLevel}`, infoPanelX + 10, infoPanelY + 95)
     
     // Blinking alert indicator for high threat
     if (threatCount >= 3 && Math.sin(this.animationTime * 10) > 0) {

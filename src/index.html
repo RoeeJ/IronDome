@@ -51,10 +51,26 @@
           font-size: 18px;
         }
       }
+      
+      /* Game UI container */
+      #game-ui-root {
+        position: fixed;
+        top: 0;
+        left: 0;
+        right: 0;
+        bottom: 0;
+        pointer-events: none;
+        z-index: 50;
+      }
     </style>
   </head>
   <body>
-    <div id="loading">Loading simulator...</div>
+    <div id="loading">
+      Loading simulator...
+      <div style="font-size: 12px; margin-top: 10px; color: #666;">
+        If this message persists, please refresh the page
+      </div>
+    </div>
     <script type="module" src="./main.ts"></script>
   </body>
 </html>
