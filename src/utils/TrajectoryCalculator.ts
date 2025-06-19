@@ -1,4 +1,5 @@
 import * as THREE from 'three'
+import { debug } from './DebugLogger'
 
 export interface LaunchParameters {
   velocity: number
@@ -124,7 +125,7 @@ export class TrajectoryCalculator {
     isDrone: boolean = false
   ): { point: THREE.Vector3; time: number } | null {
     if (isDrone) {
-      console.log(`[TRAJECTORY] Calculating drone interception:`, {
+      debug.module('Trajectory').log(`Calculating drone interception:`, {
         threatPos: threatPos.toArray().map(n => n.toFixed(1)),
         threatVel: threatVel.toArray().map(n => n.toFixed(1)),
         speed: threatVel.length().toFixed(1),
@@ -160,7 +161,7 @@ export class TrajectoryCalculator {
       // Check if threat has hit ground
       if (futurePos.y <= 0) {
         if (isDrone) {
-          console.log(`[TRAJECTORY] Drone would hit ground at t=${t.toFixed(1)}`)
+          debug.module('Trajectory').log(`Drone would hit ground at t=${t.toFixed(1)}`)
         }
         return null
       }
@@ -172,7 +173,7 @@ export class TrajectoryCalculator {
       // Check if times match (within tolerance)
       if (Math.abs(t - interceptorTime) < 0.01) {
         if (isDrone) {
-          console.log(`[TRAJECTORY] Found drone interception point at t=${t.toFixed(1)}s, distance=${distance.toFixed(1)}m`)
+          debug.module('Trajectory').log(`Found drone interception point at t=${t.toFixed(1)}s, distance=${distance.toFixed(1)}m`)
         }
         return { point: futurePos, time: t }
       }
@@ -181,7 +182,7 @@ export class TrajectoryCalculator {
     }
     
     if (isDrone) {
-      console.log(`[TRAJECTORY] Failed to find drone interception solution`)
+      debug.module('Trajectory').log(`Failed to find drone interception solution`)
     }
     return null
   }

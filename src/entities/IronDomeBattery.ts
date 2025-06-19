@@ -236,7 +236,7 @@ export class IronDomeBattery {
   canIntercept(threat: Threat): boolean {
     const threatConfig = THREAT_CONFIGS[threat.type]
     
-    console.log(`[BATTERY] Checking if can intercept ${threatConfig.isDrone ? 'DRONE' : 'threat'} ${threat.id}:`, {
+    debug.module('Battery').log(`Checking if can intercept ${threatConfig.isDrone ? 'DRONE' : 'threat'} ${threat.id}:`, {
       type: threat.type,
       position: threat.getPosition(),
       velocity: threat.getVelocity().length(),
@@ -245,26 +245,26 @@ export class IronDomeBattery {
     
     // Check if detected by radar network
     if (!this.radarNetwork || !this.radarNetwork.checkDetection(threat.getPosition())) {
-      console.log(`[BATTERY] ${threatConfig.isDrone ? 'DRONE' : 'Threat'} ${threat.id} NOT detected by radar at position:`, threat.getPosition())
+      debug.module('Battery').log(`${threatConfig.isDrone ? 'DRONE' : 'Threat'} ${threat.id} NOT detected by radar at position:`, threat.getPosition())
       return false
     }
-    console.log(`[BATTERY] ${threatConfig.isDrone ? 'DRONE' : 'Threat'} ${threat.id} detected by radar ✓`)
+    debug.module('Battery').log(`${threatConfig.isDrone ? 'DRONE' : 'Threat'} ${threat.id} detected by radar ✓`)
     
     // Check if any tube is loaded
     const hasLoadedTube = this.launcherTubes.some(tube => tube.isLoaded)
     if (!hasLoadedTube) {
-      console.log(`[BATTERY] No loaded tubes for ${threatConfig.isDrone ? 'DRONE' : 'threat'} ${threat.id}`)
+      debug.module('Battery').log(`No loaded tubes for ${threatConfig.isDrone ? 'DRONE' : 'threat'} ${threat.id}`)
       return false
     }
-    console.log(`[BATTERY] Loaded tubes available ✓`)
+    debug.module('Battery').log(`Loaded tubes available ✓`)
     
     // Check range
     const distance = threat.getPosition().distanceTo(this.config.position)
     if (distance > this.config.maxRange || distance < this.config.minRange) {
-      console.log(`[BATTERY] ${threatConfig.isDrone ? 'DRONE' : 'Threat'} ${threat.id} out of range: ${distance.toFixed(1)}m (min: ${this.config.minRange}, max: ${this.config.maxRange})`)
+      debug.module('Battery').log(`${threatConfig.isDrone ? 'DRONE' : 'Threat'} ${threat.id} out of range: ${distance.toFixed(1)}m (min: ${this.config.minRange}, max: ${this.config.maxRange})`)
       return false
     }
-    console.log(`[BATTERY] ${threatConfig.isDrone ? 'DRONE' : 'Threat'} ${threat.id} in range: ${distance.toFixed(1)}m ✓`)
+    debug.module('Battery').log(`${threatConfig.isDrone ? 'DRONE' : 'Threat'} ${threat.id} in range: ${distance.toFixed(1)}m ✓`)
     
     // Check if we can reach the threat in time
     const interceptionPoint = TrajectoryCalculator.calculateInterceptionPoint(
@@ -276,7 +276,7 @@ export class IronDomeBattery {
     )
     
     if (!interceptionPoint) {
-      console.log(`[BATTERY] Cannot calculate interception for ${threatConfig.isDrone ? 'DRONE' : 'threat'} ${threat.id}:`, {
+      debug.module('Battery').log(`Cannot calculate interception for ${threatConfig.isDrone ? 'DRONE' : 'threat'} ${threat.id}:`, {
         position: threat.getPosition(),
         velocity: threat.getVelocity(),
         speed: threat.getVelocity().length(),
@@ -285,7 +285,7 @@ export class IronDomeBattery {
       return false
     }
     
-    console.log(`[BATTERY] CAN INTERCEPT ${threatConfig.isDrone ? 'DRONE' : 'threat'} ${threat.id} ✓✓✓`)
+    debug.module('Battery').log(`CAN INTERCEPT ${threatConfig.isDrone ? 'DRONE' : 'threat'} ${threat.id} ✓✓✓`)
     return true
   }
 
@@ -360,7 +360,7 @@ export class IronDomeBattery {
     
     // Conservative firing when low on ammo, unless threat is critical
     if (ammoRatio < 0.3 && threatLevel < 0.8 && count > 1) {
-      console.log('Low ammo - reducing interceptor count')
+      debug.category('Battery', 'Low ammo - reducing interceptor count')
       count = 1
     }
     
@@ -470,7 +470,7 @@ export class IronDomeBattery {
         failureTime = 0.2 + Math.random() * 2  // Premature detonation 0.2-2.2s after launch
       }
       
-      console.log(`Interceptor will fail: ${failureMode} at ${failureTime.toFixed(1)}s`)
+      debug.category('Battery', `Interceptor will fail: ${failureMode} at ${failureTime.toFixed(1)}s`)
     }
     
     // Create interceptor with adjusted initial velocity based on launch direction
@@ -643,26 +643,26 @@ export class IronDomeBattery {
       '/assets/Battery.obj',
       (object) => {
         // Model loaded successfully
-        console.log('Battery model loaded:', object)
+        debug.asset('loading', 'battery', { object })
         
         // Log what we loaded
         let meshCount = 0
         object.traverse((child) => {
           if (child instanceof THREE.Mesh) {
             meshCount++
-            console.log('Found battery mesh:', child.name, 'vertices:', child.geometry.attributes.position?.count)
+            debug.asset('loading', 'battery-mesh', { name: child.name, vertices: child.geometry.attributes.position?.count })
           }
         })
-        console.log('Total meshes in battery model:', meshCount)
+        debug.asset('loading', 'battery-meshes', { count: meshCount })
         
         // Calculate model bounds to determine proper scale
         const box = new THREE.Box3().setFromObject(object)
         const size = box.getSize(new THREE.Vector3())
-        console.log('Original battery model size:', size)
+        debug.asset('loading', 'battery-size', { size })
         
         // Check if model has valid size
         if (size.x === 0 || size.y === 0 || size.z === 0) {
-          console.error('Battery model has zero size!', size)
+          debug.error('Battery model has zero size!', size)
           return
         }
         
@@ -673,14 +673,14 @@ export class IronDomeBattery {
           scaleFactor = targetHeight / size.y
           object.scale.set(scaleFactor, scaleFactor, scaleFactor)
         }
-        console.log('Battery scale factor:', scaleFactor)
+        debug.asset('loading', 'battery-scale', { scaleFactor })
         
         // Center the model at origin
         box.setFromObject(object)
         const center = box.getCenter(new THREE.Vector3())
         const minY = box.min.y
         object.position.set(-center.x, -minY, -center.z)  // Place on ground
-        console.log('Battery model positioned at:', object.position)
+        debug.asset('loading', 'battery-position', { position: object.position })
         
         // Apply material to all meshes in the model
         object.traverse((child) => {
@@ -709,17 +709,17 @@ export class IronDomeBattery {
         this.group.add(object)
         
         // Log model info for debugging
-        console.log('Battery model added to scene')
-        console.log('Battery model bounds:', new THREE.Box3().setFromObject(object))
+        debug.asset('loading', 'battery', 'Model added to scene')
+        debug.asset('loading', 'battery-bounds', { bounds: new THREE.Box3().setFromObject(object) })
       },
       (xhr) => {
         // Progress callback
-        console.log('Loading battery model...', (xhr.loaded / xhr.total * 100).toFixed(0) + '%')
+        debug.asset('progress', 'battery', `${(xhr.loaded / xhr.total * 100).toFixed(0)}%`)
       },
       (error) => {
         // Error callback - keep procedural model
-        console.error('Failed to load battery model:', error)
-        console.log('Using procedural model')
+        debug.error('Failed to load battery model:', error)
+        debug.log('Using procedural model')
       }
     )
   }

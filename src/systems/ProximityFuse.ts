@@ -1,4 +1,5 @@
 import * as THREE from 'three'
+import { debug } from '../utils/DebugLogger'
 
 export interface ProximityFuseConfig {
   armingDistance: number      // Minimum distance before fuse arms (meters)
@@ -41,7 +42,7 @@ export class ProximityFuse {
     // Check if fuse should arm
     if (!this.armed && this.distanceTraveled >= this.config.armingDistance) {
       this.armed = true
-      console.log('Proximity fuse armed at distance:', this.distanceTraveled)
+      debug.category('ProximityFuse', 'Armed at distance:', this.distanceTraveled)
     }
 
     // Don't check for detonation if not armed or already detonated
@@ -65,7 +66,7 @@ export class ProximityFuse {
       // Calculate detonation quality (1.0 at optimal radius, decreasing linearly)
       const detonationQuality = this.calculateDetonationQuality(distanceToTarget)
       
-      console.log(`Proximity detonation at ${distanceToTarget.toFixed(1)}m, quality: ${(detonationQuality * 100).toFixed(0)}%`)
+      debug.category('ProximityFuse', `Detonation at ${distanceToTarget.toFixed(1)}m, quality: ${(detonationQuality * 100).toFixed(0)}%`)
       
       return { shouldDetonate: true, detonationQuality }
     }

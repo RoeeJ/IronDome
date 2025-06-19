@@ -1,5 +1,6 @@
 import * as THREE from 'three'
 import { OBJLoader } from 'three/examples/jsm/loaders/OBJLoader.js'
+import { debug } from '../utils/DebugLogger'
 
 export interface RadarStation {
   position: THREE.Vector3
@@ -215,7 +216,7 @@ export class StaticRadarNetwork {
         
         // Check if model has valid size
         if (size.x === 0 || size.y === 0 || size.z === 0) {
-          console.error('Model has zero size!', size)
+          debug.error('Model has zero size!', size)
           return
         }
         
@@ -260,7 +261,7 @@ export class StaticRadarNetwork {
       (xhr) => {
       },
       (error) => {
-        console.error('Failed to load radar model:', error)
+        debug.error('Failed to load radar model:', error)
       }
     )
   }

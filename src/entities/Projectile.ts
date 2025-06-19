@@ -348,7 +348,7 @@ export class Projectile {
     // Change target for an interceptor mid-flight
     if (!this.isInterceptor || this.hasFailed) return
     
-    console.log('Interceptor retargeting to new threat')
+    debug.category('Interceptor', 'Retargeting to new threat')
     this.target = newTarget
     
     // Reset proximity fuse for new target with current position
@@ -365,7 +365,7 @@ export class Projectile {
   
   private handleFailure(): void {
     this.hasFailed = true
-    console.log(`Interceptor failure: ${this.failureMode}`)
+    debug.category('Interceptor', `Failure: ${this.failureMode}`)
     
     switch (this.failureMode) {
       case 'motor':
@@ -656,7 +656,7 @@ export class Projectile {
         setTimeout(() => scene.remove(debugBox), 5000) // Remove after 5 seconds
       }
     } catch (error) {
-      console.error('Failed to load optimized Tamir model:', error)
+      debug.error('Failed to load optimized Tamir model:', error)
       // Keep using the simple cone on error
     }
   }
