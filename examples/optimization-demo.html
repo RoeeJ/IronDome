@@ -1,0 +1,305 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Iron Dome - Optimization Demo</title>
+  <style>
+    body {
+      margin: 0;
+      font-family: Arial, sans-serif;
+      overflow: hidden;
+    }
+    #info {
+      position: absolute;
+      top: 10px;
+      left: 10px;
+      color: white;
+      background: rgba(0, 0, 0, 0.7);
+      padding: 10px;
+      border-radius: 5px;
+      font-size: 14px;
+    }
+    #controls {
+      position: absolute;
+      bottom: 10px;
+      left: 10px;
+      color: white;
+      background: rgba(0, 0, 0, 0.7);
+      padding: 10px;
+      border-radius: 5px;
+    }
+    button {
+      margin: 5px;
+      padding: 5px 10px;
+      cursor: pointer;
+    }
+  </style>
+</head>
+<body>
+  <div id="info">
+    <h3>Optimization Demo</h3>
+    <div>FPS: <span id="fps">0</span></div>
+    <div>Chunks: <span id="chunks">0</span></div>
+    <div>Objects: <span id="objects">0</span></div>
+    <div>Draw Calls: <span id="drawCalls">0</span></div>
+    <div>Camera Position: <span id="cameraPos">0, 0, 0</span></div>
+  </div>
+  
+  <div id="controls">
+    <button onclick="spawnObjects(100)">Spawn 100 Objects</button>
+    <button onclick="spawnObjects(1000)">Spawn 1000 Objects</button>
+    <button onclick="clearObjects()">Clear All</button>
+    <button onclick="toggleChunks()">Toggle Chunks</button>
+    <button onclick="toggleLOD()">Toggle LOD</button>
+    <button onclick="moveCamera()">Fly Around</button>
+  </div>
+
+  <script type="module">
+    import * as THREE from 'three'
+    import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js'
+    
+    // Scene setup
+    const scene = new THREE.Scene()
+    scene.background = new THREE.Color(0x87CEEB)
+    scene.fog = new THREE.Fog(0x87CEEB, 500, 2000)
+    
+    const camera = new THREE.PerspectiveCamera(
+      75,
+      window.innerWidth / window.innerHeight,
+      0.1,
+      3000
+    )
+    camera.position.set(200, 100, 200)
+    
+    const renderer = new THREE.WebGLRenderer({ antialias: true })
+    renderer.setSize(window.innerWidth, window.innerHeight)
+    renderer.shadowMap.enabled = true
+    document.body.appendChild(renderer.domElement)
+    
+    const controls = new OrbitControls(camera, renderer.domElement)
+    controls.enableDamping = true
+    
+    // Lighting
+    const ambientLight = new THREE.AmbientLight(0xffffff, 0.6)
+    scene.add(ambientLight)
+    
+    const directionalLight = new THREE.DirectionalLight(0xffffff, 0.8)
+    directionalLight.position.set(50, 100, 50)
+    directionalLight.castShadow = true
+    scene.add(directionalLight)
+    
+    // Simple chunk visualization
+    class SimpleChunkManager {
+      constructor(scene, chunkSize = 200, viewDistance = 3) {
+        this.scene = scene
+        this.chunkSize = chunkSize
+        this.viewDistance = viewDistance
+        this.chunks = new Map()
+        this.enabled = true
+      }
+      
+      update(cameraPosition) {
+        if (!this.enabled) return
+        
+        const chunkX = Math.floor(cameraPosition.x / this.chunkSize)
+        const chunkZ = Math.floor(cameraPosition.z / this.chunkSize)
+        
+        // Load chunks in view distance
+        const toLoad = new Set()
+        for (let dx = -this.viewDistance; dx <= this.viewDistance; dx++) {
+          for (let dz = -this.viewDistance; dz <= this.viewDistance; dz++) {
+            const x = chunkX + dx
+            const z = chunkZ + dz
+            toLoad.add(`${x},${z}`)
+          }
+        }
+        
+        // Unload distant chunks
+        for (const [key, chunk] of this.chunks) {
+          if (!toLoad.has(key)) {
+            this.scene.remove(chunk)
+            this.chunks.delete(key)
+          }
+        }
+        
+        // Load new chunks
+        for (const key of toLoad) {
+          if (!this.chunks.has(key)) {
+            const [x, z] = key.split(',').map(Number)
+            const chunk = this.createChunk(x, z)
+            this.chunks.set(key, chunk)
+            this.scene.add(chunk)
+          }
+        }
+      }
+      
+      createChunk(x, z) {
+        const group = new THREE.Group()
+        
+        // Ground
+        const geometry = new THREE.PlaneGeometry(this.chunkSize, this.chunkSize)
+        const material = new THREE.MeshStandardMaterial({
+          color: new THREE.Color().setHSL(Math.random() * 0.1 + 0.3, 0.5, 0.5),
+          roughness: 0.8
+        })
+        const ground = new THREE.Mesh(geometry, material)
+        ground.rotation.x = -Math.PI / 2
+        ground.position.set(
+          x * this.chunkSize + this.chunkSize / 2,
+          0,
+          z * this.chunkSize + this.chunkSize / 2
+        )
+        ground.receiveShadow = true
+        group.add(ground)
+        
+        // Grid
+        const grid = new THREE.GridHelper(this.chunkSize, 10, 0x000000, 0x000000)
+        grid.position.copy(ground.position)
+        grid.material.opacity = 0.2
+        grid.material.transparent = true
+        group.add(grid)
+        
+        return group
+      }
+      
+      getLoadedCount() {
+        return this.chunks.size
+      }
+    }
+    
+    // Simple LOD system
+    class SimpleLODObject {
+      constructor(scene, position) {
+        this.lod = new THREE.LOD()
+        
+        // High detail
+        const highGeo = new THREE.SphereGeometry(2, 16, 12)
+        const highMat = new THREE.MeshStandardMaterial({ color: 0xff0000 })
+        const highMesh = new THREE.Mesh(highGeo, highMat)
+        this.lod.addLevel(highMesh, 0)
+        
+        // Medium detail
+        const medGeo = new THREE.SphereGeometry(2, 8, 6)
+        const medMat = new THREE.MeshStandardMaterial({ color: 0xff6600 })
+        const medMesh = new THREE.Mesh(medGeo, medMat)
+        this.lod.addLevel(medMesh, 100)
+        
+        // Low detail
+        const lowGeo = new THREE.BoxGeometry(3, 3, 3)
+        const lowMat = new THREE.MeshStandardMaterial({ color: 0xffaa00 })
+        const lowMesh = new THREE.Mesh(lowGeo, lowMat)
+        this.lod.addLevel(lowMesh, 300)
+        
+        this.lod.position.copy(position)
+        scene.add(this.lod)
+      }
+      
+      update(camera) {
+        this.lod.update(camera)
+      }
+      
+      dispose(scene) {
+        scene.remove(this.lod)
+      }
+    }
+    
+    // Initialize systems
+    const chunkManager = new SimpleChunkManager(scene)
+    const objects = []
+    let lodEnabled = true
+    let flyingCamera = false
+    
+    // Global functions
+    window.spawnObjects = function(count) {
+      for (let i = 0; i < count; i++) {
+        const position = new THREE.Vector3(
+          (Math.random() - 0.5) * 2000,
+          Math.random() * 50 + 10,
+          (Math.random() - 0.5) * 2000
+        )
+        const obj = new SimpleLODObject(scene, position)
+        objects.push(obj)
+      }
+    }
+    
+    window.clearObjects = function() {
+      objects.forEach(obj => obj.dispose(scene))
+      objects.length = 0
+    }
+    
+    window.toggleChunks = function() {
+      chunkManager.enabled = !chunkManager.enabled
+      if (!chunkManager.enabled) {
+        // Clear all chunks
+        for (const chunk of chunkManager.chunks.values()) {
+          scene.remove(chunk)
+        }
+        chunkManager.chunks.clear()
+      }
+    }
+    
+    window.toggleLOD = function() {
+      lodEnabled = !lodEnabled
+    }
+    
+    window.moveCamera = function() {
+      flyingCamera = !flyingCamera
+    }
+    
+    // Stats
+    const stats = {
+      fps: document.getElementById('fps'),
+      chunks: document.getElementById('chunks'),
+      objects: document.getElementById('objects'),
+      drawCalls: document.getElementById('drawCalls'),
+      cameraPos: document.getElementById('cameraPos')
+    }
+    
+    // Animation loop
+    const clock = new THREE.Clock()
+    let time = 0
+    
+    function animate() {
+      requestAnimationFrame(animate)
+      
+      const delta = clock.getDelta()
+      time += delta
+      
+      // Update camera position for flying
+      if (flyingCamera) {
+        camera.position.x = Math.sin(time * 0.1) * 500
+        camera.position.z = Math.cos(time * 0.1) * 500
+        camera.position.y = 100 + Math.sin(time * 0.2) * 50
+        camera.lookAt(0, 0, 0)
+      }
+      
+      // Update systems
+      chunkManager.update(camera.position)
+      
+      if (lodEnabled) {
+        objects.forEach(obj => obj.update(camera))
+      }
+      
+      // Update stats
+      stats.fps.textContent = Math.round(1 / delta)
+      stats.chunks.textContent = chunkManager.getLoadedCount()
+      stats.objects.textContent = objects.length
+      stats.drawCalls.textContent = renderer.info.render.calls
+      stats.cameraPos.textContent = `${Math.round(camera.position.x)}, ${Math.round(camera.position.y)}, ${Math.round(camera.position.z)}`
+      
+      controls.update()
+      renderer.render(scene, camera)
+    }
+    
+    animate()
+    
+    // Handle resize
+    window.addEventListener('resize', () => {
+      camera.aspect = window.innerWidth / window.innerHeight
+      camera.updateProjectionMatrix()
+      renderer.setSize(window.innerWidth, window.innerHeight)
+    })
+  </script>
+</body>
+</html>
