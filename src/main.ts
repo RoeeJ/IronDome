@@ -18,7 +18,6 @@ import { debug } from './utils/DebugLogger'
 import { MobileInputManager } from './input/MobileInputManager'
 import { DeviceCapabilities } from './utils/DeviceCapabilities'
 import { ResponsiveUI } from './ui/ResponsiveUI'
-import { PerformanceOptimizer } from './core/PerformanceOptimizer'
 
 // Initialize device capabilities
 const deviceCaps = DeviceCapabilities.getInstance()
@@ -160,66 +159,10 @@ world.addBody(groundBody)
 // Threat Manager
 const threatManager = new ThreatManager(scene, world)
 
-// Hook optimized renderer into threat manager
-const originalThreatUpdate = threatManager.update.bind(threatManager)
-threatManager.update = function() {
-  // Call original update
-  originalThreatUpdate()
-  
-  // If instanced threats are enabled, sync with optimizer
-  if (performanceOptimizer.getSettings().enableInstancedThreats) {
-    const threats = this.getActiveThreats()
-    const optimizedRenderer = performanceOptimizer.getThreatRenderer()
-    
-    // Add new threats to optimized renderer
-    threats.forEach(threat => {
-      const threatId = `threat_${threat.id}`
-      if (!optimizedRenderer['threatInstances'].has(threatId)) {
-        optimizedRenderer.addThreat(threatId, threat.type, threat.getPosition())
-        // Hide original mesh
-        threat.mesh.visible = false
-      } else {
-        // Update position
-        optimizedRenderer.updateThreat(threatId, threat.getPosition())
-      }
-    })
-    
-    // Remove old threats from optimized renderer
-    const activeIds = new Set(threats.map(t => `threat_${t.id}`))
-    Array.from(optimizedRenderer['threatInstances'].keys()).forEach(id => {
-      if (!activeIds.has(id)) {
-        optimizedRenderer.removeThreat(id)
-      }
-    })
-  } else {
-    // Show original meshes if optimization is disabled
-    this.getActiveThreats().forEach(threat => {
-      threat.mesh.visible = true
-    })
-  }
-}
 
 // Static Radar Network (4 corners) with large coverage for high altitude
 const radarNetwork = new StaticRadarNetwork(scene, 300)  // 300m radius for high altitude coverage
 
-// Initialize Performance Optimizer
-const performanceOptimizer = new PerformanceOptimizer(scene, camera, renderer)
-
-// Enable all optimizations by default for testing
-performanceOptimizer.setSettings({
-  enableInstancedThreats: true,
-  enableInstancedProjectiles: true,
-  enableSpatialIndex: true,
-  enableLOD: true,
-  shadowsEnabled: true,
-  maxRenderDistance: 1000,
-  particleQuality: 'high'
-})
-
-// Enable auto-adjustment
-performanceOptimizer.setAutoAdjust(true)
-
-debug.log('All performance optimizations enabled for testing')
 
 // Debug: Log all objects in scene
 debug.category('Scene', 'Scene children count:', scene.children.length)
@@ -397,67 +340,6 @@ if (debug.isEnabled()) {
   debugFolder.add({ debugUrl: '💡 Add ?debug to URL for debug logs' }, 'debugUrl').disable()
 }
 
-// Performance Optimization Controls
-const optimizationFolder = gui.addFolder('Performance Optimization')
-const optimizationControls = {
-  preset: 'custom',
-  autoAdjust: true,
-  showStats: true, // Show stats by default
-  instancedThreats: true, // Enabled by default
-  instancedProjectiles: true, // Enabled by default
-  spatialIndex: true, // Enabled by default
-  enableLOD: true // Enabled by default
-}
-optimizationFolder.open() // Open folder by default
-
-optimizationFolder.add(optimizationControls, 'preset', ['low', 'medium', 'high', 'ultra'])
-  .name('Quality Preset')
-  .onChange((value: string) => {
-    performanceOptimizer.applyPreset(value as any)
-    updateOptimizationControls()
-  })
-
-optimizationFolder.add(optimizationControls, 'autoAdjust')
-  .name('Auto Adjust Quality')
-  .onChange((value: boolean) => {
-    performanceOptimizer.setAutoAdjust(value)
-  })
-
-optimizationFolder.add(optimizationControls, 'instancedThreats')
-  .name('Instanced Threats')
-  .onChange((value: boolean) => {
-    performanceOptimizer.setSettings({ enableInstancedThreats: value })
-  })
-
-optimizationFolder.add(optimizationControls, 'instancedProjectiles')
-  .name('Instanced Projectiles')
-  .onChange((value: boolean) => {
-    performanceOptimizer.setSettings({ enableInstancedProjectiles: value })
-  })
-
-optimizationFolder.add(optimizationControls, 'spatialIndex')
-  .name('Spatial Index')
-  .onChange((value: boolean) => {
-    performanceOptimizer.setSettings({ enableSpatialIndex: value })
-  })
-
-optimizationFolder.add(optimizationControls, 'enableLOD')
-  .name('Level of Detail')
-  .onChange((value: boolean) => {
-    performanceOptimizer.setSettings({ enableLOD: value })
-  })
-
-optimizationFolder.add(optimizationControls, 'showStats')
-  .name('Show Stats')
-
-// Helper to update controls from current settings
-function updateOptimizationControls() {
-  const settings = performanceOptimizer.getSettings()
-  optimizationControls.instancedThreats = settings.enableInstancedThreats
-  optimizationControls.instancedProjectiles = settings.enableInstancedProjectiles
-  optimizationControls.spatialIndex = settings.enableSpatialIndex
-  optimizationControls.enableLOD = settings.enableLOD
-}
 
 const simulationFolder = gui.addFolder('Simulation')
 
@@ -718,8 +600,6 @@ function animate() {
   const perfStats = performanceMonitor.getStats()
   profiler.endSection('Performance Monitor')
   
-  // Update performance optimizer
-  performanceOptimizer.update(deltaTime)
   
   // Adjust quality based on performance
   if (perfStats.isCritical) {
@@ -789,60 +669,6 @@ function animate() {
     profiler.endSection('Interception System')
   }
   
-  // Sync interceptors with optimized renderer
-  if (performanceOptimizer.getSettings().enableInstancedProjectiles) {
-    const optimizedProjectileRenderer = performanceOptimizer.getProjectileRenderer()
-    const allProjectiles = [...projectiles, ...systemInterceptors]
-    
-    // Add/update projectiles in optimized renderer
-    allProjectiles.forEach(projectile => {
-      const projectileId = `projectile_${projectile.id}`
-      if (!optimizedProjectileRenderer['projectileInstances'].has(projectileId)) {
-        optimizedProjectileRenderer.addProjectile(
-          projectileId, 
-          'interceptor',
-          new THREE.Vector3(
-            projectile.body.position.x,
-            projectile.body.position.y,
-            projectile.body.position.z
-          ),
-          true // with trail
-        )
-        // Hide original mesh and trail
-        if (projectile.mesh) projectile.mesh.visible = false
-        if (projectile.trail) projectile.trail.visible = false
-      } else {
-        // Update position and velocity
-        optimizedProjectileRenderer.updateProjectile(
-          projectileId,
-          new THREE.Vector3(
-            projectile.body.position.x,
-            projectile.body.position.y,
-            projectile.body.position.z
-          ),
-          new THREE.Vector3(
-            projectile.body.velocity.x,
-            projectile.body.velocity.y,
-            projectile.body.velocity.z
-          )
-        )
-      }
-    })
-    
-    // Remove old projectiles from optimized renderer
-    const activeProjectileIds = new Set(allProjectiles.map(p => `projectile_${p.id}`))
-    Array.from(optimizedProjectileRenderer['projectileInstances'].keys()).forEach(id => {
-      if (!activeProjectileIds.has(id)) {
-        optimizedProjectileRenderer.removeProjectile(id)
-      }
-    })
-  } else {
-    // Show original meshes if optimization is disabled
-    [...projectiles, ...systemInterceptors].forEach(projectile => {
-      if (projectile.mesh) projectile.mesh.visible = true
-      if (projectile.trail) projectile.trail.visible = true
-    })
-  }
 
   // Update GUI at 30 Hz (33ms) for smooth tactical display
   if (currentTime - previousTime > 0.033) {
@@ -883,14 +709,6 @@ function animate() {
     profiler.endSection('GUI Update')
     previousTime = currentTime
     
-    // Show optimization stats if enabled
-    if (optimizationControls.showStats) {
-      const optStats = performanceOptimizer.getStats()
-      displayOptimizationStats(optStats)
-    } else if (optStatsDiv) {
-      // Hide stats if disabled
-      optStatsDiv.style.display = 'none'
-    }
   }
 
   // Update controls
@@ -976,34 +794,5 @@ if (debug.isEnabled()) {
   document.body.appendChild(debugIndicator)
 }
 
-// Optimization stats display
-let optStatsDiv: HTMLDivElement | null = null
-
-function displayOptimizationStats(stats: any) {
-  if (!optStatsDiv) {
-    optStatsDiv = document.createElement('div')
-    optStatsDiv.style.position = 'absolute'
-    optStatsDiv.style.top = '100px'
-    optStatsDiv.style.right = '10px'
-    optStatsDiv.style.padding = '10px'
-    optStatsDiv.style.backgroundColor = 'rgba(0, 0, 0, 0.8)'
-    optStatsDiv.style.color = '#00ff00'
-    optStatsDiv.style.fontFamily = 'monospace'
-    optStatsDiv.style.fontSize = '12px'
-    optStatsDiv.style.borderRadius = '5px'
-    optStatsDiv.style.border = '1px solid #00ff00'
-    document.body.appendChild(optStatsDiv)
-  }
-  
-  optStatsDiv.style.display = 'block'
-  optStatsDiv.innerHTML = `
-    <div style="font-weight: bold; margin-bottom: 5px;">OPTIMIZATION STATS</div>
-    <div>FPS: ${stats.fps}</div>
-    <div>Active: ${stats.optimizationsActive.join(', ') || 'None'}</div>
-    <div>Instanced Threats: ${stats.instancedThreats}</div>
-    <div>Instanced Projectiles: ${stats.instancedProjectiles}</div>
-    <div>Spatial Objects: ${stats.spatialObjects}</div>
-  `
-}
 
 animate()
