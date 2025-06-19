@@ -3,6 +3,7 @@ import { GameState } from '../game/GameState'
 import { WaveManager } from '../game/WaveManager'
 import { ResourceManager } from '../game/ResourceManager'
 import { DomePlacementSystem } from '../game/DomePlacementSystem'
+import { DeviceCapabilities } from '../utils/DeviceCapabilities'
 
 interface GameUIProps {
   waveManager: WaveManager
@@ -41,6 +42,7 @@ export const GameUI: React.FC<GameUIProps> = ({ waveManager, placementSystem, on
   
   const gameState = GameState.getInstance()
   const resourceManager = ResourceManager.getInstance()
+  const deviceInfo = DeviceCapabilities.getInstance().getDeviceInfo()
   
   useEffect(() => {
     // Initial state
@@ -250,7 +252,14 @@ export const GameUI: React.FC<GameUIProps> = ({ waveManager, placementSystem, on
     updateResourceDisplay()
   }
   
+  const vibrate = (pattern: number | number[]) => {
+    if ('vibrate' in navigator) {
+      navigator.vibrate(pattern)
+    }
+  }
+  
   const handlePlaceDome = () => {
+    vibrate(20)
     if (placementSystem.isInPlacementMode()) {
       placementSystem.exitPlacementMode()
       setPlacementMode(false)
@@ -262,13 +271,19 @@ export const GameUI: React.FC<GameUIProps> = ({ waveManager, placementSystem, on
   
   const handlePurchaseInterceptors = () => {
     if (resourceManager.purchaseInterceptorRestock()) {
+      vibrate(30)
       showNotification('Purchased 50 interceptors!')
+    } else {
+      vibrate([10, 10, 10]) // Error pattern
     }
   }
   
   const handleEmergencySupply = () => {
     if (resourceManager.purchaseEmergencySupply()) {
+      vibrate([50, 50, 50]) // Success pattern
       showNotification('Emergency supply delivered!')
+    } else {
+      vibrate([10, 10, 10]) // Error pattern
     }
   }
   
@@ -428,6 +443,8 @@ export const GameUI: React.FC<GameUIProps> = ({ waveManager, placementSystem, on
           cursor: pointer;
           transition: all 0.3s;
           font-size: 14px;
+          -webkit-tap-highlight-color: transparent;
+          touch-action: manipulation;
         }
         
         .mode-button.active {
@@ -437,6 +454,10 @@ export const GameUI: React.FC<GameUIProps> = ({ waveManager, placementSystem, on
         
         .mode-button:hover:not(.active) {
           background: rgba(0, 56, 184, 0.5);
+        }
+        
+        .mode-button:active {
+          transform: scale(0.98);
         }
         
         .control-button {
@@ -449,11 +470,18 @@ export const GameUI: React.FC<GameUIProps> = ({ waveManager, placementSystem, on
           font-weight: bold;
           cursor: pointer;
           transition: all 0.3s;
+          -webkit-tap-highlight-color: transparent;
+          touch-action: manipulation;
         }
         
         .control-button:hover {
           background: rgba(0, 86, 214, 0.9);
           box-shadow: 0 0 10px rgba(0, 56, 184, 0.5);
+        }
+        
+        .control-button:active {
+          transform: scale(0.98);
+          background: #0045b0;
         }
         
         .control-button:disabled {
@@ -466,45 +494,102 @@ export const GameUI: React.FC<GameUIProps> = ({ waveManager, placementSystem, on
         /* Mobile responsive */
         @media (max-width: 768px) {
           .bottom-controls {
-            padding: 10px 15px;
-            gap: 10px;
-            bottom: 10px;
+            padding: 12px 20px;
+            gap: 12px;
+            bottom: 15px;
           }
           
           .mode-button {
-            padding: 8px 15px;
-            font-size: 12px;
+            padding: 12px 20px;
+            font-size: 14px;
+            min-height: 44px; /* iOS touch target size */
           }
           
           .control-button {
-            padding: 8px 15px;
-            font-size: 12px;
+            padding: 12px 20px;
+            font-size: 14px;
+            min-height: 44px;
           }
           
           .action-buttons {
-            bottom: 80px; /* Move up on mobile */
+            bottom: 90px; /* Move up on mobile */
+            right: 15px;
+            gap: 12px;
+          }
+          
+          .game-button {
+            padding: 14px 24px;
+            font-size: 16px;
+            min-height: 48px;
+            min-width: 160px;
           }
           
           .top-bar {
             display: flex;
             flex-direction: column;
             gap: 10px;
+            padding: 15px;
           }
           
           .resource-panel {
             order: 2;
             justify-self: center;
+            gap: 20px;
+          }
+          
+          .resource-icon {
+            font-size: 20px;
+          }
+          
+          .resource-value {
+            font-size: 18px;
           }
           
           .wave-panel {
             order: 1;
             width: 100%;
+            padding: 12px 16px;
+          }
+          
+          .wave-number {
+            font-size: 22px;
           }
           
           .score-panel {
             order: 3;
             justify-self: center;
             text-align: center;
+          }
+          
+          .score-value {
+            font-size: 20px;
+          }
+          
+          /* Touch-friendly modal */
+          .shop-modal {
+            min-width: 90vw;
+            max-width: 400px;
+            padding: 25px;
+            max-height: 90vh;
+            overflow-y: auto;
+          }
+          
+          .shop-item {
+            padding: 18px;
+            margin-bottom: 12px;
+          }
+          
+          .shop-close {
+            font-size: 28px;
+            padding: 10px;
+            min-width: 44px;
+            min-height: 44px;
+          }
+          
+          /* Touch-friendly notification */
+          .game-notification {
+            font-size: 18px;
+            padding: 16px 28px;
           }
         }
         
@@ -519,12 +604,19 @@ export const GameUI: React.FC<GameUIProps> = ({ waveManager, placementSystem, on
           cursor: pointer;
           transition: all 0.3s;
           min-width: 200px;
+          -webkit-tap-highlight-color: transparent;
+          touch-action: manipulation;
         }
         
         .game-button:hover {
           background: #0056d6;
           border-color: #0056d6;
           box-shadow: 0 0 15px rgba(0, 56, 184, 0.5);
+        }
+        
+        .game-button:active {
+          transform: scale(0.98);
+          background: #0045b0;
         }
         
         .game-button:disabled {
@@ -740,6 +832,30 @@ export const GameUI: React.FC<GameUIProps> = ({ waveManager, placementSystem, on
           80% { opacity: 1; transform: translate(-50%, -50%) scale(1); }
           100% { opacity: 0; transform: translate(-50%, -50%) scale(0.8); }
         }
+        
+        .placement-mode-indicator {
+          position: fixed;
+          top: 50%;
+          left: 50%;
+          transform: translate(-50%, -50%);
+          background: rgba(0, 56, 184, 0.9);
+          border: 3px solid #0038b8;
+          border-radius: 10px;
+          padding: 20px 40px;
+          color: white;
+          font-size: 20px;
+          font-weight: bold;
+          pointer-events: none;
+          z-index: 200;
+          animation: pulse 2s infinite;
+        }
+        
+        @media (max-width: 768px) {
+          .placement-mode-indicator {
+            font-size: 18px;
+            padding: 16px 32px;
+          }
+        }
         .floating-wave-indicator {
           position: fixed;
           top: 60px;
@@ -854,13 +970,19 @@ export const GameUI: React.FC<GameUIProps> = ({ waveManager, placementSystem, on
         <div className="mode-switch">
           <button 
             className={`mode-button ${isGameMode ? 'active' : ''}`}
-            onClick={() => onModeChange?.(true)}
+            onClick={() => {
+              vibrate(15)
+              onModeChange?.(true)
+            }}
           >
             GAME
           </button>
           <button 
             className={`mode-button ${!isGameMode ? 'active' : ''}`}
-            onClick={() => onModeChange?.(false)}
+            onClick={() => {
+              vibrate(15)
+              onModeChange?.(false)
+            }}
           >
             SANDBOX
           </button>
@@ -870,7 +992,10 @@ export const GameUI: React.FC<GameUIProps> = ({ waveManager, placementSystem, on
           <>
             <button 
               className="control-button"
-              onClick={startNewGame}
+              onClick={() => {
+                vibrate(20)
+                startNewGame()
+              }}
             >
               New Game
             </button>
@@ -879,6 +1004,7 @@ export const GameUI: React.FC<GameUIProps> = ({ waveManager, placementSystem, on
               <button 
                 className="control-button"
                 onClick={() => {
+                  vibrate(15)
                   waveManager.skipPreparation()
                   showNotification('Skipping to next wave!')
                 }}
@@ -921,9 +1047,12 @@ export const GameUI: React.FC<GameUIProps> = ({ waveManager, placementSystem, on
         )}
       </div>
       
-      {/* Removed floating wave indicator - now integrated into wave panel */}
-      
-      {/* Removed floating preparation timer - now integrated into wave panel */}
+      {/* Placement Mode Indicator for Mobile */}
+      {placementMode && deviceInfo?.hasTouch && (
+        <div className="placement-mode-indicator">
+          Tap to place dome
+        </div>
+      )}
       
       {/* Game Over Screen */}
       {gameOver && (
@@ -973,7 +1102,10 @@ export const GameUI: React.FC<GameUIProps> = ({ waveManager, placementSystem, on
       
       {showShop && (
         <div className="shop-modal">
-          <button className="shop-close" onClick={() => setShowShop(false)}>✕</button>
+          <button className="shop-close" onClick={() => {
+            vibrate(10)
+            setShowShop(false)
+          }}>✕</button>
           <h2 className="shop-title">Supply Shop</h2>
           
           <div className="shop-item">
@@ -999,8 +1131,11 @@ export const GameUI: React.FC<GameUIProps> = ({ waveManager, placementSystem, on
               className="game-button"
               onClick={() => {
                 if (resourceManager.purchaseNewDome()) {
+                  vibrate(30)
                   showNotification('New dome slot unlocked!')
                   updateResourceDisplay()
+                } else {
+                  vibrate([10, 10, 10]) // Error pattern
                 }
               }}
               disabled={credits < costs.domeUnlock}

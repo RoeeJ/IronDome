@@ -301,6 +301,7 @@ renderer.domElement.addEventListener('click', (event) => {
   }
 })
 
+// Mouse move for desktop
 renderer.domElement.addEventListener('mousemove', (event) => {
   if (domePlacementSystem.isInPlacementMode()) {
     const mouse = new THREE.Vector2(
@@ -318,17 +319,48 @@ renderer.domElement.addEventListener('mousemove', (event) => {
   }
 })
 
+// Touch move for mobile dome placement preview
+renderer.domElement.addEventListener('touchmove', (event) => {
+  if (domePlacementSystem.isInPlacementMode() && event.touches.length === 1) {
+    event.preventDefault()
+    const touch = event.touches[0]
+    const mouse = new THREE.Vector2(
+      (touch.clientX / window.innerWidth) * 2 - 1,
+      -(touch.clientY / window.innerHeight) * 2 + 1
+    )
+    
+    const raycaster = new THREE.Raycaster()
+    raycaster.setFromCamera(mouse, camera)
+    
+    const intersects = raycaster.intersectObject(groundMesh)
+    if (intersects.length > 0) {
+      domePlacementSystem.updatePlacementPreview(intersects[0].point)
+    }
+  }
+}, { passive: false })
+
 // Initialize mobile input if on touch device
 let mobileInput: MobileInputManager | null = null
 if (deviceInfo.hasTouch) {
   mobileInput = new MobileInputManager(camera, controls, renderer.domElement)
   
-  // Set up tap to launch interceptor
+  // Set up tap for dome placement or interceptor launch
   mobileInput.onTap((position) => {
     const raycaster = new THREE.Raycaster()
     raycaster.setFromCamera(position, camera)
     
-    // First check if user tapped directly on a threat
+    // Check if in dome placement mode first
+    if (domePlacementSystem.isInPlacementMode()) {
+      const groundIntersects = raycaster.intersectObject(groundMesh)
+      if (groundIntersects.length > 0) {
+        domePlacementSystem.attemptPlacement(groundIntersects[0].point)
+        // Haptic feedback for placement
+        if (mobileInput) mobileInput.vibrate(30)
+      }
+      return
+    }
+    
+    // Otherwise check for threats to intercept
     const threats = threatManager.getActiveThreats()
     let targetThreat: any = null
     
@@ -660,7 +692,7 @@ let frameCount = 0
 let renderBottleneckLogged = false
 
 function animate() {
-  requestAnimationFrame(animate)
+  animationId = requestAnimationFrame(animate)
   
   // Store camera reference for LOD optimizations and health bar orientation
   ;(scene as any).__camera = camera
@@ -897,8 +929,59 @@ if (debug.isEnabled()) {
 }
 
 
-// Start the animation loop and hide loading screen as final fallback
-animate()
+// Orientation handling for mobile
+let animationId: number | null = null
+let isOrientationLocked = false
+
+function checkOrientation() {
+  const orientationOverlay = document.getElementById('orientation-overlay')
+  if (!orientationOverlay) return false
+  
+  // Only check on small mobile devices
+  const isSmallMobile = window.innerWidth <= 768 && deviceInfo.isMobile
+  const isPortrait = window.innerHeight > window.innerWidth
+  
+  const shouldLock = isSmallMobile && isPortrait
+  
+  if (shouldLock && !isOrientationLocked) {
+    // Lock orientation - pause game
+    isOrientationLocked = true
+    orientationOverlay.classList.add('active')
+    if (animationId) {
+      cancelAnimationFrame(animationId)
+      animationId = null
+    }
+    // Pause game systems
+    simulationControls.pause = true
+    if (waveManager) waveManager.pauseWave()
+    debug.log('Orientation locked - game paused')
+  } else if (!shouldLock && isOrientationLocked) {
+    // Unlock orientation - resume game
+    isOrientationLocked = false
+    orientationOverlay.classList.remove('active')
+    if (!animationId) {
+      animate() // Restart animation loop
+    }
+    // Resume game systems
+    simulationControls.pause = false
+    if (waveManager && simulationControls.gameMode) waveManager.resumeWave()
+    debug.log('Orientation unlocked - game resumed')
+  }
+  
+  return shouldLock
+}
+
+// Check orientation on load and resize
+window.addEventListener('resize', checkOrientation)
+window.addEventListener('orientationchange', checkOrientation)
+
+// Initial orientation check
+const isLocked = checkOrientation()
+
+// Start the animation loop only if not orientation locked
+if (!isLocked) {
+  animate()
+}
 
 // Final fallback after animation starts
 setTimeout(hideLoadingScreen, 100)
