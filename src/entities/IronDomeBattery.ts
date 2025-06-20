@@ -1,6 +1,7 @@
 import * as THREE from 'three'
 import * as CANNON from 'cannon-es'
 import { OBJLoader } from 'three/examples/jsm/loaders/OBJLoader.js'
+import * as BufferGeometryUtils from 'three/examples/jsm/utils/BufferGeometryUtils.js'
 import { Projectile } from './Projectile'
 import { Threat, THREAT_CONFIGS } from './Threat'
 import { TrajectoryCalculator } from '../utils/TrajectoryCalculator'
@@ -22,6 +23,7 @@ export interface BatteryConfig {
   firingDelay: number  // ms between shots when firing multiple interceptors
   interceptorLimit?: number  // Max interceptors allowed (for mobile performance)
   maxHealth?: number  // Maximum health points
+  useInstancedRendering?: boolean  // Use instanced rendering (no individual meshes)
 }
 
 interface LauncherTube {
@@ -51,6 +53,7 @@ export class IronDomeBattery extends EventEmitter {
   private maxHealth: number = 100
   private healthBar?: THREE.Group
   private isDestroyed: boolean = false
+  private useInstancedRendering: boolean = false
 
   constructor(scene: THREE.Scene, world: CANNON.World, config: Partial<BatteryConfig> = {}) {
     super()
@@ -70,11 +73,13 @@ export class IronDomeBattery extends EventEmitter {
       aggressiveness: 1.3,  // Default to firing 1-2 interceptors per threat (reduced from 1.5)
       firingDelay: 800,  // 800ms between launches for staggered impacts (increased from 150ms)
       maxHealth: 100,  // Default 100 HP
+      useInstancedRendering: false,  // Default to false
       ...config
     }
     
     this.maxHealth = this.config.maxHealth || 100
     this.currentHealth = this.maxHealth
+    this.useInstancedRendering = this.config.useInstancedRendering || false
     
     this.group = new THREE.Group()
     this.group.position.copy(this.config.position)
@@ -104,6 +109,22 @@ export class IronDomeBattery extends EventEmitter {
   }
 
   private createBase(): void {
+    // If using instanced rendering, create invisible hitbox for raycasting
+    if (this.useInstancedRendering) {
+      const hitboxGeometry = new THREE.BoxGeometry(22.5, 22.5, 22.5)
+      const hitboxMaterial = new THREE.MeshBasicMaterial({
+        visible: false,
+        transparent: true,
+        opacity: 0
+      })
+      const hitbox = new THREE.Mesh(hitboxGeometry, hitboxMaterial)
+      hitbox.position.y = 6
+      hitbox.userData.isHitbox = true
+      hitbox.userData.battery = this  // Store reference to battery
+      this.group.add(hitbox)
+      return
+    }
+    
     // Base platform
     const baseGeometry = new THREE.BoxGeometry(6, 1, 6)
     const baseMaterial = new THREE.MeshStandardMaterial({
@@ -140,48 +161,62 @@ export class IronDomeBattery extends EventEmitter {
   private createLauncher(): THREE.Group {
     const launcherGroup = new THREE.Group()
     
-    // Launcher tubes
-    const tubeGeometry = new THREE.CylinderGeometry(0.2, 0.2, 3)
-    const tubeMaterial = new THREE.MeshStandardMaterial({
-      color: 0x666666,
-      roughness: 0.5,
-      metalness: 0.7
-    })
-    
-    // Create launch tubes in a circular pattern
-    for (let i = 0; i < this.config.launcherCount; i++) {
-      const angle = (i / this.config.launcherCount) * Math.PI * 2
-      const tube = new THREE.Mesh(tubeGeometry, tubeMaterial)
-      tube.position.x = Math.cos(angle) * 0.8
-      tube.position.z = Math.sin(angle) * 0.8
-      tube.position.y = 0
-      tube.rotation.z = Math.PI / 8  // Slightly angled outward
-      tube.castShadow = true
-      launcherGroup.add(tube)
+    // If using instanced rendering, create minimal launcher data without meshes
+    if (this.useInstancedRendering) {
+      // Create launcher tube data without visual meshes
+      for (let i = 0; i < this.config.launcherCount; i++) {
+        const launcherTube: LauncherTube = {
+          index: i,
+          mesh: new THREE.Mesh(), // Dummy mesh for compatibility
+          isLoaded: true,
+          lastFiredTime: 0
+        }
+        this.launcherTubes.push(launcherTube)
+      }
+    } else {
+      // Create full visual meshes for non-instanced rendering
+      const tubeGeometry = new THREE.CylinderGeometry(0.2, 0.2, 3)
+      const tubeMaterial = new THREE.MeshStandardMaterial({
+        color: 0x666666,
+        roughness: 0.5,
+        metalness: 0.7
+      })
       
-      // Create launcher tube data
-      const launcherTube: LauncherTube = {
-        index: i,
-        mesh: tube,
-        isLoaded: true,
-        lastFiredTime: 0
+      // Create launch tubes in a circular pattern
+      for (let i = 0; i < this.config.launcherCount; i++) {
+        const angle = (i / this.config.launcherCount) * Math.PI * 2
+        const tube = new THREE.Mesh(tubeGeometry, tubeMaterial)
+        tube.position.x = Math.cos(angle) * 0.8
+        tube.position.z = Math.sin(angle) * 0.8
+        tube.position.y = 0
+        tube.rotation.z = Math.PI / 8  // Slightly angled outward
+        tube.castShadow = true
+        launcherGroup.add(tube)
+        
+        // Create launcher tube data
+        const launcherTube: LauncherTube = {
+          index: i,
+          mesh: tube,
+          isLoaded: true,
+          lastFiredTime: 0
+        }
+        
+        // Add visual missile in tube
+        this.createMissileInTube(launcherTube, launcherGroup)
+        this.launcherTubes.push(launcherTube)
       }
       
-      // Add visual missile in tube
-      this.createMissileInTube(launcherTube, launcherGroup)
-      this.launcherTubes.push(launcherTube)
+      // Central mounting
+      const mountGeometry = new THREE.CylinderGeometry(1.2, 1.5, 1)
+      const mountMaterial = new THREE.MeshStandardMaterial({
+        color: 0x555555,
+        roughness: 0.6,
+        metalness: 0.5
+      })
+      const mount = new THREE.Mesh(mountGeometry, mountMaterial)
+      mount.castShadow = true
+      launcherGroup.add(mount)
     }
-    
-    // Central mounting
-    const mountGeometry = new THREE.CylinderGeometry(1.2, 1.5, 1)
-    const mountMaterial = new THREE.MeshStandardMaterial({
-      color: 0x555555,
-      roughness: 0.6,
-      metalness: 0.5
-    })
-    const mount = new THREE.Mesh(mountGeometry, mountMaterial)
-    mount.castShadow = true
-    launcherGroup.add(mount)
     
     launcherGroup.position.y = 2.5
     this.group.add(launcherGroup)
@@ -190,7 +225,7 @@ export class IronDomeBattery extends EventEmitter {
   }
 
   private createMissileInTube(tube: LauncherTube, parent: THREE.Group): void {
-    if (!tube.isLoaded) return
+    if (!tube.isLoaded || this.useInstancedRendering) return
     
     const missileGeometry = new THREE.ConeGeometry(0.15, 2, 8)
     const missileMaterial = new THREE.MeshStandardMaterial({
@@ -211,6 +246,11 @@ export class IronDomeBattery extends EventEmitter {
   }
 
   private createRadarDome(): THREE.Mesh {
+    // Skip creating radar dome meshes if using instanced rendering
+    if (this.useInstancedRendering) {
+      return new THREE.Mesh() // Return dummy mesh for compatibility
+    }
+    
     // Radar dome
     const domeGeometry = new THREE.SphereGeometry(1, 16, 8, 0, Math.PI * 2, 0, Math.PI / 2)
     const domeMaterial = new THREE.MeshStandardMaterial({
@@ -873,8 +913,39 @@ export class IronDomeBattery extends EventEmitter {
   setLaunchDirection(direction: THREE.Vector3): void {
     this.launchDirection = direction.clone().normalize()
   }
+  
+  // Enable instanced rendering mode (must be called before constructor finishes)
+  setInstancedRendering(enabled: boolean): void {
+    this.useInstancedRendering = enabled
+  }
+  
+  // Hide visual meshes when using instanced rendering
+  setVisualVisibility(visible: boolean): void {
+    this.group.traverse((child) => {
+      if (child instanceof THREE.Mesh) {
+        child.visible = visible
+      }
+    })
+    
+    // Also hide launcher tubes and missiles if they exist
+    this.launcherTubes.forEach(tube => {
+      if (tube.mesh && tube.mesh.geometry) tube.mesh.visible = visible
+      if (tube.missile && tube.missile.geometry) tube.missile.visible = visible
+    })
+    
+    // Keep health bar visible if it exists
+    if (this.healthBar) {
+      this.healthBar.visible = visible && this.useResources
+    }
+  }
 
   private loadBatteryModel(): void {
+    // Skip loading OBJ model if using instanced rendering
+    if (this.useInstancedRendering) {
+      debug.log('Skipping OBJ model load for instanced rendering')
+      return
+    }
+    
     const loader = new OBJLoader()
     loader.load(
       '/assets/Battery.obj',
@@ -919,18 +990,8 @@ export class IronDomeBattery extends EventEmitter {
         object.position.set(-center.x, -minY, -center.z)  // Place on ground
         debug.asset('loading', 'battery-position', { position: object.position })
         
-        // Apply material to all meshes in the model
-        object.traverse((child) => {
-          if (child instanceof THREE.Mesh) {
-            child.material = new THREE.MeshStandardMaterial({
-              color: 0x4a4a4a,
-              roughness: 0.7,
-              metalness: 0.5
-            })
-            child.castShadow = true
-            child.receiveShadow = true
-          }
-        })
+        // Optimize the model by merging geometries
+        this.optimizeOBJModel(object)
         
         // Hide procedurally generated base components but keep launcher tubes
         this.group.children.forEach(child => {
@@ -959,6 +1020,65 @@ export class IronDomeBattery extends EventEmitter {
         debug.log('Using procedural model')
       }
     )
+  }
+  
+  private optimizeOBJModel(object: THREE.Object3D): void {
+    // Group geometries by material
+    const materialMap = new Map<THREE.Material, THREE.BufferGeometry[]>()
+    const meshesToRemove: THREE.Mesh[] = []
+    
+    // First pass: collect all geometries grouped by material
+    object.traverse((child) => {
+      if (child instanceof THREE.Mesh && child.geometry) {
+        const material = child.material as THREE.Material
+        const geo = child.geometry.clone()
+        
+        // Apply the child's world transform to the geometry
+        child.updateWorldMatrix(true, false)
+        geo.applyMatrix4(child.matrixWorld)
+        
+        if (!materialMap.has(material)) {
+          materialMap.set(material, [])
+        }
+        materialMap.get(material)!.push(geo)
+        meshesToRemove.push(child)
+      }
+    })
+    
+    debug.log(`Found ${materialMap.size} unique materials in OBJ model`)
+    
+    // Second pass: merge geometries by material
+    let totalMeshes = 0
+    materialMap.forEach((geometries, material) => {
+      if (geometries.length > 0) {
+        try {
+          // Merge all geometries with the same material
+          const mergedGeometry = BufferGeometryUtils.mergeGeometries(geometries)
+          
+          // Create a single mesh for this material
+          const mergedMesh = new THREE.Mesh(mergedGeometry, material.clone())
+          mergedMesh.castShadow = true
+          mergedMesh.receiveShadow = true
+          object.add(mergedMesh)
+          totalMeshes++
+          
+          debug.log(`Merged ${geometries.length} geometries into 1 mesh`)
+        } catch (error) {
+          debug.error('Failed to merge geometries:', error)
+        }
+        
+        // Clean up temporary geometries
+        geometries.forEach(g => g.dispose())
+      }
+    })
+    
+    // Remove original meshes
+    meshesToRemove.forEach(mesh => {
+      if (mesh.parent) mesh.parent.remove(mesh)
+      if (mesh.geometry) mesh.geometry.dispose()
+    })
+    
+    debug.log(`OBJ model optimized: ${meshesToRemove.length} meshes -> ${totalMeshes} meshes`)
   }
   
   update(deltaTime: number = 0, threats: Threat[] = []): void {

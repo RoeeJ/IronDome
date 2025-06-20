@@ -20,32 +20,83 @@ export const DomeContextMenu: React.FC<DomeContextMenuProps> = ({
   isGameMode
 }) => {
   const [batteryConfig, setBatteryConfig] = useState<any>(null)
+  const [batteryStats, setBatteryStats] = useState<any>(null)
   const [refreshKey, setRefreshKey] = useState(0)
+  
+  // Update placement info in real-time - MUST be before any conditional returns
+  const [placementInfo, setPlacementInfo] = useState<any>(() => {
+    const placements = placementSystem.getPlacementInfo()
+    const domePlacement = placementSystem.getDomePlacements().find(p => p.id === batteryId)
+    return { ...placements, level: domePlacement?.level || 1 }
+  })
   
   useEffect(() => {
     if (battery) {
-      const config = battery.getConfig()
-      setBatteryConfig(config)
+      // Initial update
+      setBatteryConfig(battery.getConfig())
+      setBatteryStats(battery.getStats())
+      
+      // Set up interval for real-time updates
+      const interval = setInterval(() => {
+        setBatteryStats(battery.getStats())
+        // Also update config in case it changed (e.g., from damage)
+        setBatteryConfig(battery.getConfig())
+      }, 100) // Update every 100ms for smooth real-time updates
+      
+      return () => clearInterval(interval)
     }
   }, [battery, refreshKey])
   
-  // Move useMemo before conditional return to maintain hook order
-  const batteryStats = React.useMemo(() => {
-    // Force re-computation when refreshKey changes
-    return battery ? battery.getStats() : null
-  }, [battery, refreshKey])
+  useEffect(() => {
+    const updatePlacementInfo = () => {
+      const placements = placementSystem.getPlacementInfo()
+      const domePlacement = placementSystem.getDomePlacements().find(p => p.id === batteryId)
+      setPlacementInfo({ ...placements, level: domePlacement?.level || 1 })
+    }
+    
+    // Update placement info with battery stats
+    const interval = setInterval(updatePlacementInfo, 100)
+    
+    // Also update on battery upgrade event
+    const handleBatteryUpgraded = () => {
+      updatePlacementInfo()
+      setRefreshKey(prev => prev + 1)
+    }
+    window.addEventListener('batteryUpgraded', handleBatteryUpgraded)
+    
+    return () => {
+      clearInterval(interval)
+      window.removeEventListener('batteryUpgraded', handleBatteryUpgraded)
+    }
+  }, [batteryId, placementSystem])
   
   if (!battery || !batteryId || !batteryConfig || !batteryStats) return null
   
-  const handleRemove = () => {
-    if (!isGameMode || window.confirm('Remove this battery? This action cannot be undone.')) {
-      const success = placementSystem.removeBattery(batteryId)
-      if (success) {
-        onClose()
-        // Force UI update by dispatching event
-        window.dispatchEvent(new Event('batteryRemoved'))
+  const handleSell = () => {
+    if (!isLastBattery) {
+      const sellValue = getSellValue()
+      const message = isGameMode 
+        ? `Sell this Level ${placementInfo.level} battery for ${sellValue} credits?`
+        : `Remove this Level ${placementInfo.level} battery?`
+      
+      if (window.confirm(message)) {
+        const success = placementSystem.sellBattery(batteryId)
+        if (success) {
+          onClose()
+          // Force UI update by dispatching event
+          window.dispatchEvent(new Event('batteryRemoved'))
+        }
       }
     }
+  }
+  
+  const getSellValue = () => {
+    // Return 60% of total investment
+    let totalCost = 0
+    for (let i = 1; i < placementInfo.level; i++) {
+      totalCost += (500 * i) // Cost formula from getDomeUpgradeCost
+    }
+    return Math.floor(totalCost * 0.6)
   }
   
   const handleUpgrade = () => {
@@ -63,13 +114,6 @@ export const DomeContextMenu: React.FC<DomeContextMenuProps> = ({
     }
   }
   
-  const getPlacementInfo = () => {
-    const placements = placementSystem.getPlacementInfo()
-    const domePlacement = placementSystem.getDomePlacements().find(p => p.id === batteryId)
-    return { ...placements, level: domePlacement?.level || 1 }
-  }
-  
-  const placementInfo = getPlacementInfo()
   const isLastBattery = placementInfo.placedDomes <= 1
   
   return (
@@ -321,38 +365,39 @@ export const DomeContextMenu: React.FC<DomeContextMenuProps> = ({
         </div>
         
         <div className="context-menu-actions">
-          {placementInfo.level < 5 && (
-            <button 
-              className="context-menu-button"
-              onClick={(e) => {
-                e.stopPropagation()
-                handleUpgrade()
-              }}
-              disabled={!placementSystem.canUpgradeBattery(batteryId)}
-            >
-              Upgrade Battery
-              {isGameMode && (
-                <span className="upgrade-cost">
-                  (Cost: {placementSystem.getUpgradeCost(batteryId)})
-                </span>
-              )}
-            </button>
-          )}
+          <button 
+            className="context-menu-button"
+            onClick={(e) => {
+              e.stopPropagation()
+              handleUpgrade()
+            }}
+            disabled={placementInfo.level >= 5 || !placementSystem.canUpgradeBattery(batteryId)}
+            title={placementInfo.level >= 5 ? "Maximum level reached" : ""}
+          >
+            Upgrade Battery
+            {placementInfo.level >= 5 ? (
+              <span className="upgrade-cost">(Max Level)</span>
+            ) : isGameMode ? (
+              <span className="upgrade-cost">
+                (Cost: {placementSystem.getUpgradeCost(batteryId)})
+              </span>
+            ) : null}
+          </button>
           
           <button 
             className="context-menu-button danger"
             onClick={(e) => {
               e.stopPropagation()
               if (isLastBattery) {
-                alert('Cannot remove the last battery!')
+                alert('Cannot sell the last battery!')
               } else {
-                handleRemove()
+                handleSell()
               }
             }}
             disabled={isLastBattery}
-            title={isLastBattery ? "Cannot remove the last battery" : ""}
+            title={isLastBattery ? "Cannot sell the last battery" : ""}
           >
-            Remove Battery
+            {isGameMode ? `Sell Battery (${getSellValue()} credits)` : 'Remove Battery'}
           </button>
         </div>
       </div>

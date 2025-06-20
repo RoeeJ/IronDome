@@ -23,6 +23,7 @@ export interface ProjectileOptions {
 }
 
 export class Projectile {
+  id: string
   mesh: THREE.Mesh
   body: CANNON.Body
   trail: THREE.Line
@@ -70,6 +71,7 @@ export class Projectile {
       maxLifetime = isInterceptor ? 10 : 30  // 10s for interceptors, 30s for threats
     } = options
     
+    this.id = `projectile_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`
     this.scene = scene
     this.isInterceptor = isInterceptor
     this.target = target

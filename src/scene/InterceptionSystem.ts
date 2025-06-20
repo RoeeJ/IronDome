@@ -95,6 +95,12 @@ export class InterceptionSystem {
 
       // Remove interceptors that fall below ground or have detonated
       if (interceptor.body.position.y < -10 || !interceptor.isActive) {
+        // Remove from instanced renderer if available
+        const renderer = (window as any).__instancedProjectileRenderer
+        if (renderer) {
+          renderer.removeProjectile(interceptor.id)
+        }
+        
         interceptor.destroy(this.scene, this.world)
         this.interceptors.splice(i, 1)
       }
@@ -174,6 +180,12 @@ export class InterceptionSystem {
             targetPoint: threat.getImpactPoint() || threat.getPosition(),
             launchTime: Date.now()
           })
+          
+          // Add to instanced renderer if available
+          const renderer = (window as any).__instancedProjectileRenderer
+          if (renderer) {
+            renderer.addProjectile(interceptor)
+          }
         })
       }
     }
@@ -369,6 +381,12 @@ export class InterceptionSystem {
     )
 
     // Destroy both projectiles
+    // Remove from instanced renderer if available
+    const renderer = (window as any).__instancedProjectileRenderer
+    if (renderer) {
+      renderer.removeProjectile(interception.interceptor.id)
+    }
+    
     interception.interceptor.destroy(this.scene, this.world)
     interception.threat.destroy(this.scene, this.world)
   }
@@ -512,5 +530,9 @@ export class InterceptionSystem {
   
   getActiveInterceptorCount(): number {
     return this.activeInterceptions.length
+  }
+  
+  getInterceptors(): Projectile[] {
+    return [...this.interceptors]
   }
 }

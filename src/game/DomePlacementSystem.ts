@@ -6,6 +6,7 @@ import { ResourceManager } from './ResourceManager'
 import { ThreatManager } from '../scene/ThreatManager'
 import { InterceptionSystem } from '../scene/InterceptionSystem'
 import { StaticRadarNetwork } from '../scene/StaticRadarNetwork'
+import { InstancedOBJDomeRenderer } from '../rendering/InstancedOBJDomeRenderer'
 
 export interface PlacedDome {
   id: string
@@ -30,6 +31,8 @@ export class DomePlacementSystem {
   private interceptionSystem?: InterceptionSystem
   private radarNetwork?: StaticRadarNetwork
   private isSandboxMode: boolean = false
+  private instancedRenderer?: InstancedOBJDomeRenderer
+  private useInstancedRendering: boolean = true
   
   constructor(scene: THREE.Scene, world: CANNON.World) {
     this.scene = scene
@@ -55,6 +58,12 @@ export class DomePlacementSystem {
     })
     
     this.createRangePreview()
+    
+    // Initialize instanced renderer if enabled
+    if (this.useInstancedRendering) {
+      this.instancedRenderer = new InstancedOBJDomeRenderer(this.scene, 50)
+    }
+    
     this.restoreSavedPlacements()
     
     // Ensure at least one battery exists
@@ -276,6 +285,7 @@ export class DomePlacementSystem {
   }
   
   placeBatteryAt(position: THREE.Vector3, batteryId: string, level: number = 1): void {
+    // Create battery with instanced rendering flag
     const battery = new IronDomeBattery(this.scene, this.world, {
       position: position.clone(),
       maxRange: 150 + (level - 1) * 25, // Increase range with level
@@ -284,13 +294,19 @@ export class DomePlacementSystem {
       interceptorSpeed: 150 + (level - 1) * 10, // Faster interceptors with level
       launcherCount: 20 + (level - 1) * 5, // More launchers with level
       successRate: 0.95 + (level - 1) * 0.01, // Better accuracy with level
-      maxHealth: 100 + (level - 1) * 50 // More health with level
+      maxHealth: 100 + (level - 1) * 50, // More health with level
+      useInstancedRendering: this.useInstancedRendering // Pass the flag
     })
     
     // Configure battery
     battery.setResourceManagement(!this.isSandboxMode)
     battery.setLaunchOffset(new THREE.Vector3(-2, 14.5, -0.1))
     battery.setLaunchDirection(new THREE.Vector3(0.6, 1, 0.15).normalize())
+    
+    // Hide individual meshes if using instanced rendering
+    if (this.useInstancedRendering) {
+      battery.setVisualVisibility(false)
+    }
     
     // Set radar network if available
     if (this.radarNetwork) {
@@ -320,6 +336,18 @@ export class DomePlacementSystem {
     // Visual indicator for battery level
     if (level > 1) {
       this.addLevelIndicator(battery, level)
+    }
+    
+    // Update instanced renderer
+    this.updateInstancedRenderer()
+    
+    // Register in game state if not already registered
+    const existingPlacement = this.gameState.getDomePlacements().find(p => p.id === batteryId)
+    if (!existingPlacement) {
+      this.gameState.addDomePlacement(batteryId, {
+        x: position.x,
+        z: position.z
+      })
     }
   }
   
@@ -359,12 +387,12 @@ export class DomePlacementSystem {
   }
   
   
-  removeBattery(batteryId: string): boolean {
+  removeBattery(batteryId: string, removeFromGameState: boolean = true): boolean {
     const dome = this.placedDomes.get(batteryId)
     if (!dome) return false
     
-    // Prevent removing the last battery
-    if (this.placedDomes.size <= 1) {
+    // Prevent removing the last battery (only when actually removing, not upgrading)
+    if (removeFromGameState && this.placedDomes.size <= 1) {
       console.warn('Cannot remove the last battery')
       return false
     }
@@ -404,10 +432,39 @@ export class DomePlacementSystem {
     dome.battery.destroy()
     this.placedDomes.delete(batteryId)
     
-    // Remove from saved state
-    this.gameState.removeDomePlacement(batteryId)
+    // Remove from saved state only if requested
+    if (removeFromGameState) {
+      this.gameState.removeDomePlacement(batteryId)
+    }
+    
+    // Update instanced renderer
+    this.updateInstancedRenderer()
     
     return true
+  }
+  
+  sellBattery(batteryId: string): boolean {
+    const dome = this.placedDomes.get(batteryId)
+    if (!dome) return false
+    
+    // Get the placement info to calculate sell value
+    const placement = this.gameState.getDomePlacements().find(p => p.id === batteryId)
+    if (!placement) return false
+    
+    // Calculate sell value (60% of total investment)
+    let totalCost = 0
+    for (let i = 1; i < placement.level; i++) {
+      totalCost += this.gameState.getDomeUpgradeCost(i)
+    }
+    const sellValue = Math.floor(totalCost * 0.6)
+    
+    // Give credits back to player (only in game mode)
+    if (!this.isSandboxMode && sellValue > 0) {
+      this.gameState.addCredits(sellValue)
+    }
+    
+    // Remove the battery
+    return this.removeBattery(batteryId, true)
   }
   
   upgradeBattery(batteryId: string): boolean {
@@ -420,12 +477,17 @@ export class DomePlacementSystem {
       if (placement && placement.level < 5) {
         // Update the level in game state using free upgrade
         this.gameState.upgradeDomeFree(batteryId)
-        // Remove old battery and indicators
-        const position = dome.position.clone()
-        this.removeBattery(batteryId)
-        // Recreate battery with upgraded stats
-        this.placeBatteryAt(position, batteryId, placement.level + 1)
-        return true
+        // Get the updated placement with new level
+        const updatedPlacement = this.gameState.getDomePlacements().find(p => p.id === batteryId)
+        if (updatedPlacement) {
+          // Remove old battery and indicators (but keep in game state)
+          const position = dome.position.clone()
+          this.removeBattery(batteryId, false)
+          // Recreate battery with upgraded stats
+          this.placeBatteryAt(position, batteryId, updatedPlacement.level)
+          console.log(`Battery ${batteryId} upgraded to level ${updatedPlacement.level}`)
+          return true
+        }
       }
       return false
     }
@@ -434,10 +496,11 @@ export class DomePlacementSystem {
     if (this.resourceManager.purchaseDomeUpgrade(batteryId)) {
       const placement = this.gameState.getDomePlacements().find(p => p.id === batteryId)
       if (placement) {
-        // Remove old battery and indicators
-        this.removeBattery(batteryId)
-        // Recreate battery with upgraded stats
-        this.placeBatteryAt(dome.position, batteryId, placement.level)
+        // Remove old battery and indicators (but keep in game state)
+        const position = dome.position.clone()
+        this.removeBattery(batteryId, false)
+        // Recreate battery with upgraded stats (placement.level is already updated by purchaseDomeUpgrade)
+        this.placeBatteryAt(position, batteryId, placement.level)
       }
       return true
     }
@@ -491,7 +554,10 @@ export class DomePlacementSystem {
     return this.gameState.getCredits() >= upgradeCost
   }
   
-  getUpgradeCost(batteryId: string): number {
+  getUpgradeCost(batteryId: string, level?: number): number {
+    if (level !== undefined) {
+      return this.gameState.getDomeUpgradeCost(level)
+    }
     const placement = this.gameState.getDomePlacements().find(p => p.id === batteryId)
     if (!placement) return 0
     return this.gameState.getDomeUpgradeCost(placement.level)
@@ -545,6 +611,53 @@ export class DomePlacementSystem {
       this.gameState.addDomePlacement(initialId, {
         x: initialPosition.x,
         z: initialPosition.z
+      })
+    }
+  }
+  
+  private updateInstancedRenderer(): void {
+    if (!this.instancedRenderer) return
+    
+    // Convert map to format expected by renderer
+    const domesData = new Map<string, { battery: IronDomeBattery; level: number }>()
+    this.placedDomes.forEach((dome, id) => {
+      domesData.set(id, { battery: dome.battery, level: dome.level })
+    })
+    
+    this.instancedRenderer.updateDomes(domesData)
+  }
+  
+  // Call this method from your game loop to update visual states
+  update(): void {
+    // Update instanced renderer with current dome states
+    this.updateInstancedRenderer()
+  }
+  
+  // Method to toggle instanced rendering
+  setInstancedRendering(enabled: boolean): void {
+    if (this.useInstancedRendering === enabled) return
+    
+    this.useInstancedRendering = enabled
+    
+    if (enabled && !this.instancedRenderer) {
+      // Create instanced renderer
+      this.instancedRenderer = new InstancedOBJDomeRenderer(this.scene, 50)
+      
+      // Hide all individual dome meshes
+      this.placedDomes.forEach(dome => {
+        dome.battery.setVisualVisibility(false)
+      })
+      
+      // Update renderer
+      this.updateInstancedRenderer()
+    } else if (!enabled && this.instancedRenderer) {
+      // Dispose instanced renderer
+      this.instancedRenderer.dispose()
+      this.instancedRenderer = undefined
+      
+      // Show all individual dome meshes
+      this.placedDomes.forEach(dome => {
+        dome.battery.setVisualVisibility(true)
       })
     }
   }

@@ -25,6 +25,8 @@ import { WaveManager } from './game/WaveManager'
 import { ResourceManager } from './game/ResourceManager'
 import { DomePlacementSystem } from './game/DomePlacementSystem'
 import { GameUI } from './ui/GameUI'
+import { InstancedProjectileRenderer } from './rendering/InstancedProjectileRenderer'
+import { InstancedThreatRenderer } from './rendering/InstancedThreatRenderer'
 
 // Initialize device capabilities
 const deviceCaps = DeviceCapabilities.getInstance()
@@ -182,6 +184,19 @@ const resourceManager = ResourceManager.getInstance()
 // Threat Manager
 const threatManager = new ThreatManager(scene, world)
 
+// Hook into threat lifecycle for instanced rendering
+threatManager.on('threatSpawned', (threat: Threat) => {
+  if (useInstancedRendering) {
+    instancedThreatRenderer.addThreat(threat)
+  }
+})
+
+threatManager.on('threatDestroyed', (threatId: string) => {
+  if (useInstancedRendering) {
+    instancedThreatRenderer.removeThreat(threatId)
+  }
+})
+
 // Static Radar Network (4 corners) with large coverage for high altitude
 const radarNetwork = new StaticRadarNetwork(scene, 300)  // 300m radius for high altitude coverage
 
@@ -192,6 +207,10 @@ domePlacementSystem.setThreatManager(threatManager)
 // Interception System
 const interceptionSystem = new InterceptionSystem(scene, world)
 interceptionSystem.setThreatManager(threatManager)
+
+// Export interception system for global access
+;(window as any).__interceptionSystem = interceptionSystem
+;(window as any).__instancedProjectileRenderer = instancedProjectileRenderer
 
 // Connect all systems
 domePlacementSystem.setInterceptionSystem(interceptionSystem)
@@ -217,6 +236,11 @@ tacticalDisplay.update([], new THREE.Vector3(0, 0, 0), 20, 0.95, 20)
 
 // Projectile management
 let projectiles: Projectile[] = []
+
+// Instanced renderers for performance
+const instancedProjectileRenderer = new InstancedProjectileRenderer(scene)
+const instancedThreatRenderer = new InstancedThreatRenderer(scene)
+let useInstancedRendering = true
 
 // Load saved preferences from localStorage
 const savedGameMode = localStorage.getItem('ironDome_gameMode')
@@ -540,34 +564,155 @@ if (deviceInfo.hasTouch) {
   document.body.appendChild(fireButton)
 }
 
-const debugFolder = gui.addFolder('Debug')
-const debugInfo = {
+// Performance Monitor
+const perfFolder = gui.addFolder('Performance')
+const perfInfo = {
   fps: 0,
   threats: 0,
   interceptors: 0,
-  interceptions: 0,
-  successRate: 0,
-  showRadarCoverage: false
+  drawCalls: 0,
+  triangles: 0
 }
-debugFolder.add(debugInfo, 'fps').listen().disable()
-debugFolder.add(debugInfo, 'threats').listen().disable()
-debugFolder.add(debugInfo, 'interceptors').listen().disable()
-debugFolder.add(debugInfo, 'interceptions').listen().disable()
-debugFolder.add(debugInfo, 'successRate').listen().disable()
-debugFolder.add(debugInfo, 'showRadarCoverage').name('Show Radar Coverage').onChange((value: boolean) => {
+perfFolder.add(perfInfo, 'fps').listen().disable()
+perfFolder.add(perfInfo, 'threats').listen().disable()
+perfFolder.add(perfInfo, 'interceptors').listen().disable()
+perfFolder.add(perfInfo, 'drawCalls').listen().disable()
+perfFolder.add(perfInfo, 'triangles').listen().disable()
+perfFolder.add({ profiler: '⚡ Press P for Profiler' }, 'profiler').disable()
+
+// Simple notification function
+function showNotification(message: string): void {
+  const notification = document.createElement('div')
+  notification.textContent = message
+  notification.style.cssText = `
+    position: fixed;
+    top: 20px;
+    left: 50%;
+    transform: translateX(-50%);
+    background: rgba(0, 0, 0, 0.8);
+    color: white;
+    padding: 10px 20px;
+    border-radius: 5px;
+    font-family: monospace;
+    font-size: 14px;
+    z-index: 10000;
+    pointer-events: none;
+  `
+  document.body.appendChild(notification)
+  
+  setTimeout(() => {
+    notification.style.opacity = '0'
+    notification.style.transition = 'opacity 0.5s'
+    setTimeout(() => document.body.removeChild(notification), 500)
+  }, 2000)
+}
+
+// Sandbox Controls
+const sandboxFolder = gui.addFolder('Sandbox Controls')
+const sandboxControls = {
+  // Threat spawning
+  spawnRocket: () => threatManager.spawnSpecificThreat('rocket'),
+  spawnMortar: () => threatManager.spawnSpecificThreat('mortar'),
+  spawnDrone: () => threatManager.spawnSpecificThreat('drone'),
+  spawnBallistic: () => threatManager.spawnSpecificThreat('ballistic'),
+  clearAllThreats: () => {
+    threatManager.clearAll()
+    showNotification('All threats cleared')
+  },
+  
+  // Salvo controls
+  salvoSize: 5,
+  salvoType: 'mixed',
+  launchSalvo: () => {
+    threatManager.spawnSalvo(sandboxControls.salvoSize, sandboxControls.salvoType)
+    showNotification(`Launched ${sandboxControls.salvoSize} ${sandboxControls.salvoType} threats`)
+  },
+  
+  // Battery controls
+  addRandomBattery: () => {
+    const angle = Math.random() * Math.PI * 2
+    const distance = 50 + Math.random() * 100
+    const position = new THREE.Vector3(
+      Math.cos(angle) * distance,
+      0,
+      Math.sin(angle) * distance
+    )
+    domePlacementSystem.placeBatteryAt(position, `battery_${Date.now()}`, 1)
+    showNotification('Added random battery')
+  },
+  upgradeAllBatteries: () => {
+    let upgraded = 0
+    const batteries = domePlacementSystem.getAllBatteries()
+    console.log(`Found ${batteries.length} batteries to check for upgrades`)
+    
+    batteries.forEach(battery => {
+      const batteryId = domePlacementSystem.getBatteryId(battery)
+      console.log(`Checking battery ID: ${batteryId}`)
+      if (batteryId) {
+        const placement = domePlacementSystem.getDomePlacements().find(p => p.id === batteryId)
+        console.log(`Battery ${batteryId} current level: ${placement?.level || 'not found'}`)
+        if (placement && placement.level < 5) {
+          if (domePlacementSystem.upgradeBattery(batteryId)) {
+            upgraded++
+            console.log(`Successfully upgraded battery ${batteryId}`)
+          } else {
+            console.log(`Failed to upgrade battery ${batteryId}`)
+          }
+        }
+      }
+    })
+    
+    if (upgraded > 0) {
+      showNotification(`Upgraded ${upgraded} batteries`)
+    } else {
+      showNotification('No batteries to upgrade (max level reached)')
+    }
+  },
+  
+  // Visual settings
+  showRadarCoverage: false,
+  showTrajectories: true,
+  timeScale: 1.0,
+  enableFog: false
+}
+
+// Threat controls
+const threatGroup = sandboxFolder.addFolder('Spawn Threats')
+threatGroup.add(sandboxControls, 'spawnRocket').name('🚀 Spawn Rocket')
+threatGroup.add(sandboxControls, 'spawnMortar').name('💣 Spawn Mortar')
+threatGroup.add(sandboxControls, 'spawnDrone').name('🛸 Spawn Drone')
+threatGroup.add(sandboxControls, 'spawnBallistic').name('🎯 Spawn Ballistic')
+threatGroup.add(sandboxControls, 'clearAllThreats').name('🧹 Clear All Threats')
+
+// Salvo controls
+const salvoGroup = sandboxFolder.addFolder('Salvo Attack')
+salvoGroup.add(sandboxControls, 'salvoSize', 2, 20, 1).name('Salvo Size')
+salvoGroup.add(sandboxControls, 'salvoType', ['mixed', 'rocket', 'mortar', 'ballistic']).name('Salvo Type')
+salvoGroup.add(sandboxControls, 'launchSalvo').name('🎆 Launch Salvo')
+
+// Battery controls
+const batteryGroup = sandboxFolder.addFolder('Battery Management')
+batteryGroup.add(sandboxControls, 'addRandomBattery').name('➕ Add Random Battery')
+batteryGroup.add(sandboxControls, 'upgradeAllBatteries').name('⬆️ Upgrade All Batteries')
+
+// Visual controls
+const visualGroup = sandboxFolder.addFolder('Visual Settings')
+visualGroup.add(sandboxControls, 'showRadarCoverage').name('Show Radar Coverage').onChange((value: boolean) => {
   radarNetwork.setShowCoverage(value)
 })
-debugFolder.add({ profiler: '⚡ Press P for Performance Profiler' }, 'profiler').disable()
-if (debug.isEnabled()) {
-  debugFolder.add({ debugUrl: '🐛 Debug mode active (add ?debug to URL)' }, 'debugUrl').disable()
-} else {
-  debugFolder.add({ debugUrl: '💡 Add ?debug to URL for debug logs' }, 'debugUrl').disable()
-}
-
-
-// No longer need game controls in GUI - they're in the UI now
-
-const simulationFolder = gui.addFolder('Simulation')
+visualGroup.add(sandboxControls, 'showTrajectories').name('Show Trajectories').onChange((value: boolean) => {
+  simulationControls.showTrajectories = value
+})
+visualGroup.add(sandboxControls, 'timeScale', 0.1, 3.0, 0.1).name('Time Scale').onChange((value: number) => {
+  simulationControls.timeScale = value
+})
+visualGroup.add(sandboxControls, 'enableFog').name('Enable Fog').onChange((value: boolean) => {
+  if (value) {
+    scene.fog = new THREE.Fog(0x2a5298, 200, 1000)
+  } else {
+    scene.fog = null
+  }
+})
 
 // Apply initial settings to all batteries
 domePlacementSystem.getAllBatteries().forEach(battery => {
@@ -583,28 +728,6 @@ radarNetwork.setModelFacingDirection(new THREE.Vector3(
   -Math.cos(radarAngle)
 ))
 
-simulationFolder.add(simulationControls, 'autoIntercept').name('Auto Intercept')
-simulationFolder.add(simulationControls, 'pause').name('Pause Simulation').onChange((value: boolean) => {
-  if (value) {
-    waveManager.pauseWave()
-  } else {
-    waveManager.resumeWave()
-  }
-})
-simulationFolder.add(simulationControls, 'timeScale', 0.1, 3.0, 0.1).name('Time Scale')
-simulationFolder.add(simulationControls, 'showTrajectories').name('Show Trajectories')
-simulationFolder.add(simulationControls, 'enableFog').name('Enable Fog').onChange((value: boolean) => {
-  if (value) {
-    scene.fog = new THREE.Fog(0x2a5298, 100, 800)
-  } else {
-    scene.fog = null
-  }
-})
-simulationFolder.add(simulationControls, 'interceptorModel', ['none', 'ultra', 'simple']).name('Interceptor Model').onChange((value: string) => {
-  // Store preference globally for new interceptors
-  ;(window as any).__interceptorModelQuality = value
-})
-
 // Start game mode by default
 if (simulationControls.gameMode) {
   // Don't start immediately - wait for user to click start
@@ -613,55 +736,6 @@ if (simulationControls.gameMode) {
   // Sandbox mode - start spawning threats
   threatManager.setThreatMix('mixed')
   threatManager.startSpawning()
-}
-
-const batteryFolder = gui.addFolder('Battery Network')
-const batteryInfo = {
-  totalBatteries: 1,
-  totalLoadedTubes: 20,
-  totalReloading: 0,
-  totalInterceptors: 100,
-  placementInfo: '1/1 placed'
-}
-batteryFolder.add(batteryInfo, 'totalBatteries').listen().disable().name('Active Batteries')
-batteryFolder.add(batteryInfo, 'totalLoadedTubes').listen().disable().name('Total Loaded Tubes')
-batteryFolder.add(batteryInfo, 'totalReloading').listen().disable().name('Total Reloading')
-batteryFolder.add(batteryInfo, 'totalInterceptors').listen().disable().name('Interceptor Stock')
-batteryFolder.add(batteryInfo, 'placementInfo').listen().disable().name('Placement Status')
-
-const launchFolder = gui.addFolder('Manual Launch')
-const launchParams = {
-  velocity: 50,
-  angle: 45,
-  launch: () => launchProjectile()
-}
-launchFolder.add(launchParams, 'velocity', 10, 150, 1).name('Velocity (m/s)')
-launchFolder.add(launchParams, 'angle', 0, 90, 1).name('Angle (degrees)')
-launchFolder.add(launchParams, 'launch').name('Launch Interceptor')
-launchFolder.open()
-
-function launchProjectile() {
-  const position = new THREE.Vector3(-50, 1, 0)
-  const angleRad = (launchParams.angle * Math.PI) / 180
-  const velocity = new THREE.Vector3(
-    launchParams.velocity * Math.cos(angleRad),
-    launchParams.velocity * Math.sin(angleRad),
-    0
-  )
-  
-  const projectile = new Projectile(scene, world, {
-    position,
-    velocity,
-    color: 0x0038b8,
-    radius: 0.3,
-    mass: 10,
-    trailLength: 150
-  })
-  
-  projectiles.push(projectile)
-  
-  // Show predicted trajectory
-  showTrajectoryPrediction(position, velocity)
 }
 
 function showTrajectoryPrediction(position: THREE.Vector3, velocity: THREE.Vector3) {
@@ -858,6 +932,25 @@ function animate() {
     profiler.endSection('Interception System')
   }
   
+  // Update dome placement system (for instanced rendering)
+  profiler.startSection('Dome Placement Update')
+  domePlacementSystem.update()
+  profiler.endSection('Dome Placement Update')
+  
+  // Update instanced renderers
+  if (useInstancedRendering) {
+    profiler.startSection('Instanced Rendering Update')
+    
+    // Update threats
+    instancedThreatRenderer.updateThreats(activeThreats)
+    
+    // Update interceptors (combine all projectiles)
+    const allInterceptors = [...projectiles, ...systemInterceptors]
+    instancedProjectileRenderer.updateProjectiles(allInterceptors)
+    
+    profiler.endSection('Instanced Rendering Update')
+  }
+  
 
   // Update GUI at 30 Hz (33ms) for smooth tactical display
   if (currentTime - previousTime > 0.033) {
@@ -865,13 +958,11 @@ function animate() {
     const stats = interceptionSystem.getStats()
     const allProjectiles = [...projectiles, ...systemInterceptors]
     
-    debugInfo.fps = Math.round(fps)
-    debugInfo.threats = activeThreats.length
-    debugInfo.interceptors = allProjectiles.length
-    debugInfo.interceptions = stats.successful
-    debugInfo.successRate = stats.successful + stats.failed > 0 
-      ? Math.round((stats.successful / (stats.successful + stats.failed)) * 100)
-      : 0
+    perfInfo.fps = Math.round(fps)
+    perfInfo.threats = activeThreats.length
+    perfInfo.interceptors = allProjectiles.length
+    perfInfo.drawCalls = renderer.info.render.calls
+    perfInfo.triangles = renderer.info.render.triangles
     
     // Update battery network info
     const allBatteries = domePlacementSystem.getAllBatteries()
@@ -883,11 +974,7 @@ function animate() {
       totalCapacity += battery.getConfig().launcherCount
     })
     
-    batteryInfo.totalBatteries = allBatteries.length
-    batteryInfo.totalLoadedTubes = totalLoaded
-    batteryInfo.totalReloading = totalCapacity - totalLoaded
-    batteryInfo.totalInterceptors = gameState.getInterceptorStock()
-    batteryInfo.placementInfo = `${allBatteries.length}/${gameState.getUnlockedDomes()} placed`
+    // Battery info is now displayed in the UI, not in debug controls
     
     // Update tactical display only if performance allows
     if (!perfStats.isCritical) {

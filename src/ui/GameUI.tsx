@@ -181,17 +181,37 @@ export const GameUI: React.FC<GameUIProps> = ({ waveManager, placementSystem, on
         
         const intersects = raycaster.intersectObject(batteryMesh, true)
         if (intersects.length > 0) {
-          const batteryId = placementSystem.getBatteryId(battery)
-          if (batteryId) {
-            setContextMenu({
-              battery,
-              batteryId,
-              position: { x: event.clientX, y: event.clientY }
-            })
-            // Disable OrbitControls while context menu is open
-            const controls = (window as any).__controls
-            if (controls) controls.enabled = false
-            break
+          // Check if we hit a hitbox with battery reference
+          const hitObject = intersects[0].object
+          if (hitObject.userData.isHitbox && hitObject.userData.battery) {
+            // Use the battery from the hitbox userData
+            const hitBattery = hitObject.userData.battery
+            const batteryId = placementSystem.getBatteryId(hitBattery)
+            if (batteryId) {
+              setContextMenu({
+                battery: hitBattery,
+                batteryId,
+                position: { x: event.clientX, y: event.clientY }
+              })
+              // Disable OrbitControls while context menu is open
+              const controls = (window as any).__controls
+              if (controls) controls.enabled = false
+              break
+            }
+          } else {
+            // Normal battery mesh hit
+            const batteryId = placementSystem.getBatteryId(battery)
+            if (batteryId) {
+              setContextMenu({
+                battery,
+                batteryId,
+                position: { x: event.clientX, y: event.clientY }
+              })
+              // Disable OrbitControls while context menu is open
+              const controls = (window as any).__controls
+              if (controls) controls.enabled = false
+              break
+            }
           }
         }
       }

@@ -177,21 +177,39 @@ export class ThreatManager extends EventEmitter {
         const distanceToTarget = threat.getPosition().distanceTo(threat.targetPosition)
         const timeSinceLaunch = (Date.now() - threat.launchTime) / 1000
         
-        // Check if drone hit battery or ground
-        if ((distanceToTarget < 5 && threat.getPosition().y < 10) || 
-            threat.getPosition().y <= 1 || 
-            timeSinceLaunch > 60) {
+        // Check if drone should explode
+        const shouldExplode = 
+          distanceToTarget < 5 ||  // Close enough to target (5m radius)
+          threat.getPosition().y <= 1 ||  // Hit ground
+          timeSinceLaunch > 60  // Timeout after 60 seconds
+        
+        if (shouldExplode) {
+          // Check for battery hit (within explosion radius)
+          const explosionRadius = 10 // Drone explosion affects 10m radius
+          const nearbyBatteries = this.batteries.filter(battery => 
+            battery.isOperational() && 
+            battery.getPosition().distanceTo(threat.getPosition()) <= explosionRadius
+          )
           
-          // Check for battery hit
-          const hitBattery = this.checkBatteryHit(threat.getPosition())
-          if (hitBattery) {
-            const damageAmount = this.getThreatDamage(threat.type)
-            hitBattery.takeDamage(damageAmount)
-            this.emit('batteryHit', { battery: hitBattery, damage: damageAmount })
+          // Damage all batteries in explosion radius
+          nearbyBatteries.forEach(battery => {
+            const distance = battery.getPosition().distanceTo(threat.getPosition())
+            const damageFalloff = 1 - (distance / explosionRadius) // More damage closer to explosion
+            const baseDamage = this.getThreatDamage(threat.type)
+            const actualDamage = Math.ceil(baseDamage * damageFalloff)
+            
+            battery.takeDamage(actualDamage)
+            this.emit('batteryHit', { battery, damage: actualDamage })
+            console.log(`Drone explosion damaged battery at ${distance.toFixed(1)}m for ${actualDamage} damage`)
+          })
+          
+          // Create explosion (in air if still flying)
+          if (threat.getPosition().y > 5) {
+            this.createAirExplosion(threat.getPosition())
+          } else {
+            this.createGroundExplosion(threat.getPosition())
           }
           
-          // Create explosion
-          this.createGroundExplosion(threat.getPosition())
           this.removeThreat(i, false) // Drone attack
         }
       } else {
@@ -504,8 +522,10 @@ export class ThreatManager extends EventEmitter {
         return 20
       case ThreatType.MORTAR:
         return 10
-      case ThreatType.DRONE:
-        return 25
+      case ThreatType.DRONE_SLOW:
+        return 20
+      case ThreatType.DRONE_FAST:
+        return 30
       case ThreatType.CRUISE_MISSILE:
         return 40
       case ThreatType.BALLISTIC_MISSILE:
@@ -834,5 +854,116 @@ export class ThreatManager extends EventEmitter {
   
   setSalvoChance(chance: number): void {
     this.salvoChance = Math.max(0, Math.min(1, chance))
+  }
+  
+  // Spawn a specific type of threat on demand
+  spawnSpecificThreat(type: 'rocket' | 'mortar' | 'drone' | 'ballistic'): void {
+    let threatType: ThreatType
+    
+    switch(type) {
+      case 'rocket':
+        // Pick a random rocket type
+        const rocketTypes = [ThreatType.SHORT_RANGE, ThreatType.MEDIUM_RANGE, ThreatType.QASSAM_1, ThreatType.GRAD_ROCKET]
+        threatType = rocketTypes[Math.floor(Math.random() * rocketTypes.length)]
+        break
+      case 'mortar':
+        threatType = ThreatType.MORTAR
+        break
+      case 'drone':
+        // Pick a random drone type
+        const droneTypes = [ThreatType.DRONE_SLOW, ThreatType.DRONE_FAST]
+        threatType = droneTypes[Math.floor(Math.random() * droneTypes.length)]
+        break
+      case 'ballistic':
+        threatType = ThreatType.CRUISE_MISSILE
+        break
+    }
+    
+    // Create a config for this specific threat
+    const config = {
+      type: threatType,
+      spawnRadius: 150,
+      targetRadius: 40,
+      minInterval: 0,
+      maxInterval: 0
+    }
+    
+    // Get threat stats to determine spawn parameters
+    const threatStats = THREAT_CONFIGS[threatType]
+    
+    // Adjust spawn radius based on threat type
+    if (threatStats.isDrone) {
+      config.spawnRadius = 200
+    } else if (threatStats.isMortar) {
+      config.spawnRadius = 80
+    } else if (threatType === ThreatType.CRUISE_MISSILE) {
+      config.spawnRadius = 250
+    }
+    
+    // Temporarily store current configs
+    const originalConfigs = this.spawnConfigs
+    this.spawnConfigs = [config]
+    
+    // Spawn the threat
+    this.spawnSingleThreat(0)
+    
+    // Restore original configs
+    this.spawnConfigs = originalConfigs
+  }
+  
+  // Spawn a salvo of threats
+  spawnSalvo(size: number, type: string = 'mixed'): void {
+    // Determine which threat types to use
+    let possibleTypes: ThreatType[] = []
+    
+    switch(type) {
+      case 'rocket':
+        possibleTypes = [ThreatType.SHORT_RANGE, ThreatType.MEDIUM_RANGE, ThreatType.QASSAM_1, ThreatType.GRAD_ROCKET]
+        break
+      case 'mortar':
+        possibleTypes = [ThreatType.MORTAR]
+        break
+      case 'ballistic':
+        possibleTypes = [ThreatType.CRUISE_MISSILE]
+        break
+      case 'mixed':
+      default:
+        possibleTypes = [
+          ThreatType.SHORT_RANGE, ThreatType.MEDIUM_RANGE,
+          ThreatType.MORTAR, ThreatType.DRONE_SLOW,
+          ThreatType.QASSAM_1
+        ]
+        break
+    }
+    
+    // Spawn the salvo with slight delays
+    for (let i = 0; i < size; i++) {
+      setTimeout(() => {
+        const threatType = possibleTypes[Math.floor(Math.random() * possibleTypes.length)]
+        const config = {
+          type: threatType,
+          spawnRadius: 150,
+          targetRadius: 40,
+          minInterval: 0,
+          maxInterval: 0
+        }
+        
+        // Adjust spawn radius based on threat type
+        const threatStats = THREAT_CONFIGS[threatType]
+        if (threatStats.isDrone) {
+          config.spawnRadius = 200
+        } else if (threatStats.isMortar) {
+          config.spawnRadius = 80
+        } else if (threatType === ThreatType.CRUISE_MISSILE) {
+          config.spawnRadius = 250
+        }
+        
+        // Temporarily set config and spawn
+        const originalConfigs = this.spawnConfigs
+        this.spawnConfigs = [config]
+        this.spawnSingleThreat(0)
+        this.spawnConfigs = originalConfigs
+      }, i * 200) // 200ms delay between each threat in salvo
+    }
   }
 }
