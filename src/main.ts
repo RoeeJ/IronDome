@@ -336,6 +336,8 @@ updateUIMode()
 
 // GUI
 const gui = new GUI()
+// Position GUI to avoid overlapping with help button
+gui.domElement.style.top = '70px'
 // Start minimized on mobile
 if (deviceInfo.isMobile) {
   gui.close()

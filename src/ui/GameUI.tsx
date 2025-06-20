@@ -5,6 +5,7 @@ import { ResourceManager } from '../game/ResourceManager'
 import { DomePlacementSystem } from '../game/DomePlacementSystem'
 import { DeviceCapabilities } from '../utils/DeviceCapabilities'
 import { DomeContextMenu } from './DomeContextMenu'
+import { HelpModal } from './HelpModal'
 import * as THREE from 'three'
 
 interface GameUIProps {
@@ -43,6 +44,9 @@ export const GameUI: React.FC<GameUIProps> = ({ waveManager, placementSystem, on
     batteryId: string
     position: { x: number; y: number }
   } | null>(null)
+  const [showHelp, setShowHelp] = useState(false)
+  const [confirmNewGame, setConfirmNewGame] = useState(false)
+  const confirmTimeoutRef = React.useRef<NodeJS.Timeout | null>(null)
   
   // Store interval reference to clear it when needed
   const preparationIntervalRef = React.useRef<NodeJS.Timeout | null>(null)
@@ -467,7 +471,7 @@ export const GameUI: React.FC<GameUIProps> = ({ waveManager, placementSystem, on
         
         .resource-panel {
           display: flex;
-          gap: 30px;
+          gap: 20px;
           justify-self: start;
           align-items: center;
           height: 100%;
@@ -496,7 +500,7 @@ export const GameUI: React.FC<GameUIProps> = ({ waveManager, placementSystem, on
           flex-direction: column;
           justify-content: center;
           align-items: center;
-          height: 100%;
+          padding: 12px 20px;
         }
         
         .wave-number {
@@ -522,14 +526,17 @@ export const GameUI: React.FC<GameUIProps> = ({ waveManager, placementSystem, on
           transition: width 0.3s;
         }
         
-        .score-panel {
-          text-align: right;
-          justify-self: end;
+        .left-panels {
           display: flex;
           flex-direction: column;
-          justify-content: center;
-          align-items: flex-end;
-          height: 100%;
+          gap: 10px;
+          align-items: flex-start;
+        }
+        
+        .score-panel {
+          display: flex;
+          gap: 12px;
+          align-items: center;
         }
         
         .score-value {
@@ -631,6 +638,48 @@ export const GameUI: React.FC<GameUIProps> = ({ waveManager, placementSystem, on
           border-color: #666;
           color: #666;
           cursor: not-allowed;
+        }
+        
+        .control-button.warning {
+          background: #ff6600;
+          border-color: #ff6600;
+        }
+        
+        .control-button.warning:hover {
+          background: #ff8800;
+          border-color: #ff8800;
+        }
+        
+        .help-button {
+          position: fixed;
+          top: 20px;
+          right: 20px;
+          width: 40px;
+          height: 40px;
+          background: #0038b8;
+          border: 2px solid #0038b8;
+          border-radius: 50%;
+          color: white;
+          font-size: 20px;
+          font-weight: bold;
+          cursor: pointer;
+          transition: all 0.3s;
+          z-index: 1000;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          pointer-events: auto;
+        }
+        
+        .help-button:hover {
+          background: #0056d6;
+          border-color: #0056d6;
+          transform: scale(1.1);
+          box-shadow: 0 0 15px rgba(0, 56, 184, 0.5);
+        }
+        
+        .help-button:active {
+          transform: scale(0.95);
         }
         
         /* Mobile responsive */
@@ -888,6 +937,7 @@ export const GameUI: React.FC<GameUIProps> = ({ waveManager, placementSystem, on
           align-items: center;
           z-index: 10000;
           animation: fadeIn 0.5s;
+          pointer-events: auto;
         }
         
         .game-over-title {
@@ -949,6 +999,7 @@ export const GameUI: React.FC<GameUIProps> = ({ waveManager, placementSystem, on
           font-weight: bold;
           cursor: pointer;
           transition: all 0.3s;
+          pointer-events: auto;
         }
         
         .game-over-button:hover {
@@ -1046,27 +1097,49 @@ export const GameUI: React.FC<GameUIProps> = ({ waveManager, placementSystem, on
         
       `}</style>
       
+      <button 
+        className="help-button"
+        onClick={() => {
+          setShowHelp(true)
+          // Disable OrbitControls
+          const controls = (window as any).__controls
+          if (controls) controls.enabled = false
+        }}
+        title="Help & Tutorial"
+      >
+        ?
+      </button>
+      
       <div className="game-ui">
         <div className="top-bar">
           {isGameMode ? (
             // Game mode: Show all game panels
             <>
-              <div className="ui-panel resource-panel">
-                <div className="resource-item">
-                  <span className="resource-icon">💰</span>
-                  <span className="resource-value">{credits}</span>
+              <div className="left-panels">
+                <div className="ui-panel resource-panel">
+                  <div className="resource-item">
+                    <span className="resource-icon">💰</span>
+                    <span className="resource-value">{credits}</span>
+                  </div>
+                  <div className="resource-item">
+                    <span className="resource-icon">🚀</span>
+                    <span className={`resource-value ${interceptors < 10 ? 'warning' : interceptors < 5 ? 'warning-low' : ''}`}>
+                      {interceptors}
+                    </span>
+                  </div>
+                  <div className="resource-item">
+                    <span className="resource-icon">🛡️</span>
+                    <span className="resource-value">
+                      {placementInfo.placedDomes}/{placementInfo.unlockedDomes}
+                    </span>
+                  </div>
                 </div>
-                <div className="resource-item">
-                  <span className="resource-icon">🚀</span>
-                  <span className={`resource-value ${interceptors < 10 ? 'warning' : interceptors < 5 ? 'warning-low' : ''}`}>
-                    {interceptors}
-                  </span>
-                </div>
-                <div className="resource-item">
-                  <span className="resource-icon">🛡️</span>
-                  <span className="resource-value">
-                    {placementInfo.placedDomes}/{placementInfo.unlockedDomes}
-                  </span>
+                <div className="ui-panel score-panel">
+                  <span style={{ fontSize: '20px' }}>🏆</span>
+                  <div>
+                    <div className="score-value">{score.toLocaleString()}</div>
+                    <div className="high-score">High: {highScore.toLocaleString()}</div>
+                  </div>
                 </div>
               </div>
               
@@ -1089,10 +1162,7 @@ export const GameUI: React.FC<GameUIProps> = ({ waveManager, placementSystem, on
                 ) : null}
               </div>
               
-              <div className="ui-panel score-panel">
-                <div className="score-value">{score.toLocaleString()}</div>
-                <div className="high-score">High: {highScore.toLocaleString()}</div>
-              </div>
+              <div></div>
             </>
           ) : (
             // Sandbox mode: Centered panel in middle column
@@ -1133,13 +1203,28 @@ export const GameUI: React.FC<GameUIProps> = ({ waveManager, placementSystem, on
         {isGameMode && (
           <>
             <button 
-              className="control-button"
+              className={`control-button ${confirmNewGame ? 'warning' : ''}`}
               onClick={() => {
                 vibrate(20)
-                startNewGame()
+                if (!confirmNewGame) {
+                  // First click - show confirmation
+                  setConfirmNewGame(true)
+                  // Reset after 3 seconds
+                  confirmTimeoutRef.current = setTimeout(() => {
+                    setConfirmNewGame(false)
+                  }, 3000)
+                } else {
+                  // Second click - actually start new game
+                  setConfirmNewGame(false)
+                  if (confirmTimeoutRef.current) {
+                    clearTimeout(confirmTimeoutRef.current)
+                    confirmTimeoutRef.current = null
+                  }
+                  startNewGame()
+                }
               }}
             >
-              New Game
+              {confirmNewGame ? 'Are you sure?' : 'New Game'}
             </button>
             
             {!isWaveActive && preparationTime > 0 && (
@@ -1205,7 +1290,7 @@ export const GameUI: React.FC<GameUIProps> = ({ waveManager, placementSystem, on
       
       {/* Game Over Screen */}
       {gameOver && (
-        <div className="game-over-screen">
+        <div className="game-over-screen" onClick={(e) => e.stopPropagation()}>
           <div className="game-over-title">GAME OVER</div>
           {gameOver.isHighScore && (
             <div className="game-over-subtitle">NEW HIGH SCORE!</div>
@@ -1319,6 +1404,17 @@ export const GameUI: React.FC<GameUIProps> = ({ waveManager, placementSystem, on
           isGameMode={isGameMode}
         />
       )}
+      
+      <HelpModal 
+        isOpen={showHelp}
+        onClose={() => {
+          setShowHelp(false)
+          // Re-enable OrbitControls
+          const controls = (window as any).__controls
+          if (controls) controls.enabled = true
+        }}
+        isGameMode={isGameMode}
+      />
     </>
   )
 }

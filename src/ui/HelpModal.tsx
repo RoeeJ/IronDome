@@ -1,0 +1,250 @@
+import React from 'react'
+
+interface HelpModalProps {
+  isOpen: boolean
+  onClose: () => void
+  isGameMode: boolean
+}
+
+export const HelpModal: React.FC<HelpModalProps> = ({ isOpen, onClose, isGameMode }) => {
+  if (!isOpen) return null
+
+  return (
+    <>
+      <style>{`
+        .help-modal-backdrop {
+          position: fixed;
+          top: 0;
+          left: 0;
+          right: 0;
+          bottom: 0;
+          background: rgba(0, 0, 0, 0.8);
+          z-index: 10000;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          pointer-events: auto;
+        }
+        
+        .help-modal {
+          background: rgba(0, 0, 0, 0.95);
+          border: 3px solid #0038b8;
+          border-radius: 15px;
+          padding: 30px;
+          max-width: 600px;
+          max-height: 80vh;
+          overflow-y: auto;
+          color: white;
+          font-family: Arial, sans-serif;
+          position: relative;
+        }
+        
+        .help-title {
+          font-size: 28px;
+          font-weight: bold;
+          color: #0038b8;
+          text-align: center;
+          margin-bottom: 25px;
+        }
+        
+        .help-section {
+          margin-bottom: 25px;
+        }
+        
+        .help-section-title {
+          font-size: 20px;
+          color: #0095ff;
+          margin-bottom: 10px;
+          font-weight: bold;
+        }
+        
+        .help-text {
+          font-size: 16px;
+          line-height: 1.6;
+          color: #ddd;
+        }
+        
+        .help-controls {
+          background: rgba(0, 56, 184, 0.2);
+          padding: 15px;
+          border-radius: 8px;
+          margin: 10px 0;
+        }
+        
+        .help-key {
+          display: inline-block;
+          background: #0038b8;
+          padding: 4px 10px;
+          border-radius: 4px;
+          margin: 0 5px;
+          font-weight: bold;
+          font-size: 14px;
+        }
+        
+        .help-close {
+          position: absolute;
+          top: 15px;
+          right: 15px;
+          background: none;
+          border: none;
+          color: #ff0000;
+          font-size: 28px;
+          cursor: pointer;
+          padding: 5px;
+          width: 40px;
+          height: 40px;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+        }
+        
+        .help-close:hover {
+          color: #ff6666;
+        }
+        
+        .help-footer {
+          text-align: center;
+          margin-top: 30px;
+          padding-top: 20px;
+          border-top: 1px solid #0038b8;
+        }
+        
+        .star-of-david {
+          font-size: 48px;
+          color: #0038b8;
+          margin: 10px 0;
+        }
+        
+        .hebrew-text {
+          font-size: 24px;
+          font-weight: bold;
+          color: #0095ff;
+          margin: 10px 0;
+        }
+        
+        @media (max-width: 768px) {
+          .help-modal {
+            max-width: 90vw;
+            padding: 20px;
+          }
+          
+          .help-title {
+            font-size: 24px;
+          }
+          
+          .help-section-title {
+            font-size: 18px;
+          }
+          
+          .help-text {
+            font-size: 14px;
+          }
+        }
+      `}</style>
+      
+      <div className="help-modal-backdrop" onClick={onClose}>
+        <div className="help-modal" onClick={(e) => e.stopPropagation()}>
+          <button className="help-close" onClick={onClose}>✕</button>
+          
+          <h2 className="help-title">Iron Dome Defense System</h2>
+          
+          <div className="help-section">
+            <h3 className="help-section-title">Overview</h3>
+            <p className="help-text">
+              Command Israel's Iron Dome missile defense system. Protect cities by intercepting 
+              incoming threats including rockets, missiles, and drones. Place defense batteries 
+              strategically and manage your resources wisely.
+            </p>
+          </div>
+          
+          <div className="help-section">
+            <h3 className="help-section-title">Game Modes</h3>
+            <p className="help-text">
+              <strong>Game Mode:</strong> Progress through increasingly difficult waves. 
+              Manage limited resources, earn credits for successful defenses, and unlock 
+              upgrades. Batteries can be damaged and destroyed.
+            </p>
+            <p className="help-text">
+              <strong>Sandbox Mode:</strong> Free play with unlimited resources. Place 
+              batteries freely, infinite interceptors, and no damage system. Perfect for 
+              practicing and experimenting.
+            </p>
+          </div>
+          
+          <div className="help-section">
+            <h3 className="help-section-title">Controls</h3>
+            <div className="help-controls">
+              <p className="help-text">
+                <span className="help-key">Left Click</span> Rotate camera
+              </p>
+              <p className="help-text">
+                <span className="help-key">Right Click</span> Open battery context menu
+              </p>
+              <p className="help-text">
+                <span className="help-key">Scroll</span> Zoom in/out
+              </p>
+              <p className="help-text">
+                <span className="help-key">P</span> Toggle performance profiler
+              </p>
+              <p className="help-text">
+                <strong>Mobile:</strong> Touch to rotate, pinch to zoom, long press for menu
+              </p>
+            </div>
+          </div>
+          
+          <div className="help-section">
+            <h3 className="help-section-title">Threat Types</h3>
+            <p className="help-text">
+              <strong>🚀 Rockets:</strong> Fast, low-altitude threats. Common but dangerous in large numbers.
+            </p>
+            <p className="help-text">
+              <strong>🎯 Missiles:</strong> High-altitude ballistic threats. Slower but harder to intercept.
+            </p>
+            <p className="help-text">
+              <strong>✈️ Drones:</strong> Slow-moving aerial threats. Can change direction and are persistent.
+            </p>
+          </div>
+          
+          <div className="help-section">
+            <h3 className="help-section-title">Battery Management</h3>
+            <p className="help-text">
+              {isGameMode ? (
+                <>
+                  • Each battery has limited interceptors that reload over time<br/>
+                  • Upgrade batteries to improve range, accuracy, and reload speed<br/>
+                  • Protect your batteries - they can be damaged by impacts<br/>
+                  • Place new batteries strategically to cover blind spots<br/>
+                  • Each interceptor costs resources - use them wisely
+                </>
+              ) : (
+                <>
+                  • Unlimited interceptors with instant reload<br/>
+                  • Free upgrades to experiment with different configurations<br/>
+                  • No damage - batteries cannot be destroyed<br/>
+                  • Place as many batteries as you want<br/>
+                  • Perfect for learning threat patterns and practicing
+                </>
+              )}
+            </p>
+          </div>
+          
+          <div className="help-section">
+            <h3 className="help-section-title">Tips & Strategy</h3>
+            <p className="help-text">
+              • Watch for threat indicators showing impact predictions<br/>
+              • Prioritize threats heading toward populated areas<br/>
+              • Multiple batteries can engage the same threat for higher success<br/>
+              • Upgraded batteries are more effective than many basic ones<br/>
+              • Learn threat patterns to optimize battery placement
+            </p>
+          </div>
+          
+          <div className="help-footer">
+            <div className="star-of-david">✡️</div>
+            <div className="hebrew-text">עם ישראל חי</div>
+          </div>
+        </div>
+      </div>
+    </>
+  )
+}

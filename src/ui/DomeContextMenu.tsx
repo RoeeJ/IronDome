@@ -20,15 +20,22 @@ export const DomeContextMenu: React.FC<DomeContextMenuProps> = ({
   isGameMode
 }) => {
   const [batteryConfig, setBatteryConfig] = useState<any>(null)
+  const [refreshKey, setRefreshKey] = useState(0)
   
   useEffect(() => {
     if (battery) {
       const config = battery.getConfig()
       setBatteryConfig(config)
     }
-  }, [battery])
+  }, [battery, refreshKey])
   
-  if (!battery || !batteryId || !batteryConfig) return null
+  // Move useMemo before conditional return to maintain hook order
+  const batteryStats = React.useMemo(() => {
+    // Force re-computation when refreshKey changes
+    return battery ? battery.getStats() : null
+  }, [battery, refreshKey])
+  
+  if (!battery || !batteryId || !batteryConfig || !batteryStats) return null
   
   const handleRemove = () => {
     if (!isGameMode || window.confirm('Remove this battery? This action cannot be undone.')) {
@@ -44,7 +51,13 @@ export const DomeContextMenu: React.FC<DomeContextMenuProps> = ({
   const handleUpgrade = () => {
     const success = placementSystem.upgradeBattery(batteryId)
     if (success) {
-      onClose()
+      // Don't close the menu - just update the battery config
+      const updatedBattery = placementSystem.getBattery(batteryId)
+      if (updatedBattery) {
+        setBatteryConfig(updatedBattery.getConfig())
+      }
+      // Force re-render to update stats and level
+      setRefreshKey(prev => prev + 1)
       // Force UI update by dispatching event
       window.dispatchEvent(new Event('batteryUpgraded'))
     }
@@ -57,7 +70,6 @@ export const DomeContextMenu: React.FC<DomeContextMenuProps> = ({
   }
   
   const placementInfo = getPlacementInfo()
-  const batteryStats = battery.getStats()
   const isLastBattery = placementInfo.placedDomes <= 1
   
   return (
