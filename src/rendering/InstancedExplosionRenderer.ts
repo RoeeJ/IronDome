@@ -10,6 +10,7 @@ interface ExplosionInstance {
   quality: number
   active: boolean
   type: 'air' | 'ground'
+  smokeDuration?: number // Separate duration for smoke
 }
 
 export class InstancedExplosionRenderer {
@@ -26,100 +27,51 @@ export class InstancedExplosionRenderer {
   private activeExplosions = new Map<string, ExplosionInstance>()
   private dummy = new THREE.Object3D()
   
-  // Shader materials for animated effects
-  private explosionMaterial: THREE.ShaderMaterial
-  private flashMaterial: THREE.ShaderMaterial
-  private smokeMaterial: THREE.ShaderMaterial
+  // Materials for animated effects
+  private explosionMaterial: THREE.MeshBasicMaterial
+  private flashMaterial: THREE.MeshBasicMaterial
+  private smokeMaterial: THREE.MeshBasicMaterial
+  
+  // Launch effect style animations
+  private activeEffects: Array<{ update: () => boolean }> = []
   
   constructor(scene: THREE.Scene, maxExplosions: number = 100) {
     this.scene = scene
     this.maxExplosions = maxExplosions
     
-    // Create explosion shader material
-    this.explosionMaterial = new THREE.ShaderMaterial({
-      uniforms: {
-        time: { value: 0 },
-        color1: { value: new THREE.Color(0xff6600) },
-        color2: { value: new THREE.Color(0xffaa00) }
-      },
-      vertexShader: `
-        varying vec2 vUv;
-        varying float vProgress;
-        
-        void main() {
-          vUv = uv;
-          vec4 mvPosition = modelViewMatrix * vec4(position, 1.0);
-          gl_Position = projectionMatrix * mvPosition;
-          
-          // Pass instance progress through instanceMatrix scale
-          vProgress = length(instanceMatrix[0].xyz);
-        }
-      `,
-      fragmentShader: `
-        uniform float time;
-        uniform vec3 color1;
-        uniform vec3 color2;
-        varying vec2 vUv;
-        varying float vProgress;
-        
-        void main() {
-          // Create gradient from center
-          float dist = length(vUv - 0.5) * 2.0;
-          
-          // Animate opacity based on progress
-          float opacity = (1.0 - vProgress) * (1.0 - dist) * 0.8;
-          
-          // Mix colors based on progress
-          vec3 color = mix(color1, color2, vProgress);
-          
-          gl_FragColor = vec4(color, opacity);
-        }
-      `,
+    // Create gradient material with emissive glow
+    this.explosionMaterial = new THREE.MeshBasicMaterial({
+      color: 0xffaa00, // Orange base
       transparent: true,
+      opacity: 0.9,
+      side: THREE.DoubleSide,
       depthWrite: false,
-      side: THREE.DoubleSide
-    })
+      blending: THREE.AdditiveBlending // Additive for bright explosion
+    }) as any
     
-    // Create flash material
-    this.flashMaterial = new THREE.ShaderMaterial({
-      uniforms: {
-        color: { value: new THREE.Color(0xffff88) }
-      },
-      vertexShader: `
-        varying float vOpacity;
-        
-        void main() {
-          vec4 mvPosition = modelViewMatrix * vec4(position, 1.0);
-          gl_Position = projectionMatrix * mvPosition;
-          
-          // Use scale as opacity (stored in scale)
-          vOpacity = length(instanceMatrix[0].xyz);
-        }
-      `,
-      fragmentShader: `
-        uniform vec3 color;
-        varying float vOpacity;
-        
-        void main() {
-          gl_FragColor = vec4(color, vOpacity);
-        }
-      `,
+    // Create simple flash material
+    this.flashMaterial = new THREE.MeshBasicMaterial({
+      color: 0xffffdd,
       transparent: true,
-      depthWrite: false
-    })
+      opacity: 1.0,
+      side: THREE.DoubleSide,
+      depthWrite: false,
+      blending: THREE.AdditiveBlending // Additive for bright flash
+    }) as any
     
     // Simple smoke material
     this.smokeMaterial = new THREE.MeshBasicMaterial({
-      color: 0x666666,
+      color: 0x555555, // Medium gray smoke
       transparent: true,
       opacity: 0.6,
-      depthWrite: false
-    })
+      depthWrite: false,
+      side: THREE.DoubleSide
+    }) as any
     
-    // Create geometries
-    const sphereGeometry = new THREE.SphereGeometry(1, 16, 8)
+    // Create geometries with reduced complexity
+    const sphereGeometry = new THREE.SphereGeometry(1, 8, 6) // Reduced from 16x8
     const flashGeometry = new THREE.PlaneGeometry(2, 2)
-    const smokeGeometry = new THREE.TorusGeometry(1, 0.3, 8, 16)
+    const smokeGeometry = new THREE.SphereGeometry(1, 6, 4) // Simple sphere for smoke clouds
     
     // Create instanced meshes
     this.sphereMesh = new THREE.InstancedMesh(sphereGeometry, this.explosionMaterial, maxExplosions)
@@ -143,10 +95,14 @@ export class InstancedExplosionRenderer {
     this.flashMesh.instanceMatrix.needsUpdate = true
     this.smokeMesh.instanceMatrix.needsUpdate = true
     
-    // Add to scene
+    // Add to scene with proper render order
+    this.sphereMesh.renderOrder = 2  // Render explosion on top
+    this.flashMesh.renderOrder = 3   // Flash renders last (brightest)
+    this.smokeMesh.renderOrder = 1   // Smoke renders first (background)
+    
+    this.scene.add(this.smokeMesh)
     this.scene.add(this.sphereMesh)
     this.scene.add(this.flashMesh)
-    this.scene.add(this.smokeMesh)
   }
   
   createExplosion(
@@ -154,7 +110,9 @@ export class InstancedExplosionRenderer {
     quality: number = 1.0,
     type: 'air' | 'ground' = 'ground'
   ): void {
-    if (this.availableIndices.length === 0) return
+    if (this.availableIndices.length === 0) {
+      return
+    }
     
     const index = this.availableIndices.pop()!
     const id = `explosion_${Date.now()}_${Math.random()}`
@@ -164,28 +122,34 @@ export class InstancedExplosionRenderer {
       index,
       position: position.clone(),
       startTime: Date.now(),
-      duration: 800 + quality * 400, // 0.8 to 1.2 seconds
-      maxScale: 6 + quality * 8, // 6 to 14 based on quality
+      duration: 600 + quality * 200, // 0.6 to 0.8 seconds (faster main explosion)
+      maxScale: 3 + quality * 4, // 3 to 7 based on quality (smaller)
       quality,
       active: true,
-      type
+      type,
+      smokeDuration: 1000 + quality * 500 // 1.0-1.5 seconds for smoke
     }
     
     this.activeExplosions.set(id, explosion)
+    
+    // Create launch effect style smoke and dust
+    this.createLaunchStyleEffects(position, quality, type)
   }
   
   update(): void {
     const currentTime = Date.now()
     
-    // Update shader uniforms
-    this.explosionMaterial.uniforms.time.value = currentTime * 0.001
+    // Update launch style effects
+    this.activeEffects = this.activeEffects.filter(effect => effect.update())
     
     // Update all active explosions
     this.activeExplosions.forEach((explosion, id) => {
       const elapsed = currentTime - explosion.startTime
       const progress = Math.min(elapsed / explosion.duration, 1)
+      const smokeProgress = Math.min(elapsed / (explosion.smokeDuration || explosion.duration), 1)
       
-      if (progress >= 1) {
+      // Only remove when smoke is also done
+      if (smokeProgress >= 1) {
         this.removeExplosion(id)
         return
       }
@@ -194,16 +158,25 @@ export class InstancedExplosionRenderer {
       const easeOutQuad = 1 - Math.pow(1 - progress, 2)
       const scale = explosion.maxScale * easeOutQuad
       
-      // Update main explosion sphere
-      this.dummy.position.copy(explosion.position)
-      this.dummy.scale.setScalar(scale)
-      this.dummy.updateMatrix()
-      
-      // Store progress in scale for shader
-      const matrixWithProgress = this.dummy.matrix.clone()
-      matrixWithProgress.elements[0] = progress // Store progress in first element
-      
-      this.sphereMesh.setMatrixAt(explosion.index, this.dummy.matrix)
+      // Main explosion sphere (hide after it completes)
+      if (progress < 1) {
+        // Fade out by reducing scale in the last 20% of animation
+        let finalScale = scale
+        if (progress > 0.8) {
+          const fadeProgress = (progress - 0.8) / 0.2
+          finalScale = scale * (1 - fadeProgress)
+        }
+        
+        // Update main explosion sphere
+        this.dummy.position.copy(explosion.position)
+        this.dummy.scale.setScalar(finalScale)
+        this.dummy.updateMatrix()
+        this.sphereMesh.setMatrixAt(explosion.index, this.dummy.matrix)
+      } else {
+        // Hide main explosion after it completes
+        const zeroScale = new THREE.Matrix4().makeScale(0, 0, 0)
+        this.sphereMesh.setMatrixAt(explosion.index, zeroScale)
+      }
       
       // Update flash (only for first 20% of explosion)
       if (progress < 0.2) {
@@ -225,24 +198,24 @@ export class InstancedExplosionRenderer {
         this.flashMesh.setMatrixAt(explosion.index, zeroScale)
       }
       
-      // Update smoke ring (starts after 30% progress)
-      if (explosion.quality > 0.7 && progress > 0.3) {
-        const smokeProgress = (progress - 0.3) / 0.7
-        const smokeScale = scale * (1 + smokeProgress * 2)
-        const smokeY = explosion.position.y + smokeProgress * scale * 0.5
+      // Update smoke mesh (appears after explosion, lingers longer)
+      if (explosion.quality > 0.3 && progress > 0.7) {
+        // Use smokeProgress which has longer duration
+        const smokePhase = Math.min((smokeProgress - 0.3) / 0.7, 1)  // 0-1 for smoke lifetime
         
-        this.dummy.position.set(explosion.position.x, smokeY, explosion.position.z)
-        this.dummy.scale.setScalar(smokeScale)
-        this.dummy.rotation.x = -Math.PI / 2
+        // Position smoke at explosion center
+        this.dummy.position.copy(explosion.position)
         
-        // Fade out smoke
-        const smokeOpacity = 0.6 * (1 - smokeProgress)
-        this.dummy.scale.multiplyScalar(smokeOpacity)
+        // Smoke starts at explosion size and expands slowly
+        const smokeScale = explosion.maxScale * (0.8 + smokePhase * 0.4) // 80% to 120% of explosion size
+        const smokeFade = Math.pow(1 - smokePhase, 0.5) // Slower fade
         
+        this.dummy.scale.setScalar(smokeScale * smokeFade)
+        this.dummy.rotation.set(0, smokePhase * Math.PI * 0.5, 0)
         this.dummy.updateMatrix()
         this.smokeMesh.setMatrixAt(explosion.index, this.dummy.matrix)
       } else {
-        // Hide smoke
+        // Hide smoke before it appears
         const zeroScale = new THREE.Matrix4().makeScale(0, 0, 0)
         this.smokeMesh.setMatrixAt(explosion.index, zeroScale)
       }
@@ -293,6 +266,187 @@ export class InstancedExplosionRenderer {
   
   getActiveExplosionCount(): number {
     return this.activeExplosions.size
+  }
+  
+  private createLaunchStyleEffects(position: THREE.Vector3, quality: number, type: 'air' | 'ground'): void {
+    // For now, we'll rely on the instanced smoke mesh instead of creating separate particles
+    // This prevents the layering issue where particles appear over the explosion
+    
+    // For ground explosions, just add the dust ring
+    if (type === 'ground' && quality > 0.5) {
+      setTimeout(() => {
+        this.createGroundDustRing(position, quality)
+      }, 100) // 100ms delay
+    }
+  }
+  
+  private createSmokeCloud(position: THREE.Vector3, quality: number): void {
+    const particleCount = Math.floor(10 + quality * 15) // 10-25 particles based on quality
+    const geometry = new THREE.BufferGeometry()
+    const positions = new Float32Array(particleCount * 3)
+    const velocities = new Float32Array(particleCount * 3)
+    const lifetimes = new Float32Array(particleCount)
+    const sizes = new Float32Array(particleCount)
+    
+    // Initialize particles
+    for (let i = 0; i < particleCount; i++) {
+      // Random position around explosion center, starting from the edge
+      const angle = Math.random() * Math.PI * 2
+      const radius = 2 + Math.random() * 2 // Start 2-4 units from center
+      const offset = new THREE.Vector3(
+        Math.cos(angle) * radius,
+        Math.random() * 2,
+        Math.sin(angle) * radius
+      )
+      
+      positions[i * 3] = position.x + offset.x
+      positions[i * 3 + 1] = position.y + offset.y
+      positions[i * 3 + 2] = position.z + offset.z
+      
+      // Outward expansion velocity (mostly horizontal)
+      const vel = new THREE.Vector3(
+        (Math.random() - 0.5) * 8, // Outward expansion
+        (Math.random() - 0.5) * 2, // Very minimal vertical movement
+        (Math.random() - 0.5) * 8
+      )
+      
+      velocities[i * 3] = vel.x
+      velocities[i * 3 + 1] = vel.y
+      velocities[i * 3 + 2] = vel.z
+      
+      lifetimes[i] = Math.random() * 0.5
+      sizes[i] = 3 + Math.random() * 4 // Larger particles for explosions
+    }
+    
+    geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3))
+    geometry.setAttribute('velocity', new THREE.BufferAttribute(velocities, 3))
+    geometry.setAttribute('lifetime', new THREE.BufferAttribute(lifetimes, 1))
+    geometry.setAttribute('size', new THREE.BufferAttribute(sizes, 1))
+    
+    const material = new THREE.PointsMaterial({
+      size: 12,
+      color: 0x444444, // Darker smoke
+      map: this.createSmokeTexture(),
+      transparent: true,
+      opacity: 0.4, // Lower initial opacity
+      depthWrite: false,
+      depthTest: true,
+      blending: THREE.NormalBlending,
+      sizeAttenuation: true,
+      vertexColors: false
+    })
+    
+    const points = new THREE.Points(geometry, material)
+    points.renderOrder = 0  // Render smoke particles behind everything
+    this.scene.add(points)
+    
+    // Animate smoke
+    const startTime = Date.now()
+    const duration = 1500 + quality * 1000 // 1.5-2.5 seconds based on quality
+    const effect = {
+      update: () => {
+        const elapsed = (Date.now() - startTime) / 1000
+        if (elapsed > duration / 1000) {
+          this.scene.remove(points)
+          geometry.dispose()
+          material.dispose()
+          if (material.map) material.map.dispose()
+          return false
+        }
+        
+        const positions = geometry.attributes.position.array as Float32Array
+        const velocities = geometry.attributes.velocity.array as Float32Array
+        const lifetimes = geometry.attributes.lifetime.array as Float32Array
+        const sizes = geometry.attributes.size.array as Float32Array
+        
+        for (let i = 0; i < particleCount; i++) {
+          lifetimes[i] += 0.016
+          
+          // Update position
+          positions[i * 3] += velocities[i * 3] * 0.016
+          positions[i * 3 + 1] += velocities[i * 3 + 1] * 0.016
+          positions[i * 3 + 2] += velocities[i * 3 + 2] * 0.016
+          
+          // Rapidly slow down particles (high drag)
+          velocities[i * 3] *= 0.92
+          velocities[i * 3 + 1] *= 0.92 // No upward drift
+          velocities[i * 3 + 2] *= 0.92
+          
+          // Grow over time
+          sizes[i] = (3 + Math.random() * 4) * (1 + lifetimes[i] * 0.5)
+        }
+        
+        geometry.attributes.position.needsUpdate = true
+        geometry.attributes.size.needsUpdate = true
+        
+        // Start fading immediately, fade faster
+        const fadeProgress = elapsed / (duration / 1000)
+        material.opacity = 0.4 * Math.pow(1 - fadeProgress, 2) // Quadratic fade for faster dissipation
+        
+        return true
+      }
+    }
+    
+    this.activeEffects.push(effect)
+  }
+  
+  private createGroundDustRing(position: THREE.Vector3, quality: number): void {
+    // Just create expanding dust ring without particles
+    const ringGeometry = new THREE.RingGeometry(1, 10 + quality * 5, 16, 1)
+    const ringMaterial = new THREE.MeshBasicMaterial({
+      color: 0x8b7355,
+      opacity: 0.4,
+      transparent: true,
+      side: THREE.DoubleSide
+    })
+    const ring = new THREE.Mesh(ringGeometry, ringMaterial)
+    ring.rotation.x = -Math.PI / 2
+    ring.position.copy(position)
+    ring.position.y = 0.05
+    ring.renderOrder = -1  // Render dust ring way behind explosion
+    this.scene.add(ring)
+    
+    // Animate dust ring
+    const startTime = Date.now()
+    const effect = {
+      update: () => {
+        const elapsed = (Date.now() - startTime) / 1000
+        if (elapsed > 2) {
+          this.scene.remove(ring)
+          ringGeometry.dispose()
+          ringMaterial.dispose()
+          return false
+        }
+        
+        // Expand ring
+        const scale = 1 + elapsed * 5
+        ring.scale.set(scale, scale, 1)
+        ringMaterial.opacity = 0.4 * (1 - elapsed / 2)
+        
+        return true
+      }
+    }
+    
+    this.activeEffects.push(effect)
+  }
+  
+  private createSmokeTexture(): THREE.Texture {
+    const canvas = document.createElement('canvas')
+    canvas.width = 64
+    canvas.height = 64
+    const ctx = canvas.getContext('2d')!
+    
+    const gradient = ctx.createRadialGradient(32, 32, 0, 32, 32, 32)
+    gradient.addColorStop(0, 'rgba(100,100,100,0.8)')
+    gradient.addColorStop(0.4, 'rgba(100,100,100,0.4)')
+    gradient.addColorStop(1, 'rgba(100,100,100,0)')
+    
+    ctx.fillStyle = gradient
+    ctx.fillRect(0, 0, 64, 64)
+    
+    const texture = new THREE.CanvasTexture(canvas)
+    texture.needsUpdate = true
+    return texture
   }
   
   dispose(): void {

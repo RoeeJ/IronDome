@@ -240,8 +240,8 @@ export class InterceptionSystem {
     // Higher quality = larger explosion
     // this.fragmentationSystem.createFragmentation(position, direction, quality)
     
-    // Create explosion visual
-    this.createExplosion(position, quality)
+    // Create explosion visual with boosted quality for better smoke
+    this.createExplosion(position, Math.max(0.8, quality))
     
     // Determine if threat is destroyed based on quality
     const destroyProbability = 0.7 + quality * 0.3  // 70% to 100% based on quality
@@ -311,7 +311,7 @@ export class InterceptionSystem {
     this.repurposeInterceptors(threat)
     
     // Small explosion at threat position
-    this.createExplosion(threat.getPosition(), 0.3)
+    this.createExplosion(threat.getPosition(), 0.8)
   }
   
   private repurposeInterceptors(destroyedThreat: Threat): void {
@@ -365,7 +365,7 @@ export class InterceptionSystem {
         // No suitable target found - self-destruct to avoid friendly fire
         debug.category('Interception', 'No suitable retarget found - interceptor will self-destruct')
         interception.interceptor.isActive = false
-        this.createExplosion(interception.interceptor.getPosition(), 0.2)
+        this.createExplosion(interception.interceptor.getPosition(), 0.8)
       }
     }
   }
@@ -398,14 +398,33 @@ export class InterceptionSystem {
       // Use instanced renderer for better performance
       instancedRenderer.createExplosion(position, quality, position.y > 5 ? 'air' : 'ground')
       
-      // Add point light flash
-      const flash = new THREE.PointLight(0xffaa00, 3 + quality * 4, 30 + quality * 30)
+      // Add point light flash (scaled down to match smaller explosions)
+      const flash = new THREE.PointLight(0xffff00, 5 + quality * 10, 20 + quality * 20)
       flash.position.copy(position)
       this.scene.add(flash)
       
+      // Add ambient light boost for the explosion
+      const ambientBoost = new THREE.PointLight(0xff6600, 2, 30)
+      ambientBoost.position.copy(position)
+      this.scene.add(ambientBoost)
+      
+      // Fade out lights
+      const fadeInterval = setInterval(() => {
+        flash.intensity *= 0.85
+        ambientBoost.intensity *= 0.9
+        if (flash.intensity < 0.1) {
+          clearInterval(fadeInterval)
+          this.scene.remove(flash)
+          this.scene.remove(ambientBoost)
+        }
+      }, 50)
+      
+      // Ensure cleanup after max time
       setTimeout(() => {
+        clearInterval(fadeInterval)
         this.scene.remove(flash)
-      }, 200)
+        this.scene.remove(ambientBoost)
+      }, 1000)
       
       return
     }

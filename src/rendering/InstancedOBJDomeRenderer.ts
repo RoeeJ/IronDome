@@ -3,6 +3,7 @@ import { OBJLoader } from 'three/examples/jsm/loaders/OBJLoader.js'
 import * as BufferGeometryUtils from 'three/examples/jsm/utils/BufferGeometryUtils.js'
 import { IronDomeBattery } from '../entities/IronDomeBattery'
 import { debug } from '../utils/DebugLogger'
+import { GeometryOptimizer } from '../utils/GeometryOptimizer'
 
 export class InstancedOBJDomeRenderer {
   private scene: THREE.Scene
@@ -28,7 +29,7 @@ export class InstancedOBJDomeRenderer {
     this.scene = scene
     this.maxDomes = maxDomes
     
-    // Start loading the OBJ model
+    // Load the OBJ model with optimization
     this.loadPromise = this.loadOBJModel()
   }
   
@@ -45,7 +46,23 @@ export class InstancedOBJDomeRenderer {
         )
       })
       
-      // Process the OBJ model
+      // Analyze model complexity before optimization
+      const beforeStats = GeometryOptimizer.analyzeComplexity(object)
+      debug.log('Battery OBJ complexity BEFORE optimization:', beforeStats)
+      
+      // Optimize the model to reduce triangle count
+      GeometryOptimizer.optimizeObject(object, {
+        simplify: true, // Enable decimation
+        simplifyRatio: 0.05, // Keep only 5% of triangles for instanced rendering
+        mergeByMaterial: true,
+        removeSmallDetails: true,
+        smallDetailThreshold: 3.0 // Remove small details aggressively
+      })
+      
+      const afterStats = GeometryOptimizer.analyzeComplexity(object)
+      debug.log('Battery OBJ complexity AFTER optimization:', afterStats)
+      
+      // Process the optimized OBJ model
       const geometries: THREE.BufferGeometry[] = []
       const materials: THREE.Material[] = []
       

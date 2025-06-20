@@ -7,6 +7,8 @@ import { Threat, THREAT_CONFIGS } from './Threat'
 import { TrajectoryCalculator } from '../utils/TrajectoryCalculator'
 import { StaticRadarNetwork } from '../scene/StaticRadarNetwork'
 import { LaunchEffectsSystem } from '../systems/LaunchEffectsSystem'
+import { GeometryOptimizer } from '../utils/GeometryOptimizer'
+import { GeometryConfig } from '../config/GeometryConfig'
 import { debug } from '../utils/DebugLogger'
 import { ResourceManager } from '../game/ResourceManager'
 import { EventEmitter } from 'events'
@@ -102,7 +104,7 @@ export class IronDomeBattery extends EventEmitter {
     
     // Radar system will be set externally
     
-    // Create health bar
+    // Create health bar (will be shown/hidden based on resource management)
     this.createHealthBar()
     
     scene.add(this.group)
@@ -723,6 +725,7 @@ export class IronDomeBattery extends EventEmitter {
   }
   
   setResourceManagement(enabled: boolean): void {
+    console.log('[Battery] setResourceManagement called with:', enabled, 'current useResources:', this.useResources)
     this.useResources = enabled
     
     // In sandbox mode (resources disabled), also disable health system
@@ -730,19 +733,27 @@ export class IronDomeBattery extends EventEmitter {
       // Remove health bar if it exists
       if (this.healthBar) {
         this.healthBar.visible = false
+        console.log('[Battery] Health bar hidden (sandbox mode)')
       }
       // Reset health to max and prevent damage
       this.currentHealth = this.maxHealth
       this.isDestroyed = false
     } else {
       // Re-enable health bar
-      if (this.healthBar) {
-        this.healthBar.visible = true
+      if (!this.healthBar) {
+        console.log('[Battery] Health bar doesn\'t exist, creating it')
+        // Create health bar if it doesn't exist yet
+        this.createHealthBar()
       }
+      this.healthBar.visible = true
+      this.updateHealthBar() // Update to show current health
+      console.log('[Battery] Health bar enabled and updated, visible:', this.healthBar.visible)
     }
   }
   
   private createHealthBar(): void {
+    console.log('[HealthBar] Creating health bar, useResources:', this.useResources)
+    
     // Remove existing health bar if it exists
     if (this.healthBar) {
       this.healthBar.traverse((child) => {
@@ -767,7 +778,7 @@ export class IronDomeBattery extends EventEmitter {
       side: THREE.DoubleSide
     })
     const bgBar = new THREE.Mesh(bgGeometry, bgMaterial)
-    bgBar.position.y = 25
+    bgBar.position.y = 0 // Relative to group
     this.healthBar.add(bgBar)
     
     // Health bar
@@ -779,7 +790,7 @@ export class IronDomeBattery extends EventEmitter {
       side: THREE.DoubleSide
     })
     const healthFill = new THREE.Mesh(healthGeometry, healthMaterial)
-    healthFill.position.y = 25
+    healthFill.position.y = 0 // Relative to group
     healthFill.position.z = 0.1
     healthFill.name = 'health-fill'
     this.healthBar.add(healthFill)
@@ -787,6 +798,11 @@ export class IronDomeBattery extends EventEmitter {
     // Add to scene (not group) so it can rotate independently
     this.scene.add(this.healthBar)
     this.healthBar.position.copy(this.config.position)
+    this.healthBar.position.y = 25 // Position above battery
+    
+    // Set initial visibility based on resource management mode
+    this.healthBar.visible = this.useResources
+    console.log('[HealthBar] Created at position:', this.healthBar.position, 'visible:', this.healthBar.visible)
   }
   
   private updateHealthBar(): void {
@@ -844,7 +860,11 @@ export class IronDomeBattery extends EventEmitter {
   
   private onDestroyed(): void {
     // Create explosion effect
-    const explosionGeometry = new THREE.SphereGeometry(15, 16, 16)
+    const explosionGeometry = new THREE.SphereGeometry(
+      GeometryConfig.explosionSphere.radius,
+      GeometryConfig.explosionSphere.widthSegments,
+      GeometryConfig.explosionSphere.heightSegments
+    )
     const explosionMaterial = new THREE.MeshBasicMaterial({
       color: 0xff6600,
       transparent: true,
@@ -990,8 +1010,23 @@ export class IronDomeBattery extends EventEmitter {
         object.position.set(-center.x, -minY, -center.z)  // Place on ground
         debug.asset('loading', 'battery-position', { position: object.position })
         
-        // Optimize the model by merging geometries
-        this.optimizeOBJModel(object)
+        // Analyze model complexity before optimization
+        const beforeStats = GeometryOptimizer.analyzeComplexity(object)
+        debug.log('Battery model complexity BEFORE optimization:', beforeStats)
+        
+        // Optimize the model aggressively
+        GeometryOptimizer.optimizeObject(object, {
+          simplify: true, // Enable our basic simplification
+          simplifyRatio: 0.1, // Keep only 10% of triangles
+          mergeByMaterial: true, // This is the key optimization
+          removeSmallDetails: true,
+          smallDetailThreshold: 2.0 // Remove details smaller than 2.0 units
+        })
+        
+        // Analyze after optimization
+        const afterStats = GeometryOptimizer.analyzeComplexity(object)
+        debug.log('Battery model complexity AFTER optimization:', afterStats)
+        debug.log(`Triangle reduction: ${beforeStats.totalTriangles} -> ${afterStats.totalTriangles} (${Math.round((1 - afterStats.totalTriangles/beforeStats.totalTriangles) * 100)}% reduction)`)
         
         // Hide procedurally generated base components but keep launcher tubes
         this.group.children.forEach(child => {
@@ -1082,11 +1117,24 @@ export class IronDomeBattery extends EventEmitter {
   }
   
   update(deltaTime: number = 0, threats: Threat[] = []): void {
-    // Update health bar to face camera
+    // Update health bar to face camera and follow battery position
     if (this.healthBar && !this.isDestroyed) {
       const camera = (this.scene as any).__camera
       if (camera) {
-        this.healthBar.lookAt(camera.position)
+        // Update position in case battery moved
+        this.healthBar.position.copy(this.config.position)
+        this.healthBar.position.y = 25 // Position above battery
+        
+        // Look at camera but keep upright
+        const cameraPos = camera.position.clone()
+        cameraPos.y = this.healthBar.position.y
+        this.healthBar.lookAt(cameraPos)
+        
+        // Ensure visibility in game mode
+        if (this.useResources && !this.healthBar.visible) {
+          console.log('[Battery] Health bar was hidden, making visible')
+          this.healthBar.visible = true
+        }
       }
     }
     

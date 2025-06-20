@@ -27,6 +27,7 @@ import { DomePlacementSystem } from './game/DomePlacementSystem'
 import { GameUI } from './ui/GameUI'
 import { InstancedProjectileRenderer } from './rendering/InstancedProjectileRenderer'
 import { InstancedThreatRenderer } from './rendering/InstancedThreatRenderer'
+import { LODInstancedThreatRenderer } from './rendering/LODInstancedThreatRenderer'
 
 // Initialize device capabilities
 const deviceCaps = DeviceCapabilities.getInstance()
@@ -187,13 +188,21 @@ const threatManager = new ThreatManager(scene, world)
 // Hook into threat lifecycle for instanced rendering
 threatManager.on('threatSpawned', (threat: Threat) => {
   if (useInstancedRendering) {
-    instancedThreatRenderer.addThreat(threat)
+    if (useLODRendering) {
+      lodInstancedThreatRenderer.addThreat(threat)
+    } else {
+      instancedThreatRenderer.addThreat(threat)
+    }
   }
 })
 
 threatManager.on('threatDestroyed', (threatId: string) => {
   if (useInstancedRendering) {
-    instancedThreatRenderer.removeThreat(threatId)
+    if (useLODRendering) {
+      lodInstancedThreatRenderer.removeThreat(threatId)
+    } else {
+      instancedThreatRenderer.removeThreat(threatId)
+    }
   }
 })
 
@@ -240,17 +249,19 @@ let projectiles: Projectile[] = []
 // Instanced renderers for performance
 const instancedProjectileRenderer = new InstancedProjectileRenderer(scene)
 const instancedThreatRenderer = new InstancedThreatRenderer(scene)
+const lodInstancedThreatRenderer = new LODInstancedThreatRenderer(scene, camera)
 let useInstancedRendering = true
+let useLODRendering = true
 
 // Import and create instanced debris renderer
 import { InstancedDebrisRenderer } from './rendering/InstancedDebrisRenderer'
-const instancedDebrisRenderer = new InstancedDebrisRenderer(scene, 1000)
+const instancedDebrisRenderer = new InstancedDebrisRenderer(scene, 500)
 // Make it globally available for the debris system
 ;(window as any).__instancedDebrisRenderer = instancedDebrisRenderer
 
 // Import and create instanced explosion renderer
 import { InstancedExplosionRenderer } from './rendering/InstancedExplosionRenderer'
-const instancedExplosionRenderer = new InstancedExplosionRenderer(scene, 100)
+const instancedExplosionRenderer = new InstancedExplosionRenderer(scene, 30)
 // Make it globally available
 ;(window as any).__instancedExplosionRenderer = instancedExplosionRenderer
 
@@ -954,7 +965,11 @@ function animate() {
     profiler.startSection('Instanced Rendering Update')
     
     // Update threats
-    instancedThreatRenderer.updateThreats(activeThreats)
+    if (useLODRendering) {
+      lodInstancedThreatRenderer.updateThreats(activeThreats, currentTime * 1000)
+    } else {
+      instancedThreatRenderer.updateThreats(activeThreats)
+    }
     
     // Update interceptors (combine all projectiles)
     const allInterceptors = [...projectiles, ...systemInterceptors]
@@ -1104,6 +1119,10 @@ if (debug.isEnabled()) {
   debugIndicator.textContent = 'DEBUG MODE'
   document.body.appendChild(debugIndicator)
 }
+
+// LOD rendering is now always enabled by default
+
+// LOD rendering is always enabled - no toggle needed
 
 
 // Orientation handling for mobile

@@ -55,14 +55,8 @@ export class GameState extends EventEmitter {
     super()
     this.data = this.loadState()
     
-    // Check if this is a page refresh - reset game state
-    const isRefresh = performance.navigation.type === 1 || 
-                      (performance.getEntriesByType('navigation')[0] as any)?.type === 'reload'
-    
-    if (isRefresh) {
-      // Reset to default state on refresh
-      this.data = { ...this.DEFAULT_STATE }
-      // Ensure we have the initial dome placement
+    // Ensure we have at least one battery placement
+    if (!this.data.domePlacements || this.data.domePlacements.length === 0) {
       this.data.domePlacements = [{
         id: 'battery_initial',
         position: { x: 0, z: 0 },

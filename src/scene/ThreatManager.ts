@@ -177,9 +177,22 @@ export class ThreatManager extends EventEmitter {
         const distanceToTarget = threat.getPosition().distanceTo(threat.targetPosition)
         const timeSinceLaunch = (Date.now() - threat.launchTime) / 1000
         
+        // Check if drone is close to any battery
+        const closestBattery = this.batteries.reduce((closest, battery) => {
+          if (!battery.isOperational()) return closest
+          const dist = threat.getPosition().distanceTo(battery.getPosition())
+          const closestDist = closest ? threat.getPosition().distanceTo(closest.getPosition()) : Infinity
+          return dist < closestDist ? battery : closest
+        }, null as IronDomeBattery | null)
+        
+        const distanceToBattery = closestBattery 
+          ? threat.getPosition().distanceTo(closestBattery.getPosition())
+          : Infinity
+        
         // Check if drone should explode
         const shouldExplode = 
-          distanceToTarget < 5 ||  // Close enough to target (5m radius)
+          distanceToBattery < 10 ||  // Within damage distance of battery
+          distanceToTarget < 5 ||  // Close enough to original target
           threat.getPosition().y <= 1 ||  // Hit ground
           timeSinceLaunch > 60  // Timeout after 60 seconds
         
@@ -776,7 +789,7 @@ export class ThreatManager extends EventEmitter {
     // Check if instanced explosion renderer is available
     const instancedRenderer = (window as any).__instancedExplosionRenderer
     if (instancedRenderer) {
-      instancedRenderer.createExplosion(position, 0.6, 'air')
+      instancedRenderer.createExplosion(position, 0.8, 'air')
       
       // Add point light flash
       const flash = new THREE.PointLight(0xffaa00, 10, 50)

@@ -290,19 +290,25 @@ export class Threat extends Projectile {
         this.body.velocity.y = -10
       }
       
-      // If close to target horizontally, start descent
-      if (horizontalDistance < 50) {
+      // If close to target horizontally, start aggressive descent
+      if (horizontalDistance < 30) { // Reduced from 50 to 30 for more aggressive dive
         // Override altitude maintenance and dive toward target
         const diveDir = new THREE.Vector3()
           .subVectors(this.targetPosition, currentPos)
           .normalize()
         
+        // Strong dive force to ensure drone reaches target
         const diveForce = new CANNON.Vec3(
-          diveDir.x * 30,
-          diveDir.y * 30 - 10, // Extra downward force
-          diveDir.z * 30
+          diveDir.x * 50,
+          -50, // Strong downward force
+          diveDir.z * 50
         )
         this.body.applyForce(diveForce, this.body.position)
+        
+        // Also directly adjust velocity to ensure descent
+        if (this.body.velocity.y > -20) {
+          this.body.velocity.y = -20
+        }
       } else {
         // Normal flight - maintain altitude and move toward target
         targetDir.y = 0 // Ignore vertical component for horizontal movement

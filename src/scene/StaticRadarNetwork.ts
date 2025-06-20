@@ -82,8 +82,8 @@ export class StaticRadarNetwork {
     // Create static coverage dome
     const domeGeometry = new THREE.SphereGeometry(
       this.detectionRadius,
-      32,
-      16,
+      16,  // Reduced from 32
+      8,   // Reduced from 16
       0,
       Math.PI * 2,
       0,

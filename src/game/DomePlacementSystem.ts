@@ -71,12 +71,32 @@ export class DomePlacementSystem {
   }
   
   setSandboxMode(isSandbox: boolean): void {
+    const previousMode = this.isSandboxMode
     this.isSandboxMode = isSandbox
     
-    // Update all existing batteries
-    this.placedDomes.forEach(dome => {
-      dome.battery.setResourceManagement(!isSandbox)
-    })
+    // If switching from one mode to another, clean up and reset
+    if (previousMode !== isSandbox) {
+      // Clear all existing batteries
+      const batteryIds = Array.from(this.placedDomes.keys())
+      batteryIds.forEach(id => {
+        this.removeBattery(id, false) // Don't update game state during mode switch
+      })
+      
+      // Clear saved placements from game state
+      const placements = this.gameState.getDomePlacements()
+      placements.forEach(p => {
+        this.gameState.removeDomePlacement(p.id)
+      })
+      
+      // Place initial battery at center
+      const initialId = 'battery_initial'
+      const initialPosition = new THREE.Vector3(0, 0, 0)
+      this.placeBatteryAt(initialPosition, initialId, 1)
+      this.gameState.addDomePlacement(initialId, {
+        x: initialPosition.x,
+        z: initialPosition.z
+      })
+    }
   }
   
   private createRangePreview(): void {
@@ -303,6 +323,16 @@ export class DomePlacementSystem {
     battery.setLaunchOffset(new THREE.Vector3(-2, 14.5, -0.1))
     battery.setLaunchDirection(new THREE.Vector3(0.6, 1, 0.15).normalize())
     
+    // Listen for battery destruction in game mode
+    if (!this.isSandboxMode) {
+      battery.on('destroyed', () => {
+        // Remove the destroyed battery after a delay for the explosion animation
+        setTimeout(() => {
+          this.removeBattery(batteryId, true)
+        }, 2000)
+      })
+    }
+    
     // Hide individual meshes if using instanced rendering
     if (this.useInstancedRendering) {
       battery.setVisualVisibility(false)
@@ -468,12 +498,19 @@ export class DomePlacementSystem {
   }
   
   upgradeBattery(batteryId: string): boolean {
+    console.log('[DomePlacement] Attempting to upgrade battery:', batteryId)
+    
     const dome = this.placedDomes.get(batteryId)
-    if (!dome) return false
+    if (!dome) {
+      console.log('[DomePlacement] Battery not found in placedDomes:', batteryId)
+      console.log('[DomePlacement] Available batteries:', Array.from(this.placedDomes.keys()))
+      return false
+    }
     
     // In sandbox mode, upgrades are free
     if (this.isSandboxMode) {
       const placement = this.gameState.getDomePlacements().find(p => p.id === batteryId)
+      console.log('[DomePlacement] Found placement:', placement)
       if (placement && placement.level < 5) {
         // Update the level in game state using free upgrade
         this.gameState.upgradeDomeFree(batteryId)
@@ -493,8 +530,11 @@ export class DomePlacementSystem {
     }
     
     // Game mode - use resources
+    console.log('[DomePlacement] Game mode upgrade for battery:', batteryId)
     if (this.resourceManager.purchaseDomeUpgrade(batteryId)) {
+      console.log('[DomePlacement] Resources purchased successfully')
       const placement = this.gameState.getDomePlacements().find(p => p.id === batteryId)
+      console.log('[DomePlacement] Found placement for upgrade:', placement)
       if (placement) {
         // Remove old battery and indicators (but keep in game state)
         const position = dome.position.clone()
@@ -568,6 +608,11 @@ export class DomePlacementSystem {
       if (dome.battery === battery) return id
     }
     return null
+  }
+  
+  getBattery(batteryId: string): IronDomeBattery | null {
+    const dome = this.placedDomes.get(batteryId)
+    return dome ? dome.battery : null
   }
   
   isInPlacementMode(): boolean {
