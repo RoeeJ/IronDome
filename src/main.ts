@@ -70,6 +70,10 @@ const camera = new THREE.PerspectiveCamera(
 camera.position.set(100, 60, 100)  // Moved camera further back
 camera.lookAt(0, 0, 0)
 
+// Store camera and scene globally for context menu
+;(window as any).__camera = camera
+;(window as any).__scene = scene
+
 // Renderer setup with device-specific settings
 const renderer = new THREE.WebGLRenderer({ 
   antialias: !deviceInfo.isMobile, // Disable antialiasing on mobile
@@ -85,6 +89,11 @@ renderer.domElement.style.height = window.innerHeight + 'px'
 // Adjust pixel ratio for mobile
 const maxPixelRatio = deviceInfo.isMobile ? 2 : window.devicePixelRatio
 renderer.setPixelRatio(Math.min(window.devicePixelRatio, maxPixelRatio))
+
+// Ensure renderer doesn't block UI events
+renderer.domElement.style.position = 'absolute'
+renderer.domElement.style.top = '0'
+renderer.domElement.style.left = '0'
 
 // Shadow settings based on device
 renderer.shadowMap.enabled = deviceCaps.shouldEnableShadows()
@@ -103,6 +112,9 @@ controls.dampingFactor = 0.05
 controls.minDistance = 10
 controls.maxDistance = 500  // Increased max distance
 controls.maxPolarAngle = Math.PI / 2 - 0.1 // Prevent going below ground
+
+// Store controls globally for UI to disable when needed
+;(window as any).__controls = controls
 
 // Lighting
 const ambientLight = new THREE.AmbientLight(0xffffff, 0.6)
@@ -206,9 +218,13 @@ tacticalDisplay.update([], new THREE.Vector3(0, 0, 0), 20, 0.95, 20)
 // Projectile management
 let projectiles: Projectile[] = []
 
+// Load saved preferences from localStorage
+const savedGameMode = localStorage.getItem('ironDome_gameMode')
+const savedProfilerVisible = localStorage.getItem('ironDome_profilerVisible')
+
 // Simulation controls (must be defined before UI)
 const simulationControls = {
-  gameMode: true,  // Enable game mode by default
+  gameMode: savedGameMode !== null ? savedGameMode === 'true' : true,  // Default to true if not saved
   autoIntercept: true,
   pause: false,
   timeScale: 1.0,
@@ -248,6 +264,52 @@ const updateUIMode = () => {
       isGameMode: simulationControls.gameMode,
       onModeChange: (gameMode: boolean) => {
         simulationControls.gameMode = gameMode
+        // Save to localStorage
+        localStorage.setItem('ironDome_gameMode', gameMode.toString())
+        
+        // Clear all existing threats and projectiles
+        threatManager.clearAll()
+        projectiles.forEach(p => p.destroy(scene, world))
+        projectiles = []
+        
+        // Reset game state
+        if (gameMode) {
+          // Switching to game mode - start fresh
+          gameState.startNewGame()
+          
+          // Remove all batteries
+          const allBatteries = domePlacementSystem.getAllBatteries()
+          const batteryIds: string[] = []
+          allBatteries.forEach(battery => {
+            const batteryId = domePlacementSystem.getBatteryId(battery)
+            if (batteryId) batteryIds.push(batteryId)
+          })
+          
+          // Remove all batteries
+          batteryIds.forEach(id => domePlacementSystem.removeBattery(id))
+          
+          // Ensure we have the initial battery
+          if (domePlacementSystem.getAllBatteries().length === 0) {
+            // Force create initial battery
+            const initialId = 'battery_initial'
+            domePlacementSystem.placeBatteryAt(new THREE.Vector3(0, 0, 0), initialId, 1)
+            gameState.addDomePlacement(initialId, { x: 0, z: 0 })
+          }
+        } else {
+          // Switching to sandbox mode - ensure at least one battery
+          const allBatteries = domePlacementSystem.getAllBatteries()
+          
+          // If no batteries exist, create one
+          if (allBatteries.length === 0) {
+            const initialId = 'battery_initial'
+            domePlacementSystem.placeBatteryAt(new THREE.Vector3(0, 0, 0), initialId, 1)
+            gameState.addDomePlacement(initialId, { x: 0, z: 0 })
+          }
+        }
+        
+        // Update placement system mode
+        domePlacementSystem.setSandboxMode(!gameMode)
+        
         if (gameMode) {
           // Switch to game mode
           threatManager.stopSpawning()
@@ -265,6 +327,9 @@ const updateUIMode = () => {
     })
   )
 }
+
+// Set initial sandbox mode based on saved preference
+domePlacementSystem.setSandboxMode(!simulationControls.gameMode)
 
 // Initial render
 updateUIMode()
@@ -686,6 +751,11 @@ const profiler = new Profiler()
 const profilerDisplay = new ProfilerDisplay(profiler)
 const renderProfiler = new RenderProfiler(renderer)
 renderProfiler.setProfiler(profiler)
+
+// Apply saved profiler visibility
+if (savedProfilerVisible === 'true') {
+  profilerDisplay.show()
+}
 
 // Render bottleneck tracking
 let frameCount = 0

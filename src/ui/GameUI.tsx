@@ -4,6 +4,8 @@ import { WaveManager } from '../game/WaveManager'
 import { ResourceManager } from '../game/ResourceManager'
 import { DomePlacementSystem } from '../game/DomePlacementSystem'
 import { DeviceCapabilities } from '../utils/DeviceCapabilities'
+import { DomeContextMenu } from './DomeContextMenu'
+import * as THREE from 'three'
 
 interface GameUIProps {
   waveManager: WaveManager
@@ -36,6 +38,11 @@ export const GameUI: React.FC<GameUIProps> = ({ waveManager, placementSystem, on
   const [showShop, setShowShop] = useState(false)
   const [placementMode, setPlacementMode] = useState(false)
   const [gameOver, setGameOver] = useState<GameOverData | null>(null)
+  const [contextMenu, setContextMenu] = useState<{
+    battery: any
+    batteryId: string
+    position: { x: number; y: number }
+  } | null>(null)
   
   // Store interval reference to clear it when needed
   const preparationIntervalRef = React.useRef<NodeJS.Timeout | null>(null)
@@ -135,8 +142,120 @@ export const GameUI: React.FC<GameUIProps> = ({ waveManager, placementSystem, on
         
         // Stop the game
         waveManager.pauseWave()
+        
+        // Disable OrbitControls
+        const controls = (window as any).__controls
+        if (controls) controls.enabled = false
       }
     }
+    
+    // Handle right-click on batteries
+    const handleContextMenu = (event: MouseEvent) => {
+      event.preventDefault()
+      
+      // Cast ray to find clicked battery
+      const canvas = document.querySelector('canvas')
+      if (!canvas) return
+      
+      const rect = canvas.getBoundingClientRect()
+      const x = ((event.clientX - rect.left) / rect.width) * 2 - 1
+      const y = -((event.clientY - rect.top) / rect.height) * 2 + 1
+      
+      // Get camera and scene from Three.js
+      const camera = (window as any).__camera
+      const scene = (window as any).__scene
+      if (!camera || !scene) return
+      
+      const raycaster = new THREE.Raycaster()
+      raycaster.setFromCamera(new THREE.Vector2(x, y), camera)
+      
+      // Check all batteries
+      const batteries = placementSystem.getAllBatteries()
+      for (const battery of batteries) {
+        const batteryMesh = battery.getGroup()
+        if (!batteryMesh) continue
+        
+        const intersects = raycaster.intersectObject(batteryMesh, true)
+        if (intersects.length > 0) {
+          const batteryId = placementSystem.getBatteryId(battery)
+          if (batteryId) {
+            setContextMenu({
+              battery,
+              batteryId,
+              position: { x: event.clientX, y: event.clientY }
+            })
+            // Disable OrbitControls while context menu is open
+            const controls = (window as any).__controls
+            if (controls) controls.enabled = false
+            break
+          }
+        }
+      }
+    }
+    
+    document.addEventListener('contextmenu', handleContextMenu)
+    
+    // Handle long press for mobile
+    let longPressTimer: NodeJS.Timeout | null = null
+    let touchStartPos = { x: 0, y: 0 }
+    
+    const handleTouchStart = (event: TouchEvent) => {
+      if (event.touches.length !== 1) return
+      
+      const touch = event.touches[0]
+      touchStartPos = { x: touch.clientX, y: touch.clientY }
+      
+      longPressTimer = setTimeout(() => {
+        // Simulate right-click
+        const mouseEvent = new MouseEvent('contextmenu', {
+          clientX: touch.clientX,
+          clientY: touch.clientY,
+          bubbles: true,
+          cancelable: true
+        })
+        handleContextMenu(mouseEvent)
+        vibrate(20)
+      }, 500) // 500ms for long press
+    }
+    
+    const handleTouchEnd = () => {
+      if (longPressTimer) {
+        clearTimeout(longPressTimer)
+        longPressTimer = null
+      }
+    }
+    
+    const handleTouchMove = (event: TouchEvent) => {
+      if (!longPressTimer || event.touches.length !== 1) return
+      
+      const touch = event.touches[0]
+      const distance = Math.sqrt(
+        Math.pow(touch.clientX - touchStartPos.x, 2) +
+        Math.pow(touch.clientY - touchStartPos.y, 2)
+      )
+      
+      // Cancel long press if moved too far
+      if (distance > 10) {
+        clearTimeout(longPressTimer)
+        longPressTimer = null
+      }
+    }
+    
+    if (deviceInfo?.hasTouch) {
+      document.addEventListener('touchstart', handleTouchStart, { passive: true })
+      document.addEventListener('touchend', handleTouchEnd)
+      document.addEventListener('touchmove', handleTouchMove, { passive: true })
+    }
+    
+    // Listen for battery updates
+    const handleBatteryUpdate = () => {
+      updateResourceDisplay()
+      // Force re-render to update placement info
+      setPlacementMode(placementSystem.isInPlacementMode())
+    }
+    
+    window.addEventListener('batteryRemoved', handleBatteryUpdate)
+    window.addEventListener('batteryUpgraded', handleBatteryUpdate)
     
     // Attach listeners
     gameState.on('creditsChanged', handleCreditsChanged)
@@ -160,6 +279,20 @@ export const GameUI: React.FC<GameUIProps> = ({ waveManager, placementSystem, on
       // Clear intervals
       clearInterval(placementCheckInterval)
       clearInterval(gameOverCheckInterval)
+      
+      // Remove context menu handler
+      document.removeEventListener('contextmenu', handleContextMenu)
+      
+      // Remove touch handlers
+      if (deviceInfo?.hasTouch) {
+        document.removeEventListener('touchstart', handleTouchStart)
+        document.removeEventListener('touchend', handleTouchEnd)
+        document.removeEventListener('touchmove', handleTouchMove)
+      }
+      
+      // Remove battery update handlers
+      window.removeEventListener('batteryRemoved', handleBatteryUpdate)
+      window.removeEventListener('batteryUpgraded', handleBatteryUpdate)
       
       gameState.off('creditsChanged', handleCreditsChanged)
       gameState.off('interceptorsChanged', handleInterceptorsChanged)
@@ -222,23 +355,32 @@ export const GameUI: React.FC<GameUIProps> = ({ waveManager, placementSystem, on
     // Clear current game state
     gameState.startNewGame()
     
-    // Reset domes - remove all existing ones
+    // Reset domes - remove all existing ones except the last
     const allBatteries = placementSystem.getAllBatteries()
+    const batteryIds: string[] = []
+    
     allBatteries.forEach(battery => {
-      // Skip the initial battery at center
-      if (battery.getPosition().length() > 1) {
-        const batteryId = placementSystem.getBatteryId(battery)
-        if (batteryId) {
-          placementSystem.removeBattery(batteryId)
-        }
-      }
+      const batteryId = placementSystem.getBatteryId(battery)
+      if (batteryId) batteryIds.push(batteryId)
     })
     
-    // Heal the center battery to full health
-    const centerBattery = placementSystem.getAllBatteries()[0]
-    if (centerBattery) {
-      const health = centerBattery.getHealth()
-      centerBattery.repair(health.max - health.current)
+    // Remove all batteries except the last one
+    if (batteryIds.length > 1) {
+      batteryIds.slice(1).forEach(id => {
+        placementSystem.removeBattery(id)
+      })
+    }
+    
+    // Reset the remaining battery to center position if needed
+    const remainingBattery = placementSystem.getAllBatteries()[0]
+    if (remainingBattery) {
+      const health = remainingBattery.getHealth()
+      remainingBattery.repair(health.max - health.current)
+    } else {
+      // No batteries left, create initial one
+      const initialId = 'battery_initial'
+      placementSystem.placeBatteryAt(new THREE.Vector3(0, 0, 0), initialId, 1)
+      gameState.addDomePlacement(initialId, { x: 0, z: 0 })
     }
     
     // Start fresh wave sequence
@@ -668,7 +810,7 @@ export const GameUI: React.FC<GameUIProps> = ({ waveManager, placementSystem, on
           padding: 30px;
           min-width: 400px;
           pointer-events: auto;
-          z-index: 200;
+          z-index: 10000;
         }
         
         .shop-title {
@@ -744,7 +886,7 @@ export const GameUI: React.FC<GameUIProps> = ({ waveManager, placementSystem, on
           flex-direction: column;
           justify-content: center;
           align-items: center;
-          z-index: 500;
+          z-index: 10000;
           animation: fadeIn 0.5s;
         }
         
@@ -1023,17 +1165,24 @@ export const GameUI: React.FC<GameUIProps> = ({ waveManager, placementSystem, on
           disabled={!placementSystem.canPlaceNewDome()}
         >
           {placementMode ? 'Cancel Placement' : 'Place Dome'}
-          {!placementMode && placementInfo.placedDomes >= placementInfo.unlockedDomes && (
+          {!placementMode && isGameMode && placementInfo.placedDomes >= placementInfo.unlockedDomes && (
             <div className="button-cost">Cost: {costs.domeUnlock}</div>
           )}
         </button>
         
-        <button 
-          className="game-button"
-          onClick={() => setShowShop(!showShop)}
-        >
-          Shop
-        </button>
+        {isGameMode && (
+          <button 
+            className="game-button"
+            onClick={() => {
+              setShowShop(!showShop)
+              // Toggle OrbitControls based on shop state
+              const controls = (window as any).__controls
+              if (controls) controls.enabled = showShop
+            }}
+          >
+            Shop
+          </button>
+        )}
         
         {interceptors < 20 && isWaveActive && (
           <button 
@@ -1082,6 +1231,9 @@ export const GameUI: React.FC<GameUIProps> = ({ waveManager, placementSystem, on
               className="game-over-button"
               onClick={() => {
                 setGameOver(null)
+                // Re-enable OrbitControls
+                const controls = (window as any).__controls
+                if (controls) controls.enabled = true
                 startNewGame()
               }}
             >
@@ -1091,6 +1243,9 @@ export const GameUI: React.FC<GameUIProps> = ({ waveManager, placementSystem, on
               className="game-over-button"
               onClick={() => {
                 setGameOver(null)
+                // Re-enable OrbitControls
+                const controls = (window as any).__controls
+                if (controls) controls.enabled = true
                 onModeChange?.(false)
               }}
             >
@@ -1105,6 +1260,9 @@ export const GameUI: React.FC<GameUIProps> = ({ waveManager, placementSystem, on
           <button className="shop-close" onClick={() => {
             vibrate(10)
             setShowShop(false)
+            // Re-enable OrbitControls
+            const controls = (window as any).__controls
+            if (controls) controls.enabled = true
           }}>✕</button>
           <h2 className="shop-title">Supply Shop</h2>
           
@@ -1144,6 +1302,22 @@ export const GameUI: React.FC<GameUIProps> = ({ waveManager, placementSystem, on
             </button>
           </div>
         </div>
+      )}
+      
+      {contextMenu && (
+        <DomeContextMenu
+          battery={contextMenu.battery}
+          batteryId={contextMenu.batteryId}
+          position={contextMenu.position}
+          onClose={() => {
+            setContextMenu(null)
+            // Re-enable OrbitControls
+            const controls = (window as any).__controls
+            if (controls) controls.enabled = true
+          }}
+          placementSystem={placementSystem}
+          isGameMode={isGameMode}
+        />
       )}
     </>
   )

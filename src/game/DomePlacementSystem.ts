@@ -29,6 +29,7 @@ export class DomePlacementSystem {
   private threatManager?: ThreatManager
   private interceptionSystem?: InterceptionSystem
   private radarNetwork?: StaticRadarNetwork
+  private isSandboxMode: boolean = false
   
   constructor(scene: THREE.Scene, world: CANNON.World) {
     this.scene = scene
@@ -58,6 +59,15 @@ export class DomePlacementSystem {
     
     // Ensure at least one battery exists
     setTimeout(() => this.ensureInitialBattery(), 100)
+  }
+  
+  setSandboxMode(isSandbox: boolean): void {
+    this.isSandboxMode = isSandbox
+    
+    // Update all existing batteries
+    this.placedDomes.forEach(dome => {
+      dome.battery.setResourceManagement(!isSandbox)
+    })
   }
   
   private createRangePreview(): void {
@@ -217,7 +227,10 @@ export class DomePlacementSystem {
   }
   
   attemptPlacement(worldPosition: THREE.Vector3): boolean {
-    if (!this.placementMode || !this.canPlaceNewDome()) return false
+    if (!this.placementMode) return false
+    
+    // In sandbox mode, no restrictions
+    if (!this.isSandboxMode && !this.canPlaceNewDome()) return false
     
     // Snap to ground
     const position = new THREE.Vector3(
@@ -232,34 +245,37 @@ export class DomePlacementSystem {
     
     const batteryId = `battery_${Date.now()}`
     
-    // Check if we have unlocked domes available
-    const unlockedCount = this.gameState.getUnlockedDomes()
-    const placedCount = this.placedDomes.size
-    
-    if (placedCount >= unlockedCount) {
-      // Need to purchase a new dome slot
-      if (!this.resourceManager.purchaseNewDome()) {
-        return false
+    // In game mode, check dome limits
+    if (!this.isSandboxMode) {
+      // Check if we have unlocked domes available
+      const unlockedCount = this.gameState.getUnlockedDomes()
+      const placedCount = this.placedDomes.size
+      
+      if (placedCount >= unlockedCount) {
+        // Need to purchase a new dome slot
+        if (!this.resourceManager.purchaseNewDome()) {
+          return false
+        }
       }
     }
     
     this.placeBatteryAt(position, batteryId)
     
-    // Save placement
+    // Save placement (even in sandbox mode for persistence)
     this.gameState.addDomePlacement(batteryId, {
       x: position.x,
       z: position.z
     })
     
-    // Auto-exit placement mode if we've reached the limit
-    if (!this.canPlaceNewDome()) {
+    // Auto-exit placement mode if we've reached the limit (game mode only)
+    if (!this.isSandboxMode && !this.canPlaceNewDome()) {
       this.exitPlacementMode()
     }
     
     return true
   }
   
-  private placeBatteryAt(position: THREE.Vector3, batteryId: string, level: number = 1): void {
+  placeBatteryAt(position: THREE.Vector3, batteryId: string, level: number = 1): void {
     const battery = new IronDomeBattery(this.scene, this.world, {
       position: position.clone(),
       maxRange: 150 + (level - 1) * 25, // Increase range with level
@@ -272,7 +288,7 @@ export class DomePlacementSystem {
     })
     
     // Configure battery
-    battery.setResourceManagement(true)
+    battery.setResourceManagement(!this.isSandboxMode)
     battery.setLaunchOffset(new THREE.Vector3(-2, 14.5, -0.1))
     battery.setLaunchDirection(new THREE.Vector3(0.6, 1, 0.15).normalize())
     
@@ -347,6 +363,12 @@ export class DomePlacementSystem {
     const dome = this.placedDomes.get(batteryId)
     if (!dome) return false
     
+    // Prevent removing the last battery
+    if (this.placedDomes.size <= 1) {
+      console.warn('Cannot remove the last battery')
+      return false
+    }
+    
     // Remove range and level indicators
     const toRemove: THREE.Object3D[] = []
     this.scene.children.forEach((child) => {
@@ -392,6 +414,23 @@ export class DomePlacementSystem {
     const dome = this.placedDomes.get(batteryId)
     if (!dome) return false
     
+    // In sandbox mode, upgrades are free
+    if (this.isSandboxMode) {
+      const placement = this.gameState.getDomePlacements().find(p => p.id === batteryId)
+      if (placement && placement.level < 5) {
+        // Update the level in game state using free upgrade
+        this.gameState.upgradeDomeFree(batteryId)
+        // Remove old battery and indicators
+        const position = dome.position.clone()
+        this.removeBattery(batteryId)
+        // Recreate battery with upgraded stats
+        this.placeBatteryAt(position, batteryId, placement.level + 1)
+        return true
+      }
+      return false
+    }
+    
+    // Game mode - use resources
     if (this.resourceManager.purchaseDomeUpgrade(batteryId)) {
       const placement = this.gameState.getDomePlacements().find(p => p.id === batteryId)
       if (placement) {
@@ -416,6 +455,9 @@ export class DomePlacementSystem {
   }
   
   canPlaceNewDome(): boolean {
+    // In sandbox mode, always allow placement
+    if (this.isSandboxMode) return true
+    
     const unlockedCount = this.gameState.getUnlockedDomes()
     const placedCount = this.placedDomes.size
     
@@ -430,6 +472,36 @@ export class DomePlacementSystem {
       placedDomes: this.placedDomes.size,
       canPlace: this.canPlaceNewDome()
     }
+  }
+  
+  getDomePlacements() {
+    return this.gameState.getDomePlacements()
+  }
+  
+  canUpgradeBattery(batteryId: string): boolean {
+    if (this.isSandboxMode) return true // Free upgrades in sandbox
+    
+    const dome = this.placedDomes.get(batteryId)
+    if (!dome) return false
+    
+    const placement = this.gameState.getDomePlacements().find(p => p.id === batteryId)
+    if (!placement || placement.level >= 5) return false // Max level 5
+    
+    const upgradeCost = this.gameState.getDomeUpgradeCost(placement.level)
+    return this.gameState.getCredits() >= upgradeCost
+  }
+  
+  getUpgradeCost(batteryId: string): number {
+    const placement = this.gameState.getDomePlacements().find(p => p.id === batteryId)
+    if (!placement) return 0
+    return this.gameState.getDomeUpgradeCost(placement.level)
+  }
+  
+  getBatteryId(battery: IronDomeBattery): string | null {
+    for (const [id, dome] of this.placedDomes) {
+      if (dome.battery === battery) return id
+    }
+    return null
   }
   
   isInPlacementMode(): boolean {
@@ -461,15 +533,6 @@ export class DomePlacementSystem {
     for (const dome of this.placedDomes.values()) {
       dome.battery.setRadarNetwork(radarNetwork)
     }
-  }
-  
-  getBatteryId(battery: IronDomeBattery): string | null {
-    for (const [id, dome] of this.placedDomes) {
-      if (dome.battery === battery) {
-        return id
-      }
-    }
-    return null
   }
   
   private ensureInitialBattery(): void {

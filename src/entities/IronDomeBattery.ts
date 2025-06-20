@@ -658,12 +658,48 @@ export class IronDomeBattery extends EventEmitter {
     return this.config.position.clone()
   }
   
+  getGroup(): THREE.Group {
+    return this.group
+  }
+  
   getConfig(): BatteryConfig {
     return { ...this.config }
   }
   
+  getStats() {
+    const loadedTubes = this.launcherTubes.filter(t => t.isLoaded).length
+    const reloadingTubes = this.launcherTubes.filter(t => !t.isLoaded).length
+    
+    return {
+      loadedTubes,
+      reloadingTubes,
+      totalTubes: this.launcherTubes.length,
+      health: {
+        current: this.currentHealth,
+        max: this.maxHealth,
+        percent: this.currentHealth / this.maxHealth
+      }
+    }
+  }
+  
   setResourceManagement(enabled: boolean): void {
     this.useResources = enabled
+    
+    // In sandbox mode (resources disabled), also disable health system
+    if (!enabled) {
+      // Remove health bar if it exists
+      if (this.healthBar) {
+        this.healthBar.visible = false
+      }
+      // Reset health to max and prevent damage
+      this.currentHealth = this.maxHealth
+      this.isDestroyed = false
+    } else {
+      // Re-enable health bar
+      if (this.healthBar) {
+        this.healthBar.visible = true
+      }
+    }
   }
   
   private createHealthBar(): void {
@@ -744,6 +780,9 @@ export class IronDomeBattery extends EventEmitter {
   takeDamage(amount: number): void {
     if (this.isDestroyed) return
     
+    // In sandbox mode (resources disabled), ignore damage
+    if (!this.useResources) return
+    
     this.currentHealth = Math.max(0, this.currentHealth - amount)
     this.updateHealthBar()
     
@@ -815,6 +854,12 @@ export class IronDomeBattery extends EventEmitter {
       current: this.currentHealth,
       max: this.maxHealth
     }
+  }
+  
+  repair(amount: number): void {
+    this.currentHealth = Math.min(this.maxHealth, this.currentHealth + amount)
+    this.isDestroyed = false
+    this.updateHealthBar()
   }
   
   isOperational(): boolean {

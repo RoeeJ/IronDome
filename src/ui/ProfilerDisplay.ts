@@ -42,6 +42,24 @@ export class ProfilerDisplay {
   toggle(): void {
     this.visible = !this.visible
     this.canvas.style.display = this.visible ? 'block' : 'none'
+    // Save visibility state to localStorage
+    localStorage.setItem('ironDome_profilerVisible', this.visible.toString())
+  }
+  
+  show(): void {
+    this.visible = true
+    this.canvas.style.display = 'block'
+    localStorage.setItem('ironDome_profilerVisible', 'true')
+  }
+  
+  hide(): void {
+    this.visible = false
+    this.canvas.style.display = 'none'
+    localStorage.setItem('ironDome_profilerVisible', 'false')
+  }
+  
+  isVisible(): boolean {
+    return this.visible
   }
   
   update(): void {

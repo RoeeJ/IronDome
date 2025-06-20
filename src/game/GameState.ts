@@ -232,6 +232,17 @@ export class GameState extends EventEmitter {
     return false
   }
   
+  upgradeDomeFree(id: string): boolean {
+    const dome = this.data.domePlacements.find(d => d.id === id)
+    if (dome && dome.level < 5) {
+      dome.level++
+      this.saveState()
+      this.emit('domeUpgraded', { id, level: dome.level })
+      return true
+    }
+    return false
+  }
+  
   getDomeUpgradeCost(currentLevel: number): number {
     return 500 * currentLevel
   }
