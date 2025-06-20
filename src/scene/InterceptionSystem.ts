@@ -392,6 +392,25 @@ export class InterceptionSystem {
   }
 
   private createExplosion(position: THREE.Vector3, quality: number = 1.0): void {
+    // Check if instanced explosion renderer is available
+    const instancedRenderer = (window as any).__instancedExplosionRenderer
+    if (instancedRenderer) {
+      // Use instanced renderer for better performance
+      instancedRenderer.createExplosion(position, quality, position.y > 5 ? 'air' : 'ground')
+      
+      // Add point light flash
+      const flash = new THREE.PointLight(0xffaa00, 3 + quality * 4, 30 + quality * 30)
+      flash.position.copy(position)
+      this.scene.add(flash)
+      
+      setTimeout(() => {
+        this.scene.remove(flash)
+      }, 200)
+      
+      return
+    }
+    
+    // Fallback to old method
     // Create expanding sphere for explosion
     const geometry = new THREE.SphereGeometry(1, 16, 8)
     const material = new THREE.MeshBasicMaterial({

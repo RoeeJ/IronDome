@@ -242,6 +242,18 @@ const instancedProjectileRenderer = new InstancedProjectileRenderer(scene)
 const instancedThreatRenderer = new InstancedThreatRenderer(scene)
 let useInstancedRendering = true
 
+// Import and create instanced debris renderer
+import { InstancedDebrisRenderer } from './rendering/InstancedDebrisRenderer'
+const instancedDebrisRenderer = new InstancedDebrisRenderer(scene, 1000)
+// Make it globally available for the debris system
+;(window as any).__instancedDebrisRenderer = instancedDebrisRenderer
+
+// Import and create instanced explosion renderer
+import { InstancedExplosionRenderer } from './rendering/InstancedExplosionRenderer'
+const instancedExplosionRenderer = new InstancedExplosionRenderer(scene, 100)
+// Make it globally available
+;(window as any).__instancedExplosionRenderer = instancedExplosionRenderer
+
 // Load saved preferences from localStorage
 const savedGameMode = localStorage.getItem('ironDome_gameMode')
 const savedProfilerVisible = localStorage.getItem('ironDome_profilerVisible')
@@ -947,6 +959,12 @@ function animate() {
     // Update interceptors (combine all projectiles)
     const allInterceptors = [...projectiles, ...systemInterceptors]
     instancedProjectileRenderer.updateProjectiles(allInterceptors)
+    
+    // Update debris
+    instancedDebrisRenderer.update(deltaTime)
+    
+    // Update explosions
+    instancedExplosionRenderer.update()
     
     profiler.endSection('Instanced Rendering Update')
   }

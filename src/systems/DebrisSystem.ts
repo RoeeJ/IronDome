@@ -49,6 +49,23 @@ export class DebrisSystem {
       explosive = false
     } = options
     
+    // Check if instanced renderer is available
+    const instancedRenderer = (window as any).__instancedDebrisRenderer
+    if (instancedRenderer) {
+      // Use instanced renderer for better performance
+      instancedRenderer.createDebris(
+        position,
+        velocity,
+        count,
+        {
+          speedMultiplier: explosive ? 1.5 : 1,
+          lifetimeSeconds: lifetimeRange[1],
+          sizeVariation: sizeRange[1] - sizeRange[0]
+        }
+      )
+      return
+    }
+    
     for (let i = 0; i < count; i++) {
       // Random size
       const size = sizeRange[0] + Math.random() * (sizeRange[1] - sizeRange[0])
