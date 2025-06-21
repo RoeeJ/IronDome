@@ -46,6 +46,7 @@ export const GameUI: React.FC<GameUIProps> = ({ waveManager, placementSystem, on
   } | null>(null)
   const [showHelp, setShowHelp] = useState(false)
   const [confirmNewGame, setConfirmNewGame] = useState(false)
+  const [autoIntercept, setAutoIntercept] = useState(true)
   const confirmTimeoutRef = React.useRef<NodeJS.Timeout | null>(null)
   
   // Store interval reference to clear it when needed
@@ -59,6 +60,12 @@ export const GameUI: React.FC<GameUIProps> = ({ waveManager, placementSystem, on
     // Initial state
     updateResourceDisplay()
     setPlacementMode(placementSystem.isInPlacementMode())
+    
+    // Sync initial auto intercept state
+    const controls = (window as any).__simulationControls
+    if (controls) {
+      setAutoIntercept(controls.autoIntercept)
+    }
     
     // Check placement mode periodically to stay in sync
     const placementCheckInterval = setInterval(() => {
@@ -111,6 +118,17 @@ export const GameUI: React.FC<GameUIProps> = ({ waveManager, placementSystem, on
     const handleWaveCompleted = (data: any) => {
       // Show wave complete notification
       showNotification(`Wave ${data.waveNumber} Complete! +${data.creditsEarned} credits`)
+      
+      // Check if auto-intercept was just unlocked
+      if (data.waveNumber === 4 && isGameMode) {
+        setTimeout(() => {
+          showNotification('🎆 AUTO-INTERCEPT UNLOCKED! Toggle between manual and auto modes.')
+          // Enable auto-intercept by default when unlocked
+          const controls = (window as any).__simulationControls
+          controls.autoIntercept = true
+          setAutoIntercept(true)
+        }, 2000)
+      }
     }
     
     const handleNewGame = () => {
@@ -146,6 +164,12 @@ export const GameUI: React.FC<GameUIProps> = ({ waveManager, placementSystem, on
         
         // Stop the game
         waveManager.pauseWave()
+        
+        // Pause the entire simulation
+        const simulationControls = (window as any).__simulationControls
+        if (simulationControls) {
+          simulationControls.pause = true
+        }
         
         // Disable OrbitControls
         const controls = (window as any).__controls
@@ -481,12 +505,31 @@ export const GameUI: React.FC<GameUIProps> = ({ waveManager, placementSystem, on
         }
         
         .top-bar {
-          display: grid;
-          grid-template-columns: 1fr auto 1fr;
+          display: flex;
+          justify-content: space-between;
+          align-items: flex-start;
+          width: 100%;
+          position: relative;
           gap: 20px;
-          margin-bottom: 10px;
-          align-items: stretch;
+        }
+        
+        .top-left, .top-center, .top-right {
+          flex: 1;
+          display: flex;
+          align-items: flex-start;
           min-height: 35px;
+        }
+        
+        .top-left {
+          justify-content: flex-start;
+        }
+        
+        .top-center {
+          justify-content: center;
+        }
+        
+        .top-right {
+          justify-content: flex-end;
         }
         
         .resource-panel {
@@ -515,7 +558,6 @@ export const GameUI: React.FC<GameUIProps> = ({ waveManager, placementSystem, on
         
         .wave-panel {
           text-align: center;
-          justify-self: center;
           display: flex;
           flex-direction: column;
           justify-content: center;
@@ -672,7 +714,7 @@ export const GameUI: React.FC<GameUIProps> = ({ waveManager, placementSystem, on
         
         .help-button {
           position: fixed;
-          top: 20px;
+          top: 70px;
           right: 20px;
           width: 40px;
           height: 40px;
@@ -739,7 +781,11 @@ export const GameUI: React.FC<GameUIProps> = ({ waveManager, placementSystem, on
             display: flex;
             flex-direction: column;
             gap: 10px;
-            padding: 15px;
+          }
+          
+          .top-left, .top-center, .top-right {
+            width: 100%;
+            justify-content: center;
           }
           
           .resource-panel {
@@ -757,8 +803,7 @@ export const GameUI: React.FC<GameUIProps> = ({ waveManager, placementSystem, on
           }
           
           .wave-panel {
-            order: 1;
-            width: 100%;
+            width: auto;
             padding: 12px 16px;
           }
           
@@ -1115,6 +1160,56 @@ export const GameUI: React.FC<GameUIProps> = ({ waveManager, placementSystem, on
           color: #aaa;
         }
         
+        .intercept-mode-panel {
+          text-align: center;
+        }
+        
+        .intercept-mode-button {
+          background: rgba(0, 56, 184, 0.3);
+          border: 2px solid #0038b8;
+          color: #0095ff;
+          padding: 4px 8px;
+          border-radius: 5px;
+          font-size: 16px;
+          font-weight: bold;
+          cursor: pointer;
+          transition: all 0.3s;
+          display: inline-block;
+          margin: 0 auto;
+        }
+        
+        .intercept-mode-button:hover {
+          background: rgba(0, 56, 184, 0.5);
+          transform: scale(1.05);
+        }
+        
+        .intercept-mode-button.active {
+          background: #0038b8;
+          color: white;
+          box-shadow: 0 0 10px rgba(0, 149, 255, 0.5);
+        }
+        
+        .auto-intercept-locked {
+          padding: 4px;
+          text-align: center;
+        }
+        
+        .unlock-progress {
+          width: 100%;
+          height: 6px;
+          background: rgba(255, 255, 255, 0.1);
+          border-radius: 3px;
+          margin-top: 8px;
+          overflow: hidden;
+        }
+        
+        .unlock-progress-bar {
+          height: 100%;
+          background: linear-gradient(90deg, #0038b8, #0095ff);
+          transition: width 0.5s;
+          box-shadow: 0 0 10px rgba(0, 149, 255, 0.5);
+        }
+        
       `}</style>
       
       <button 
@@ -1135,64 +1230,115 @@ export const GameUI: React.FC<GameUIProps> = ({ waveManager, placementSystem, on
           {isGameMode ? (
             // Game mode: Show all game panels
             <>
-              <div className="left-panels">
-                <div className="ui-panel resource-panel">
-                  <div className="resource-item">
-                    <span className="resource-icon">💰</span>
-                    <span className="resource-value">{credits}</span>
-                  </div>
-                  <div className="resource-item">
-                    <span className="resource-icon">🚀</span>
-                    <span className={`resource-value ${interceptors < 10 ? 'warning' : interceptors < 5 ? 'warning-low' : ''}`}>
-                      {interceptors}
-                    </span>
-                  </div>
-                  <div className="resource-item">
-                    <span className="resource-icon">🛡️</span>
-                    <span className="resource-value">
-                      {placementInfo.placedDomes}/{placementInfo.unlockedDomes}
-                    </span>
-                  </div>
-                </div>
-                <div className="ui-panel score-panel">
-                  <span style={{ fontSize: '20px' }}>🏆</span>
-                  <div>
-                    <div className="score-value">{score.toLocaleString()}</div>
-                    <div className="high-score">High: {highScore.toLocaleString()}</div>
-                  </div>
-                </div>
-              </div>
-              
-              <div className="ui-panel wave-panel">
-                <div className="wave-number">Wave {currentWave}</div>
-                {isWaveActive ? (
-                  <>
-                    <div className="wave-progress">
-                      <div 
-                        className="wave-progress-bar" 
-                        style={{ width: `${(waveProgress.destroyed / waveProgress.total) * 100}%` }}
-                      />
+              <div className="top-left">
+                <div className="left-panels">
+                  <div className="ui-panel resource-panel">
+                    <div className="resource-item">
+                      <span className="resource-icon">💰</span>
+                      <span className="resource-value">{credits}</span>
                     </div>
-                    <div className="wave-text">{waveProgress.destroyed}/{waveProgress.total} Threats</div>
-                  </>
-                ) : preparationTime > 0 ? (
-                  <div className="preparation-timer">
-                    Next wave in {preparationTime}s
+                    <div className="resource-item">
+                      <span className="resource-icon">🚀</span>
+                      <span className={`resource-value ${interceptors < 10 ? 'warning' : interceptors < 5 ? 'warning-low' : ''}`}>
+                        {interceptors}
+                      </span>
+                    </div>
+                    <div className="resource-item">
+                      <span className="resource-icon">🛡️</span>
+                      <span className="resource-value">
+                        {placementInfo.placedDomes}/{placementInfo.unlockedDomes}
+                      </span>
+                    </div>
                   </div>
-                ) : null}
+                  <div className="ui-panel score-panel">
+                    <span style={{ fontSize: '20px' }}>🏆</span>
+                    <div>
+                      <div className="score-value">{score.toLocaleString()}</div>
+                      <div className="high-score">High: {highScore.toLocaleString()}</div>
+                    </div>
+                  </div>
+                </div>
               </div>
               
-              <div></div>
+              <div className="top-center">
+                <div className="ui-panel wave-panel">
+                  <div className="wave-number">Wave {currentWave}</div>
+                  {isWaveActive ? (
+                    <>
+                      <div className="wave-progress">
+                        <div 
+                          className="wave-progress-bar" 
+                          style={{ width: `${(waveProgress.destroyed / waveProgress.total) * 100}%` }}
+                        />
+                      </div>
+                      <div className="wave-text">{waveProgress.destroyed}/{waveProgress.total} Threats</div>
+                    </>
+                  ) : preparationTime > 0 ? (
+                    <div className="preparation-timer">
+                      Next wave in {preparationTime}s
+                    </div>
+                  ) : null}
+                </div>
+              </div>
+              
+              <div className="top-right">
+                <div className="ui-panel intercept-mode-panel">
+                  {currentWave >= 5 ? (
+                    <button 
+                      className={`intercept-mode-button ${autoIntercept ? 'active' : ''}`}
+                      onClick={() => {
+                        vibrate(15)
+                        const controls = (window as any).__simulationControls
+                        const newValue = !controls.autoIntercept
+                        controls.autoIntercept = newValue
+                        setAutoIntercept(newValue)
+                        showNotification(newValue ? 'Auto-Intercept Enabled' : 'Manual Targeting Mode')
+                      }}
+                      title={autoIntercept ? 'Automatic interception enabled' : 'Click on threats to intercept'}
+                    >
+                      {autoIntercept ? '🤖' : '🎯'}
+                    </button>
+                  ) : (
+                    <div className="auto-intercept-locked" title={`Auto-intercept unlocks at Wave 5 (${5 - currentWave} waves to go)`}>
+                      <div style={{ fontSize: '14px' }}>🔒</div>
+                      <div style={{ fontSize: '9px', color: '#666' }}>Wave 5</div>
+                    </div>
+                  )}
+                </div>
+              </div>
             </>
           ) : (
-            // Sandbox mode: Centered panel in middle column
+            // Sandbox mode: Show sandbox info and intercept mode toggle
             <>
-              <div></div>
-              <div className="ui-panel wave-panel">
-                <div className="wave-number">Sandbox Mode</div>
-                <div style={{ fontSize: '14px', marginTop: '5px' }}>Free Play</div>
+              <div className="top-left">
+                {/* Empty left section for consistency */}
               </div>
-              <div></div>
+              
+              <div className="top-center">
+                <div className="ui-panel wave-panel">
+                  <div className="wave-number">Sandbox Mode</div>
+                  <div style={{ fontSize: '14px', marginTop: '5px' }}>Free Play</div>
+                </div>
+              </div>
+              
+              <div className="top-right">
+                <div className="ui-panel intercept-mode-panel">
+                  <button 
+                    className={`intercept-mode-button ${autoIntercept ? 'active' : ''}`}
+                    onClick={() => {
+                      vibrate(15)
+                      const controls = (window as any).__simulationControls
+                      const newValue = !controls.autoIntercept
+                      controls.autoIntercept = newValue
+                      setAutoIntercept(newValue)
+                      showNotification(newValue ? 'Auto-Intercept Enabled' : 'Manual Targeting Mode')
+                    }}
+                    title={autoIntercept ? 'Automatic interception enabled' : 'Click on threats to intercept'}
+                  >
+                    {autoIntercept ? '🤖' : '🎯'}
+                  </button>
+                </div>
+              </div>
             </>
           )}
         </div>
@@ -1339,6 +1485,11 @@ export const GameUI: React.FC<GameUIProps> = ({ waveManager, placementSystem, on
                 // Re-enable OrbitControls
                 const controls = (window as any).__controls
                 if (controls) controls.enabled = true
+                // Unpause simulation
+                const simulationControls = (window as any).__simulationControls
+                if (simulationControls) {
+                  simulationControls.pause = false
+                }
                 startNewGame()
               }}
             >
@@ -1351,6 +1502,11 @@ export const GameUI: React.FC<GameUIProps> = ({ waveManager, placementSystem, on
                 // Re-enable OrbitControls
                 const controls = (window as any).__controls
                 if (controls) controls.enabled = true
+                // Unpause simulation
+                const simulationControls = (window as any).__simulationControls
+                if (simulationControls) {
+                  simulationControls.pause = false
+                }
                 onModeChange?.(false)
               }}
             >

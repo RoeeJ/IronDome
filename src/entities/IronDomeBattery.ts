@@ -539,6 +539,93 @@ export class IronDomeBattery extends EventEmitter {
     return interceptors.length > 0 ? interceptors[0] : null
   }
   
+  fireInterceptorManual(threat: Threat): Projectile | null {
+    // Manual fire - bypasses range checks for player control
+    // Check if any tube is loaded
+    const loadedTube = this.launcherTubes.find(tube => tube.isLoaded)
+    if (!loadedTube) {
+      debug.log('No loaded tubes available for manual fire')
+      return null
+    }
+    
+    // Check resources if resource management is enabled
+    if (this.useResources && !this.resourceManager.consumeInterceptor()) {
+      debug.warn('No interceptors in stock for manual fire!')
+      return null
+    }
+    
+    // For manual fire, aim directly at threat's current position with lead prediction
+    const threatPos = threat.getPosition()
+    const threatVel = threat.getVelocity()
+    
+    // Simple lead calculation - estimate time to reach threat
+    const distance = this.config.position.distanceTo(threatPos)
+    const timeToReach = distance / this.config.interceptorSpeed
+    
+    // Predict where threat will be
+    const leadPoint = new THREE.Vector3(
+      threatPos.x + threatVel.x * timeToReach * 0.8, // Slight underestimate for better visuals
+      threatPos.y + threatVel.y * timeToReach * 0.8,
+      threatPos.z + threatVel.z * timeToReach * 0.8
+    )
+    
+    // Calculate launch velocity to reach the lead point
+    let launchParams = TrajectoryCalculator.calculateLaunchParameters(
+      this.config.position,
+      leadPoint,
+      this.config.interceptorSpeed,
+      true  // Use lofted trajectory
+    )
+    
+    if (!launchParams) {
+      // If can't calculate trajectory, just aim directly
+      const direction = new THREE.Vector3().subVectors(leadPoint, this.config.position).normalize()
+      launchParams = {
+        angle: 45, // Default angle
+        azimuth: Math.atan2(direction.z, direction.x),
+        velocity: this.config.interceptorSpeed
+      }
+    }
+    
+    // Get launch position
+    const tubeWorldPos = this.config.position.clone()
+    tubeWorldPos.add(this.launchOffset)
+    
+    // Create interceptor with perfect success rate for manual control
+    const velocity = TrajectoryCalculator.getVelocityVector(launchParams)
+    const interceptor = new Projectile(this.scene, this.world, {
+      position: tubeWorldPos,
+      velocity,
+      color: 0x00ff00,
+      radius: 0.3,
+      mass: 10,
+      isInterceptor: true,
+      target: threat,
+      failureMode: 'none', // No failures for manual control
+      maxLifetime: 15,
+      batteryPosition: this.config.position
+    })
+    
+    // Mark tube as reloading
+    loadedTube.isLoaded = false
+    loadedTube.reloadStartTime = Date.now()
+    this.activeInterceptors++
+    
+    // Visual feedback
+    if (loadedTube.missile) {
+      loadedTube.missile.visible = false
+    }
+    
+    // Note: Manual interceptors need to be tracked separately
+    // since Projectile doesn't extend EventEmitter
+    
+    // Create launch effects
+    this.launchEffects.createLaunchEffect(tubeWorldPos, this.launchDirection)
+    
+    this.emit('interceptorLaunched', { interceptor, threat })
+    return interceptor
+  }
+  
   private launchFromTube(tube: LauncherTube, threat: Threat): Projectile | null {
     // Calculate interception point
     const threatConfig = THREAT_CONFIGS[threat.type]
@@ -611,7 +698,7 @@ export class IronDomeBattery extends EventEmitter {
       mass: 20,  // Reduced mass for better maneuverability
       trailLength: 100,
       isInterceptor: true,
-      target: threat.mesh,
+      target: threat,
       failureMode,
       failureTime,
       maxLifetime: 10,  // 10 second max flight time
@@ -922,10 +1009,19 @@ export class IronDomeBattery extends EventEmitter {
   }
   
   repair(amount: number): void {
-    if (this.isDestroyed) return
+    if (this.isDestroyed && this.currentHealth + amount >= this.maxHealth * 0.2) {
+      // Revive the battery if repaired above 20% health
+      this.isDestroyed = false
+      this.group.visible = true
+    }
     
     this.currentHealth = Math.min(this.maxHealth, this.currentHealth + amount)
     this.updateHealthBar()
+    
+    // Show health bar in game mode when repaired
+    if (this.healthBar && this.useResources) {
+      this.healthBar.visible = true
+    }
   }
   
   getHealth(): { current: number; max: number } {
@@ -933,12 +1029,6 @@ export class IronDomeBattery extends EventEmitter {
       current: this.currentHealth,
       max: this.maxHealth
     }
-  }
-  
-  repair(amount: number): void {
-    this.currentHealth = Math.min(this.maxHealth, this.currentHealth + amount)
-    this.isDestroyed = false
-    this.updateHealthBar()
   }
   
   isOperational(): boolean {

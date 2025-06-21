@@ -5,6 +5,7 @@ import { ProximityFuse } from '../systems/ProximityFuse'
 import { ExhaustTrailSystem } from '../systems/ExhaustTrailSystem'
 import { ModelCache } from '../utils/ModelCache'
 import { debug } from '../utils/DebugLogger'
+import { ThrustVectorControl } from '../systems/ThrustVectorControl'
 
 export interface ProjectileOptions {
   position: THREE.Vector3
@@ -36,6 +37,7 @@ export class Projectile {
   proximityFuse?: ProximityFuse
   detonationCallback?: (position: THREE.Vector3, quality: number) => void
   exhaustTrail?: ExhaustTrailSystem
+  thrustControl?: ThrustVectorControl
   private scene: THREE.Scene
   private failureMode: string
   private failureTime: number
@@ -43,6 +45,7 @@ export class Projectile {
   private hasFailed: boolean = false
   private radius: number
   private maxLifetime: number
+  private batteryPosition?: THREE.Vector3
   
   // Physics scaling factor for simulator world
   private static readonly WORLD_SCALE = 0.3 // 30% of real-world values
@@ -68,7 +71,8 @@ export class Projectile {
       useExhaustTrail = true,
       failureMode = 'none',
       failureTime = 0,
-      maxLifetime = isInterceptor ? 10 : 30  // 10s for interceptors, 30s for threats
+      maxLifetime = isInterceptor ? 10 : 30,  // 10s for interceptors, 30s for threats
+      batteryPosition
     } = options
     
     this.id = `projectile_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`
@@ -80,6 +84,7 @@ export class Projectile {
     this.launchTime = Date.now()
     this.radius = radius
     this.maxLifetime = maxLifetime
+    this.batteryPosition = batteryPosition
 
     // Create mesh - use model for interceptor, simple geometry for threats
     if (isInterceptor) {
@@ -93,7 +98,7 @@ export class Projectile {
         metalness: 0.8
       })
       this.mesh = new THREE.Mesh(geometry, material)
-      this.mesh.rotation.x = Math.PI / 2 // Point forward
+      // Rotation will be handled by orientMissile()
       
       // Load optimized Tamir model using shared cache (if enabled)
       const modelQuality = (window as any).__interceptorModelQuality || 'ultra'
@@ -123,7 +128,7 @@ export class Projectile {
       position: new CANNON.Vec3(position.x, position.y, position.z),
       velocity: new CANNON.Vec3(velocity.x, velocity.y, velocity.z),
       linearDamping: 0.01,  // Small amount of drag for stability
-      angularDamping: 0.1   // Prevent spinning
+      angularDamping: 0.3   // Moderate damping - allows turning but prevents spin
     })
     world.addBody(this.body)
 
@@ -140,14 +145,22 @@ export class Projectile {
     this.trail = new THREE.Line(this.trailGeometry, trailMaterial)
     scene.add(this.trail)
     
-    // Initialize proximity fuse for interceptors with scaled values
+    // Initialize proximity fuse for interceptors with realistic parameters
     if (isInterceptor && target) {
       this.proximityFuse = new ProximityFuse(position, {
-        armingDistance: 20,     // Arms after 20m
-        detonationRadius: 8,    // Detonates within 8m (very forgiving)
-        optimalRadius: 3,       // Best at 3m
-        scanRate: 4             // Check every 4ms for better detection
+        armingDistance: 30,      // Arms after 30m
+        detonationRadius: 5,     // Detonate within 5m only
+        optimalRadius: 2,        // Best at 2m
+        scanRate: 2              // Check every 2ms for precise detonation timing
       })
+      
+      // Disable thrust vector control for now - it's causing issues
+      // this.thrustControl = new ThrustVectorControl({
+      //   maxThrust: 200 * mass,
+      //   thrustDuration: 3,
+      //   dacsThrustPulse: 10 * mass,
+      //   dacsImpulseBudget: 100 * mass
+      // })
     }
     
     // Initialize exhaust trail system
@@ -229,9 +242,15 @@ export class Projectile {
       }
     }
 
-    // Sync mesh with physics body
+    // Sync mesh position with physics body
     this.mesh.position.copy(this.body.position as any)
-    this.mesh.quaternion.copy(this.body.quaternion as any)
+    // Don't copy quaternion - we'll orient based on velocity instead
+    
+    // Always orient based on current velocity
+    const currentVel = this.getVelocity()
+    if (currentVel.length() > 1) {
+      this.orientMissile(currentVel)
+    }
 
     // Update trail
     this.trailPositions.push(this.mesh.position.clone())
@@ -273,7 +292,9 @@ export class Projectile {
     
     // Check proximity fuse for interceptors
     if (this.isInterceptor && this.proximityFuse && this.target) {
-      const targetPosition = this.target.position
+      const targetPosition = 'getPosition' in this.target 
+        ? (this.target as any).getPosition() 
+        : this.target.position
       const currentTime = Date.now()
       
       const { shouldDetonate, detonationQuality } = this.proximityFuse.update(
@@ -437,12 +458,27 @@ export class Projectile {
   
   setTargetPoint(targetPoint: THREE.Vector3): void {
     // Update the target position for improved targeting
-    if (!this.target) {
+    if (!targetPoint) {
+      debug.warning('setTargetPoint called with undefined targetPoint')
+      return
+    }
+    
+    // If target is a Threat object, we shouldn't modify it directly
+    if (this.target && 'getPosition' in this.target) {
+      // Target is a Threat, create a separate dummy target for the aim point
+      const dummyTarget = new THREE.Object3D()
+      dummyTarget.position.copy(targetPoint)
+      this.scene.add(dummyTarget)
+      this.target = dummyTarget
+    } else if (!this.target) {
       // Create a dummy target object if none exists
       this.target = new THREE.Object3D()
       this.scene.add(this.target)
+      this.target.position.copy(targetPoint)
+    } else if (this.target.position) {
+      // Target has a position property, update it
+      this.target.position.copy(targetPoint)
     }
-    this.target.position.copy(targetPoint)
   }
 
   private updateGuidance(deltaTime: number): void {
@@ -456,9 +492,9 @@ export class Projectile {
       return
     }
     
-    // Check minimum travel distance before guidance kicks in
+    // Minimal launch clearance before guidance (just to clear the launcher)
     const distanceTraveled = this.proximityFuse?.getDistanceTraveled() || 0
-    const minGuidanceDistance = 15 // Don't guide for first 15 meters
+    const minGuidanceDistance = 3 // 3 meters to clear launcher safely
     if (distanceTraveled < minGuidanceDistance) {
       // Just orient the missile during launch phase
       this.orientMissile(currentVelocity)
@@ -466,10 +502,12 @@ export class Projectile {
     }
     
     // Calculate intercept point prediction
-    const targetPos = this.target.position.clone()
+    const targetPos = 'getPosition' in this.target 
+      ? (this.target as any).getPosition() 
+      : this.target.position.clone()
     const myPos = this.mesh.position.clone()
     
-    // Proportional navigation with realistic constraints
+    // Proportional navigation
     const toTarget = targetPos.clone().sub(myPos)
     const distance = toTarget.length()
     
@@ -488,18 +526,10 @@ export class Projectile {
       predictedTargetPos.add(targetVel.clone().multiplyScalar(leadTime))
     }
     
-    // Calculate line of sight rate
+    // Calculate line of sight to predicted position
     const los = predictedTargetPos.clone().sub(myPos).normalize()
-    const currentDirection = currentVelocity.clone().normalize()
     
-    // Realistic missile constraints scaled for simulator
-    // Increase turning capability for small world
-    const maxGForce = 40 // Higher G-force for better maneuverability
-    const gravity = 9.81
-    const maxAcceleration = maxGForce * gravity
-    const maxTurnRate = maxAcceleration / currentSpeed // v = rω, so ω = a/v
-    
-    // Simple proportional navigation
+    // Simple proportional navigation - just turn towards target
     const desiredVelocity = los.multiplyScalar(currentSpeed)
     const velocityError = desiredVelocity.clone().sub(currentVelocity)
     
@@ -507,7 +537,7 @@ export class Projectile {
     const correctionForce = velocityError.multiplyScalar(this.body.mass * 2) // P gain of 2
     
     // Limit maximum force
-    const maxForce = this.body.mass * maxAcceleration
+    const maxForce = this.body.mass * 40 * 9.81 // 40G max
     if (correctionForce.length() > maxForce) {
       correctionForce.normalize().multiplyScalar(maxForce)
     }
@@ -517,7 +547,7 @@ export class Projectile {
     this.body.applyForce(
       new CANNON.Vec3(
         correctionForce.x,
-        correctionForce.y + gravityCompensation, // Compensate for gravity
+        correctionForce.y + gravityCompensation,
         correctionForce.z
       ),
       new CANNON.Vec3(0, 0, 0)
@@ -560,8 +590,8 @@ export class Projectile {
       
       this.mesh.quaternion.copy(quaternion)
     } else {
-      // For procedural geometry (cone)
-      const defaultForward = new THREE.Vector3(0, 0, 1)
+      // For procedural geometry (cone) - cone points up by default in Three.js
+      const defaultForward = new THREE.Vector3(0, 1, 0) // Cone points along +Y
       const quaternion = new THREE.Quaternion().setFromUnitVectors(defaultForward, direction)
       this.mesh.quaternion.copy(quaternion)
     }

@@ -350,6 +350,8 @@ export class DomePlacementSystem {
       level
     })
     
+    console.log(`Battery placed: ${batteryId}, level: ${level}, placedDomes size: ${this.placedDomes.size}`)
+    
     // Register with threat manager
     if (this.threatManager) {
       this.threatManager.registerBattery(battery)
@@ -585,13 +587,26 @@ export class DomePlacementSystem {
     if (this.isSandboxMode) return true // Free upgrades in sandbox
     
     const dome = this.placedDomes.get(batteryId)
-    if (!dome) return false
+    if (!dome) {
+      console.log(`canUpgradeBattery: No dome found for ${batteryId}`)
+      return false
+    }
     
     const placement = this.gameState.getDomePlacements().find(p => p.id === batteryId)
-    if (!placement || placement.level >= 5) return false // Max level 5
+    if (!placement) {
+      console.log(`canUpgradeBattery: No placement found for ${batteryId}`)
+      return false
+    }
+    if (placement.level >= 5) {
+      console.log(`canUpgradeBattery: Max level reached for ${batteryId}`)
+      return false
+    }
     
     const upgradeCost = this.gameState.getDomeUpgradeCost(placement.level)
-    return this.gameState.getCredits() >= upgradeCost
+    const credits = this.gameState.getCredits()
+    const canAfford = credits >= upgradeCost
+    console.log(`canUpgradeBattery: Battery ${batteryId}, level ${placement.level}, cost ${upgradeCost}, credits ${credits}, can afford: ${canAfford}`)
+    return canAfford
   }
   
   getUpgradeCost(batteryId: string, level?: number): number {
@@ -599,14 +614,22 @@ export class DomePlacementSystem {
       return this.gameState.getDomeUpgradeCost(level)
     }
     const placement = this.gameState.getDomePlacements().find(p => p.id === batteryId)
-    if (!placement) return 0
+    if (!placement) {
+      console.warn(`No placement found for battery ${batteryId}. All placements:`, this.gameState.getDomePlacements())
+      // Default to level 1 upgrade cost if no placement found
+      return this.gameState.getDomeUpgradeCost(1)
+    }
     return this.gameState.getDomeUpgradeCost(placement.level)
   }
   
   getBatteryId(battery: IronDomeBattery): string | null {
     for (const [id, dome] of this.placedDomes) {
-      if (dome.battery === battery) return id
+      if (dome.battery === battery) {
+        console.log(`Found battery ID: ${id}`)
+        return id
+      }
     }
+    console.log(`Battery not found! Total batteries: ${this.placedDomes.size}`)
     return null
   }
   
@@ -705,5 +728,33 @@ export class DomePlacementSystem {
         dome.battery.setVisualVisibility(true)
       })
     }
+  }
+  
+  canAffordRepair(batteryId: string): boolean {
+    const dome = this.placedDomes.get(batteryId)
+    if (!dome) return false
+    
+    const health = dome.battery.getHealth()
+    const repairCost = Math.ceil((health.max - health.current) * 2)
+    
+    return this.gameState.getCredits() >= repairCost
+  }
+  
+  repairBattery(batteryId: string, cost: number): boolean {
+    const dome = this.placedDomes.get(batteryId)
+    if (!dome) return false
+    
+    // Only charge in game mode
+    if (!this.isSandboxMode) {
+      if (!this.gameState.spendCredits(cost)) {
+        return false
+      }
+    }
+    
+    // Repair to full health
+    const health = dome.battery.getHealth()
+    dome.battery.repair(health.max - health.current)
+    
+    return true
   }
 }

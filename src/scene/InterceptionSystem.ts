@@ -15,6 +15,7 @@ import { ImprovedTrajectoryCalculator } from '../utils/ImprovedTrajectoryCalcula
 import { PredictiveTargeting } from '../utils/PredictiveTargeting'
 import { InterceptorAllocation } from '../systems/InterceptorAllocation'
 import { InterceptionOptimizer } from '../systems/InterceptionOptimizer'
+import { BlastPhysics } from '../systems/BlastPhysics'
 
 interface Interception {
   interceptor: Projectile
@@ -31,6 +32,7 @@ export class InterceptionSystem {
   private interceptors: Projectile[] = []
   private successfulInterceptions: number = 0
   private failedInterceptions: number = 0
+  private totalInterceptorsFired: number = 0
   private fragmentationSystem: FragmentationSystem
   private debrisSystem: DebrisSystem
   private currentThreats: Threat[] = []
@@ -122,6 +124,12 @@ export class InterceptionSystem {
           if (assignment > 0) {
             debug.module('Interception').log(`Clearing stale assignment for threat ${threat.id}`)
             this.batteryCoordinator.clearThreatAssignment(threat.id)
+          }
+          
+          // Safety check: unmark threats that have no active interceptors
+          if (threat.isBeingIntercepted() && !assignedThreats.has(threat.id)) {
+            debug.module('Interception').log(`Clearing stale interception mark for threat ${threat.id}`)
+            threat.unmarkAsBeingIntercepted()
           }
         }
       })
@@ -257,7 +265,7 @@ export class InterceptionSystem {
           battery.config.interceptorSpeed
         )
         
-        if (leadPrediction) {
+        if (leadPrediction && leadPrediction.aimPoint) {
           // Update interceptor's target point with prediction
           interceptor.setTargetPoint(leadPrediction.aimPoint)
         }
@@ -268,6 +276,7 @@ export class InterceptionSystem {
         }
         
         this.interceptors.push(interceptor)
+        this.totalInterceptorsFired++
         this.activeInterceptions.push({
           interceptor,
           threat,
@@ -358,6 +367,7 @@ export class InterceptionSystem {
             }
             
             this.interceptors.push(interceptor)
+            this.totalInterceptorsFired++
             this.activeInterceptions.push({
               interceptor,
               threat,
@@ -418,18 +428,35 @@ export class InterceptionSystem {
     position: THREE.Vector3, 
     quality: number
   ): void {
-    debug.category('Combat', `Proximity detonation! Quality: ${(quality * 100).toFixed(0)}%`)
+    debug.category('Combat', `Proximity detonation at ${position.distanceTo(threat.getPosition()).toFixed(1)}m`)
     
-    // Create simple explosion instead of cone fragmentation
-    // Higher quality = larger explosion
-    // this.fragmentationSystem.createFragmentation(position, direction, quality)
-    
-    // Create explosion visual with boosted quality for better smoke
+    // Create explosion visual
     this.createExplosion(position, Math.max(0.8, quality))
     
-    // Determine if threat is destroyed based on quality
-    const destroyProbability = 0.7 + quality * 0.3  // 70% to 100% based on quality
-    if (Math.random() < destroyProbability) {
+    // Check if threat is still active before counting hits/misses
+    if (!threat.isActive) {
+      debug.category('Combat', 'Interceptor detonated near already destroyed threat - not counting')
+      // Remove from active interceptions
+      const index = this.activeInterceptions.findIndex(i => i.interceptor === interceptor)
+      if (index !== -1) {
+        this.activeInterceptions.splice(index, 1)
+      }
+      return
+    }
+    
+    // Try to mark threat as being intercepted (atomic operation)
+    const wasMarked = threat.markAsBeingIntercepted()
+    
+    // Use physics-based blast damage calculation
+    const damage = BlastPhysics.calculateDamage(
+      position,
+      threat.getPosition(),
+      threat.getVelocity()
+    )
+    
+    debug.category('Combat', `Blast damage: ${damage.damageType}, Kill probability: ${(damage.killProbability * 100).toFixed(0)}%`)
+    
+    if (damage.hit && wasMarked) {
       this.successfulInterceptions++
       
       // Track stats
@@ -468,14 +495,26 @@ export class InterceptionSystem {
       if (index !== -1) {
         this.activeInterceptions.splice(index, 1)
       }
-    } else {
+    } else if (wasMarked) {
+      // Only count as failure if we actually tried to intercept (wasMarked = true)
       this.failedInterceptions++
       this.gameState.recordMiss()
       debug.category('Combat', 'Proximity detonation failed to destroy threat')
       
+      // IMPORTANT: Unmark the threat so other interceptors can try
+      threat.unmarkAsBeingIntercepted()
+      
       // Create some debris even on failed interception
       const threatVelocity = threat.getVelocity()
       this.debrisSystem.createDebris(position, threatVelocity.clone().multiplyScalar(0.2), 5)
+    } else {
+      // Another interceptor is already handling this threat
+      debug.category('Combat', 'Interceptor detonated on threat already being intercepted - not counting')
+      // Remove from active interceptions
+      const index = this.activeInterceptions.findIndex(i => i.interceptor === interceptor)
+      if (index !== -1) {
+        this.activeInterceptions.splice(index, 1)
+      }
     }
   }
   
@@ -581,7 +620,7 @@ export class InterceptionSystem {
     interception.threat.destroy(this.scene, this.world)
   }
 
-  private createExplosion(position: THREE.Vector3, quality: number = 1.0): void {
+  public createExplosion(position: THREE.Vector3, quality: number = 1.0): void {
       // Check if instanced explosion renderer is available
       const instancedRenderer = (window as any).__instancedExplosionRenderer
       if (instancedRenderer) {
@@ -768,12 +807,14 @@ export class InterceptionSystem {
 
   getStats() {
     const coordinatorStats = this.batteryCoordinator.getCoordinationStats()
+    const operationalBatteries = this.batteries.filter(b => b.isOperational())
     return {
       successful: this.successfulInterceptions,
       failed: this.failedInterceptions,
-      active: this.activeInterceptions.length,
-      batteries: this.batteries.length,
-      totalInterceptors: this.batteries.reduce((sum, b) => sum + b.getInterceptorCount(), 0),
+      totalFired: this.totalInterceptorsFired,
+      active: this.interceptors.length,
+      batteries: operationalBatteries.length,
+      totalInterceptors: operationalBatteries.reduce((sum, b) => sum + b.getInterceptorCount(), 0),
       activeInterceptors: this.interceptors.length,
       coordination: coordinatorStats,
       algorithmMode: this.useImprovedAlgorithms ? 'improved' : 'legacy'
@@ -790,5 +831,26 @@ export class InterceptionSystem {
   
   setBatteryCoordination(enabled: boolean): void {
     this.batteryCoordinator.setCoordinationEnabled(enabled)
+  }
+  
+  getNearestBattery(threat: Threat): IronDomeBattery | null {
+    let nearestBattery: IronDomeBattery | null = null
+    let minDistance = Infinity
+    
+    for (const battery of this.batteries) {
+      if (battery.isOperational() && battery.canIntercept(threat)) {
+        const distance = battery.getPosition().distanceTo(threat.getPosition())
+        if (distance < minDistance) {
+          minDistance = distance
+          nearestBattery = battery
+        }
+      }
+    }
+    
+    return nearestBattery
+  }
+  
+  getBatteries(): IronDomeBattery[] {
+    return [...this.batteries]
   }
 }

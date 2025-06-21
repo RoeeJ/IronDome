@@ -119,9 +119,10 @@ export class ExtendedStatsDisplay {
       <div style="line-height: 1.4;">
         <div style="color: #4fc3f7;"><b>🎯 Interception System</b></div>
         <div>Mode: <span style="color: ${stats.algorithmMode === 'improved' ? '#81c784' : '#ffd54f'}">${stats.algorithmMode}</span></div>
-        <div>Success/Failed: <span style="color: #81c784">${stats.successful}</span>/<span style="color: #e57373">${stats.failed}</span></div>
-        <div>Success Rate: <span style="color: ${parseFloat(successRate) > 80 ? '#81c784' : '#ffd54f'}">${successRate}%</span></div>
-        <div>Active Intercepts: ${stats.active}</div>
+        <div>Total Fired: ${stats.totalFired || 0}</div>
+        <div>Hits/Misses: <span style="color: #81c784">${stats.successful}</span>/<span style="color: #e57373">${stats.failed}</span></div>
+        <div>Hit Rate: <span style="color: ${parseFloat(successRate) > 80 ? '#81c784' : '#ffd54f'}">${successRate}%</span></div>
+        <div>In Flight: ${stats.active}</div>
         <div>Efficiency: ${interceptorEfficiency}</div>
         
         <div style="margin-top: 8px; color: #ff8a65;"><b>🚀 Threats</b></div>

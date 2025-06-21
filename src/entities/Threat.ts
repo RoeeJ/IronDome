@@ -170,6 +170,7 @@ export class Threat extends Projectile {
   private config: ThreatConfig
   private cruisingPhase: boolean = false
   private maneuverTimer: number = 0
+  private _isBeingIntercepted: boolean = false
 
   constructor(
     scene: THREE.Scene,
@@ -539,5 +540,21 @@ export class Threat extends Projectile {
         this.mesh.rotateX(Math.PI / 2) // Adjust for cylinder orientation
       }
     }
+  }
+  
+  markAsBeingIntercepted(): boolean {
+    if (this._isBeingIntercepted) {
+      return false // Already being intercepted
+    }
+    this._isBeingIntercepted = true
+    return true // Successfully marked
+  }
+  
+  unmarkAsBeingIntercepted(): void {
+    this._isBeingIntercepted = false
+  }
+  
+  isBeingIntercepted(): boolean {
+    return this._isBeingIntercepted
   }
 }

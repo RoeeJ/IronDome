@@ -239,6 +239,27 @@ export class ThreatManager extends EventEmitter {
             this.emit('batteryHit', { battery: hitBattery, damage: damageAmount })
           }
           
+          // Check for shockwave damage to nearby batteries
+          const shockwaveRadius = this.getShockwaveRadius(threat.type)
+          const nearbyBatteries = this.batteries.filter(battery => {
+            const distance = battery.getPosition().distanceTo(impactPosition)
+            return battery.isOperational() && distance <= shockwaveRadius && battery !== hitBattery
+          })
+          
+          // Apply shockwave damage with falloff
+          nearbyBatteries.forEach(battery => {
+            const distance = battery.getPosition().distanceTo(impactPosition)
+            const damageFalloff = 1 - (distance / shockwaveRadius)
+            const baseDamage = this.getThreatDamage(threat.type)
+            const shockwaveDamage = Math.ceil(baseDamage * 0.5 * damageFalloff) // 50% of base damage for shockwave
+            
+            if (shockwaveDamage > 0) {
+              battery.takeDamage(shockwaveDamage)
+              this.emit('batteryHit', { battery, damage: shockwaveDamage, isShockwave: true })
+              console.log(`Shockwave damaged battery at ${distance.toFixed(1)}m for ${shockwaveDamage} damage`)
+            }
+          })
+          
           // Create explosion at impact point
           this.createGroundExplosion(impactPosition)
           this.removeThreat(i, false) // Missed - hit ground
@@ -536,10 +557,20 @@ export class ThreatManager extends EventEmitter {
     switch (type) {
       case ThreatType.GRAD_ROCKET:
         return 15
-      case ThreatType.QASSAM_ROCKET:
+      case ThreatType.QASSAM_1:
+        return 10
+      case ThreatType.QASSAM_2:
+        return 15
+      case ThreatType.QASSAM_3:
         return 20
       case ThreatType.MORTAR:
         return 10
+      case ThreatType.SHORT_RANGE:
+        return 15
+      case ThreatType.MEDIUM_RANGE:
+        return 20
+      case ThreatType.LONG_RANGE:
+        return 25
       case ThreatType.DRONE_SLOW:
         return 20
       case ThreatType.DRONE_FAST:
@@ -548,6 +579,34 @@ export class ThreatManager extends EventEmitter {
         return 40
       case ThreatType.BALLISTIC_MISSILE:
         return 50
+      default:
+        return 20
+    }
+  }
+  
+  private getShockwaveRadius(type: ThreatType): number {
+    // Different threat types have different shockwave radii
+    switch (type) {
+      case ThreatType.MORTAR:
+        return 15 // Small shockwave
+      case ThreatType.SHORT_RANGE:
+      case ThreatType.QASSAM_1:
+      case ThreatType.QASSAM_2:
+        return 20
+      case ThreatType.MEDIUM_RANGE:
+      case ThreatType.QASSAM_3:
+      case ThreatType.GRAD_ROCKET:
+        return 25
+      case ThreatType.LONG_RANGE:
+        return 30
+      case ThreatType.DRONE_SLOW:
+        return 20
+      case ThreatType.DRONE_FAST:
+        return 25
+      case ThreatType.CRUISE_MISSILE:
+        return 35
+      case ThreatType.BALLISTIC_MISSILE:
+        return 40 // Large shockwave
       default:
         return 20
     }

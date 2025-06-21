@@ -208,6 +208,16 @@ export const DomeContextMenu: React.FC<DomeContextMenuProps> = ({
           transform: scale(0.98);
         }
         
+        .context-menu-button.repair {
+          background: #00a000;
+          border-color: #00a000;
+        }
+        
+        .context-menu-button.repair:hover {
+          background: #00c000;
+          border-color: #00c000;
+        }
+        
         .context-menu-button.danger {
           background: #b80000;
           border-color: #b80000;
@@ -365,6 +375,29 @@ export const DomeContextMenu: React.FC<DomeContextMenuProps> = ({
         </div>
         
         <div className="context-menu-actions">
+          {isGameMode && batteryStats.health.percent < 1 && (
+            <button 
+              className="context-menu-button repair"
+              onClick={(e) => {
+                e.stopPropagation()
+                const repairCost = Math.ceil((batteryStats.health.max - batteryStats.health.current) * 2)
+                const success = placementSystem.repairBattery(batteryId, repairCost)
+                if (success) {
+                  // Force re-render to update stats
+                  setRefreshKey(prev => prev + 1)
+                  window.dispatchEvent(new Event('batteryRepaired'))
+                }
+              }}
+              disabled={!placementSystem.canAffordRepair(batteryId)}
+              title={batteryStats.health.percent === 1 ? "Battery at full health" : ""}
+            >
+              Repair Battery
+              <span className="upgrade-cost">
+                (Cost: {Math.ceil((batteryStats.health.max - batteryStats.health.current) * 2)})
+              </span>
+            </button>
+          )}
+          
           <button 
             className="context-menu-button"
             onClick={(e) => {

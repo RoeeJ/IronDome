@@ -30,6 +30,7 @@ import { InstancedThreatRenderer } from './rendering/InstancedThreatRenderer'
 import { LODInstancedThreatRenderer } from './rendering/LODInstancedThreatRenderer'
 import { StatsDisplay } from './ui/StatsDisplay'
 import { ExtendedStatsDisplay } from './ui/ExtendedStatsDisplay'
+import { BlastPhysics } from './systems/BlastPhysics'
 
 // Initialize device capabilities
 const deviceCaps = DeviceCapabilities.getInstance()
@@ -289,7 +290,7 @@ const savedProfilerVisible = localStorage.getItem('ironDome_profilerVisible')
 // Simulation controls (must be defined before UI)
 const simulationControls = {
   gameMode: savedGameMode !== null ? savedGameMode === 'true' : true,  // Default to true if not saved
-  autoIntercept: true,
+  autoIntercept: false,  // Manual targeting by default in game mode
   pause: false,
   timeScale: 1.0,
   showTrajectories: true,
@@ -381,14 +382,26 @@ const updateUIMode = () => {
         if (gameMode) {
           // Switch to game mode
           threatManager.stopSpawning()
+          threatManager.clearAll() // Clear any existing threats
           gui.hide() // Hide debug controls in game mode
+          
+          // Reset game state
+          const gameState = GameState.getInstance()
+          gameState.startNewGame()
+          
+          // Resources are managed by GameState, no need for separate reset
+          
           // Don't auto-start, wait for user to click start
         } else {
           // Switch to sandbox mode  
           waveManager.pauseWave()
+          threatManager.clearAll() // Clear any existing threats
           threatManager.setThreatMix('mixed')
           threatManager.startSpawning()
           gui.show() // Show debug controls in sandbox mode
+          
+          // Enable auto-intercept by default in sandbox mode
+          simulationControls.autoIntercept = true
         }
         updateUIMode() // Re-render UI
       }
@@ -398,6 +411,13 @@ const updateUIMode = () => {
 
 // Set initial sandbox mode based on saved preference
 domePlacementSystem.setSandboxMode(!simulationControls.gameMode)
+
+// Reset game state if in game mode (ensures fresh start on refresh)
+if (simulationControls.gameMode) {
+  const gameState = GameState.getInstance()
+  gameState.startNewGame()
+  threatManager.clearAll()
+}
 
 // Initial render
 updateUIMode()
@@ -418,39 +438,254 @@ if (simulationControls.gameMode) {
 // Apply responsive UI
 const responsiveUI = new ResponsiveUI(gui)
 
-// Handle dome placement input
+// Create manual targeting system
+const manualTargetingSystem = {
+  selectedThreat: null as Threat | null,
+  priorityTargets: new Set<string>(),
+  
+  selectThreat(threat: Threat | null) {
+    this.selectedThreat = threat
+    // Update visual indicator
+    threatManager.getActiveThreats().forEach(t => {
+      if (t.mesh) {
+        const material = t.mesh.material as THREE.MeshStandardMaterial
+        if (t === threat) {
+          material.emissive = new THREE.Color(0xffff00) // Yellow highlight
+          material.emissiveIntensity = 0.5
+        } else if (this.priorityTargets.has(t.id)) {
+          material.emissive = new THREE.Color(0xff00ff) // Purple for priority
+          material.emissiveIntensity = 0.3
+        } else {
+          material.emissive = material.color
+          material.emissiveIntensity = 0.2
+        }
+      }
+    })
+  },
+  
+  togglePriority(threat: Threat) {
+    if (this.priorityTargets.has(threat.id)) {
+      this.priorityTargets.delete(threat.id)
+    } else {
+      this.priorityTargets.add(threat.id)
+    }
+    this.selectThreat(threat) // Update visuals
+  },
+  
+  clearSelection() {
+    this.selectedThreat = null
+    this.selectThreat(null)
+  }
+}
+
+// Make it globally available
+;(window as any).__manualTargeting = manualTargetingSystem
+
+// Handle dome placement and threat selection
 renderer.domElement.addEventListener('click', (event) => {
+  const mouse = new THREE.Vector2(
+    (event.clientX / window.innerWidth) * 2 - 1,
+    -(event.clientY / window.innerHeight) * 2 + 1
+  )
+  
+  const raycaster = new THREE.Raycaster()
+  raycaster.setFromCamera(mouse, camera)
+  
+  // Check if we're in dome placement mode
   if (domePlacementSystem.isInPlacementMode()) {
-    const mouse = new THREE.Vector2(
-      (event.clientX / window.innerWidth) * 2 - 1,
-      -(event.clientY / window.innerHeight) * 2 + 1
-    )
-    
-    const raycaster = new THREE.Raycaster()
-    raycaster.setFromCamera(mouse, camera)
-    
     const intersects = raycaster.intersectObject(groundMesh)
     if (intersects.length > 0) {
       domePlacementSystem.attemptPlacement(intersects[0].point)
     }
+    return
+  }
+  
+  // Check for threat clicks (in game mode with manual targeting, or sandbox mode)
+  if ((simulationControls.gameMode && !simulationControls.autoIntercept) || !simulationControls.gameMode) {
+    // Set crosshair cursor
+    renderer.domElement.style.cursor = 'crosshair'
+    
+    // Instead of raycasting to meshes, check distance to threats in screen space
+    const threats = threatManager.getActiveThreats()
+    let closestThreat: Threat | null = null
+    let minDistance = 50 // Maximum pixel distance for selection (generous hit area)
+    
+    threats.forEach(threat => {
+      // Project threat position to screen space
+      const threatPos = threat.getPosition().clone()
+      threatPos.project(camera)
+      
+      // Convert to screen coordinates
+      const screenX = (threatPos.x + 1) * window.innerWidth / 2
+      const screenY = (-threatPos.y + 1) * window.innerHeight / 2
+      
+      // Calculate distance from click
+      const distance = Math.sqrt(
+        Math.pow(event.clientX - screenX, 2) + 
+        Math.pow(event.clientY - screenY, 2)
+      )
+      
+      // Check if within hit area and closest
+      if (distance < minDistance && threatPos.z < 1) { // z < 1 ensures it's in front of camera
+        minDistance = distance
+        closestThreat = threat
+      }
+    })
+    
+    if (closestThreat) {
+      const threat = closestThreat
+      
+      if (threat) {
+        if (event.shiftKey) {
+          // Shift+click to toggle priority
+          manualTargetingSystem.togglePriority(threat)
+        } else {
+          // Regular click to select
+          manualTargetingSystem.selectThreat(threat)
+          
+          // Fire interceptor at selected threat
+          // For manual control, find ANY operational battery (not just nearest that can intercept)
+          const batteries = interceptionSystem.getBatteries()
+          let interceptorFired = false
+          
+          // Try each battery until one can fire
+          for (const battery of batteries) {
+            if (battery.isOperational()) {
+              const interceptor = battery.fireInterceptorManual(threat)
+              if (interceptor) {
+                // Set up detonation callback for manual interceptor
+                interceptor.detonationCallback = (position: THREE.Vector3, quality: number) => {
+                  // Create explosion effect
+                  interceptionSystem.createExplosion(position, Math.max(0.8, quality))
+                  
+                  // Use physics-based blast damage
+                  if (threat.isActive) {
+                    const wasMarked = threat.markAsBeingIntercepted()
+                    
+                    // Use BlastPhysics for damage calculation
+                    const damage = BlastPhysics.calculateDamage(
+                      position,
+                      threat.getPosition(),
+                      threat.getVelocity()
+                    )
+                    
+                    console.log(`Manual intercept blast: ${damage.damageType} damage, ${(damage.killProbability * 100).toFixed(0)}% kill probability`)
+                    
+                    if (wasMarked && damage.hit) {
+                      // Destroy the threat
+                      threat.destroy(scene, world)
+                      
+                      // Remove threat from active threats array
+                      const threatIndex = threats.indexOf(threat)
+                      if (threatIndex !== -1) {
+                        threats.splice(threatIndex, 1)
+                      }
+                      
+                      // Update game stats
+                      gameState.recordInterception()
+                      gameState.recordThreatDestroyed()
+                      
+                      // Update interception system stats
+                      ;(interceptionSystem as any).successfulInterceptions = ((interceptionSystem as any).successfulInterceptions || 0) + 1
+                    } else if (wasMarked && !damage.hit) {
+                      // Failed to destroy - unmark so other interceptors can try
+                      threat.unmarkAsBeingIntercepted()
+                      console.log('Manual intercept failed - unmarking threat')
+                      gameState.recordMiss()
+                    }
+                  }
+                  
+                  // Always destroy the interceptor
+                  interceptor.destroy(scene, world)
+                  
+                  // Remove interceptor from arrays
+                  const interceptorIndex = projectiles.indexOf(interceptor)
+                  if (interceptorIndex !== -1) {
+                    projectiles.splice(interceptorIndex, 1)
+                  }
+                  const sysIndex = (interceptionSystem as any).interceptors.indexOf(interceptor)
+                  if (sysIndex !== -1) {
+                    (interceptionSystem as any).interceptors.splice(sysIndex, 1)
+                  }
+                }
+                
+                projectiles.push(interceptor)
+                // Track manual interceptor in interception system
+                ;(interceptionSystem as any).interceptors.push(interceptor)
+                ;(interceptionSystem as any).totalInterceptorsFired = ((interceptionSystem as any).totalInterceptorsFired || 0) + 1
+                console.log('Manual intercept fired!')
+                interceptorFired = true
+                break
+              }
+            }
+          }
+          
+          if (!interceptorFired) {
+            // No battery could fire
+            if (batteries.filter(b => b.isOperational()).length === 0) {
+              if ((window as any).showNotification) {
+                (window as any).showNotification('No operational batteries!')
+              }
+            } else {
+              if ((window as any).showNotification) {
+                (window as any).showNotification('No interceptors ready!')
+              }
+            }
+          }
+        }
+      }
+    } else {
+      // Clicked empty space - clear selection
+      manualTargetingSystem.clearSelection()
+    }
+  } else {
+    // Reset cursor
+    renderer.domElement.style.cursor = 'auto'
   }
 })
 
 // Mouse move for desktop
 renderer.domElement.addEventListener('mousemove', (event) => {
+  const mouse = new THREE.Vector2(
+    (event.clientX / window.innerWidth) * 2 - 1,
+    -(event.clientY / window.innerHeight) * 2 + 1
+  )
+  
+  const raycaster = new THREE.Raycaster()
+  raycaster.setFromCamera(mouse, camera)
+  
   if (domePlacementSystem.isInPlacementMode()) {
-    const mouse = new THREE.Vector2(
-      (event.clientX / window.innerWidth) * 2 - 1,
-      -(event.clientY / window.innerHeight) * 2 + 1
-    )
-    
-    const raycaster = new THREE.Raycaster()
-    raycaster.setFromCamera(mouse, camera)
-    
     const intersects = raycaster.intersectObject(groundMesh)
     if (intersects.length > 0) {
       domePlacementSystem.updatePlacementPreview(intersects[0].point)
     }
+  } else if (simulationControls.gameMode && !simulationControls.autoIntercept) {
+    // Check if hovering over a threat using screen space distance
+    const threats = threatManager.getActiveThreats()
+    let isHoveringThreat = false
+    
+    threats.forEach(threat => {
+      // Project threat position to screen space
+      const threatPos = threat.getPosition().clone()
+      threatPos.project(camera)
+      
+      // Convert to screen coordinates
+      const screenX = (threatPos.x + 1) * window.innerWidth / 2
+      const screenY = (-threatPos.y + 1) * window.innerHeight / 2
+      
+      // Calculate distance from mouse
+      const distance = Math.sqrt(
+        Math.pow(event.clientX - screenX, 2) + 
+        Math.pow(event.clientY - screenY, 2)
+      )
+      
+      // Check if within hover area
+      if (distance < 50 && threatPos.z < 1) { // Same generous hit area
+        isHoveringThreat = true
+      }
+    })
+    
+    renderer.domElement.style.cursor = isHoveringThreat ? 'pointer' : 'crosshair'
   }
 })
 

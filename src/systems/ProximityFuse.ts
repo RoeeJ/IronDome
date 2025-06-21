@@ -75,14 +75,16 @@ export class ProximityFuse {
   }
 
   private calculateDetonationQuality(distance: number): number {
+    // Quality based on how close to optimal the detonation is
+    // This affects visual explosion size but not damage (damage uses BlastPhysics)
     if (distance <= this.config.optimalRadius) {
-      // Perfect detonation within optimal radius
-      return 1.0
+      // Near-optimal detonation
+      return 0.9 + (1 - distance / this.config.optimalRadius) * 0.1
     } else {
-      // Linear falloff from optimal to max radius
+      // Sub-optimal but still effective
       const falloffRange = this.config.detonationRadius - this.config.optimalRadius
       const distanceFromOptimal = distance - this.config.optimalRadius
-      return Math.max(0, 1 - (distanceFromOptimal / falloffRange))
+      return Math.max(0.5, 0.9 - (distanceFromOptimal / falloffRange) * 0.4)
     }
   }
 
