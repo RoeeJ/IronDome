@@ -5,6 +5,7 @@ import * as BufferGeometryUtils from 'three/examples/jsm/utils/BufferGeometryUti
 import { Projectile } from './Projectile'
 import { Threat, THREAT_CONFIGS } from './Threat'
 import { TrajectoryCalculator } from '../utils/TrajectoryCalculator'
+import { ImprovedTrajectoryCalculator } from '../utils/ImprovedTrajectoryCalculator'
 import { StaticRadarNetwork } from '../scene/StaticRadarNetwork'
 import { LaunchEffectsSystem } from '../systems/LaunchEffectsSystem'
 import { GeometryOptimizer } from '../utils/GeometryOptimizer'
@@ -335,13 +336,23 @@ export class IronDomeBattery extends EventEmitter {
     debug.module('Battery').log(`${threatConfig.isDrone ? 'DRONE' : 'Threat'} ${threat.id} in range: ${distance.toFixed(1)}m ✓`)
     
     // Check if we can reach the threat in time
-    const interceptionPoint = TrajectoryCalculator.calculateInterceptionPoint(
-      threat.getPosition(),
-      threat.getVelocity(),
-      this.config.position,
-      this.config.interceptorSpeed,
-      threatConfig.isDrone || false
-    )
+    // Use improved calculator if available (can be configured)
+    const useImproved = (window as any).__useImprovedAlgorithms !== false
+    const interceptionPoint = useImproved 
+      ? ImprovedTrajectoryCalculator.calculateInterceptionPoint(
+          threat.getPosition(),
+          threat.getVelocity(),
+          this.config.position,
+          this.config.interceptorSpeed,
+          threatConfig.isDrone || false
+        )
+      : TrajectoryCalculator.calculateInterceptionPoint(
+          threat.getPosition(),
+          threat.getVelocity(),
+          this.config.position,
+          this.config.interceptorSpeed,
+          threatConfig.isDrone || false
+        )
     
     if (!interceptionPoint) {
       debug.module('Battery').log(`Cannot calculate interception for ${threatConfig.isDrone ? 'DRONE' : 'threat'} ${threat.id}:`, {

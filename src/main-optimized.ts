@@ -72,7 +72,7 @@ camera.lookAt(0, 0, 0)
 // Renderer setup with device-specific settings
 const renderer = new THREE.WebGLRenderer({ 
   antialias: !deviceInfo.isMobile,
-  powerPreference: deviceInfo.isMobile ? 'low-power' : 'high-performance'
+  // powerPreference: deviceInfo.isMobile ? 'low-power' : 'high-performance'
 })
 
 // Apply render scale for performance

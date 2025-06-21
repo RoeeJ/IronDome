@@ -124,7 +124,7 @@ export class InstancedExplosionRenderer {
       position: position.clone(),
       startTime: Date.now(),
       duration: 600 + quality * 200, // 0.6 to 0.8 seconds (faster main explosion)
-      maxScale: 3 + quality * 4, // 3 to 7 based on quality (smaller)
+      maxScale: 2 + quality * 2.5, // 2 to 4.5 based on quality (smaller)
       quality,
       active: true,
       type,
@@ -409,8 +409,8 @@ export class InstancedExplosionRenderer {
 
   
   private createGroundDustRing(position: THREE.Vector3, quality: number): void {
-    // Just create expanding dust ring without particles
-    const ringGeometry = new THREE.RingGeometry(1, 10 + quality * 5, 16, 1)
+    // Just create expanding dust ring without particles (reduced size)
+    const ringGeometry = new THREE.RingGeometry(0.5, 3 + quality * 2, 16, 1)
     const ringMaterial = new THREE.MeshBasicMaterial({
       color: 0x8b7355,
       opacity: 0.4,
@@ -436,8 +436,8 @@ export class InstancedExplosionRenderer {
           return false
         }
         
-        // Expand ring
-        const scale = 1 + elapsed * 5
+        // Expand ring (reduced expansion)
+        const scale = 1 + elapsed * 2
         ring.scale.set(scale, scale, 1)
         ringMaterial.opacity = 0.4 * (1 - elapsed / 2)
         

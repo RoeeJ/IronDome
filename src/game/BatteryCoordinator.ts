@@ -228,6 +228,7 @@ export class BatteryCoordinator {
   
   getCoordinationStats() {
     return {
+      enabled: this.coordinationEnabled,
       totalBatteries: this.batteries.size,
       activeAssignments: this.threatAssignments.size,
       totalActiveEngagements: Array.from(this.batteries.values())

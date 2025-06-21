@@ -28,6 +28,8 @@ import { GameUI } from './ui/GameUI'
 import { InstancedProjectileRenderer } from './rendering/InstancedProjectileRenderer'
 import { InstancedThreatRenderer } from './rendering/InstancedThreatRenderer'
 import { LODInstancedThreatRenderer } from './rendering/LODInstancedThreatRenderer'
+import { StatsDisplay } from './ui/StatsDisplay'
+import { ExtendedStatsDisplay } from './ui/ExtendedStatsDisplay'
 
 // Initialize device capabilities
 const deviceCaps = DeviceCapabilities.getInstance()
@@ -293,6 +295,7 @@ const simulationControls = {
   showTrajectories: true,
   enableFog: false,
   interceptorModel: 'ultra',  // 'none', 'ultra', 'simple'
+  useImprovedAlgorithms: true,  // New flag for improved tracking/interception
   startGame: () => {
     // Clear any existing projectiles
     projectiles.forEach(p => p.destroy(scene, world))
@@ -309,6 +312,9 @@ const simulationControls = {
     location.reload() // Simple reload for now
   }
 }
+
+// Expose simulationControls globally for UI components
+;(window as any).__simulationControls = simulationControls
 
 // Create React UI
 const uiContainer = document.createElement('div')
@@ -602,8 +608,7 @@ if (deviceInfo.hasTouch) {
   document.body.appendChild(fireButton)
 }
 
-// Performance Monitor
-const perfFolder = gui.addFolder('Performance')
+// Performance info object still needed for updates
 const perfInfo = {
   fps: 0,
   threats: 0,
@@ -612,13 +617,9 @@ const perfInfo = {
   triangles: 0,
   coordinated: 'Enabled'
 }
-perfFolder.add(perfInfo, 'fps').listen().disable()
-perfFolder.add(perfInfo, 'threats').listen().disable()
-perfFolder.add(perfInfo, 'interceptors').listen().disable()
-perfFolder.add(perfInfo, 'drawCalls').listen().disable()
-perfFolder.add(perfInfo, 'triangles').listen().disable()
-perfFolder.add(perfInfo, 'coordinated').listen().disable()
-perfFolder.add({ profiler: '⚡ Press P for Profiler' }, 'profiler').disable()
+
+// Performance stats are now displayed using stats.js
+// Press Ctrl+H to toggle visibility
 
 // Simple notification function
 function showNotification(message: string): void {
@@ -716,8 +717,7 @@ const sandboxControls = {
   enableFog: false,
   
   // Defense settings
-  autoIntercept: true,
-  batteryCoordination: true
+  autoIntercept: true
 }
 
 // Threat controls
@@ -763,10 +763,8 @@ const defenseGroup = sandboxFolder.addFolder('Defense Settings')
 defenseGroup.add(sandboxControls, 'autoIntercept').name('Auto Intercept').onChange((value: boolean) => {
   simulationControls.autoIntercept = value
 })
-defenseGroup.add(sandboxControls, 'batteryCoordination').name('Battery Coordination').onChange((value: boolean) => {
-  interceptionSystem.setBatteryCoordination(value)
-  showNotification(value ? 'Battery coordination enabled' : 'Battery coordination disabled')
-})
+// Algorithms and coordination are now always enabled by default
+// No need for controls as they are production-ready
 
 // Apply initial settings to all batteries
 domePlacementSystem.getAllBatteries().forEach(battery => {
@@ -887,12 +885,48 @@ if (savedProfilerVisible === 'true') {
   profilerDisplay.show()
 }
 
+// Initialize stats.js displays
+const statsDisplay = new StatsDisplay()
+const extendedStatsDisplay = new ExtendedStatsDisplay()
+
+// Connect systems to stats displays
+statsDisplay.setInterceptionSystem(interceptionSystem)
+statsDisplay.setThreatManager(threatManager)
+extendedStatsDisplay.setInterceptionSystem(interceptionSystem)
+extendedStatsDisplay.setThreatManager(threatManager)
+
+// Hide stats.js if profiler is not visible
+if (!profilerDisplay.isVisible()) {
+  statsDisplay.hide()
+}
+
+// Keyboard event handlers
+window.addEventListener('keydown', (e) => {
+  // S key toggles extended stats
+  if (e.key === 's' || e.key === 'S') {
+    extendedStatsDisplay.toggleVisibility()
+  }
+  
+  // P key toggles profiler AND stats.js
+  if (e.key === 'p' || e.key === 'P') {
+    const profilerVisible = profilerDisplay.isVisible()
+    if (profilerVisible) {
+      statsDisplay.show()
+    } else {
+      statsDisplay.hide()
+    }
+  }
+})
+
 // Render bottleneck tracking
 let frameCount = 0
 let renderBottleneckLogged = false
 
 function animate() {
   animationId = requestAnimationFrame(animate)
+  
+  // Begin stats.js frame tracking
+  statsDisplay.beginFrame()
   
   // Store camera reference for LOD optimizations and health bar orientation
   ;(scene as any).__camera = camera
@@ -1083,6 +1117,10 @@ function animate() {
   profiler.endSection('Frame')
   profilerDisplay.setRenderStats(renderProfiler.getLastStats())
   profilerDisplay.update()
+  
+  // End stats.js frame and update extended stats
+  statsDisplay.endFrame()
+  extendedStatsDisplay.update()
   
   // Log render bottleneck analysis periodically
   frameCount++

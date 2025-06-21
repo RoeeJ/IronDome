@@ -684,8 +684,8 @@ export class ThreatManager extends EventEmitter {
       explosion.scale.set(scale, scale, scale)
       explosionMaterial.opacity = 1 - progress
 
-      // Expand shockwave
-      const ringScale = 1 + progress * 15
+      // Expand shockwave (reduced size)
+      const ringScale = 1 + progress * 6
       shockwave.scale.set(ringScale, ringScale, 1)
       ringMaterial.opacity = 0.8 * (1 - progress)
 

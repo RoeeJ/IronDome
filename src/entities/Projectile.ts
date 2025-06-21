@@ -435,6 +435,16 @@ export class Projectile {
     }
   }
   
+  setTargetPoint(targetPoint: THREE.Vector3): void {
+    // Update the target position for improved targeting
+    if (!this.target) {
+      // Create a dummy target object if none exists
+      this.target = new THREE.Object3D()
+      this.scene.add(this.target)
+    }
+    this.target.position.copy(targetPoint)
+  }
+
   private updateGuidance(deltaTime: number): void {
     if (!this.target || !this.isActive) return
     

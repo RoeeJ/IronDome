@@ -11,6 +11,10 @@ import { ResourceManager } from '../game/ResourceManager'
 import { GameState } from '../game/GameState'
 import { ThreatManager } from './ThreatManager'
 import { BatteryCoordinator } from '../game/BatteryCoordinator'
+import { ImprovedTrajectoryCalculator } from '../utils/ImprovedTrajectoryCalculator'
+import { PredictiveTargeting } from '../utils/PredictiveTargeting'
+import { InterceptorAllocation } from '../systems/InterceptorAllocation'
+import { InterceptionOptimizer } from '../systems/InterceptionOptimizer'
 
 interface Interception {
   interceptor: Projectile
@@ -37,6 +41,12 @@ export class InterceptionSystem {
   private comboCount: number = 0
   private lastInterceptionTime: number = 0
   private batteryCoordinator: BatteryCoordinator
+  
+  // New algorithm components
+  private predictiveTargeting: PredictiveTargeting
+  private interceptorAllocation: InterceptorAllocation
+  private interceptionOptimizer: InterceptionOptimizer
+  private useImprovedAlgorithms: boolean = true
 
   constructor(scene: THREE.Scene, world: CANNON.World) {
     this.scene = scene
@@ -46,6 +56,11 @@ export class InterceptionSystem {
     this.resourceManager = ResourceManager.getInstance()
     this.gameState = GameState.getInstance()
     this.batteryCoordinator = new BatteryCoordinator()
+    
+    // Initialize improved algorithms
+    this.predictiveTargeting = new PredictiveTargeting()
+    this.interceptorAllocation = new InterceptorAllocation()
+    this.interceptionOptimizer = new InterceptionOptimizer()
   }
   
   setThreatManager(threatManager: ThreatManager): void {
@@ -69,6 +84,19 @@ export class InterceptionSystem {
     // Store threats for repurposing
     this.currentThreats = threats
     
+    // Update predictive tracking for improved algorithms
+    if (this.useImprovedAlgorithms) {
+      if (this.profiler) this.profiler.startSection('Predictive Tracking')
+      threats.forEach(threat => {
+        this.predictiveTargeting.updateThreatTracking(threat)
+      })
+      // Periodic cleanup
+      if (Math.random() < 0.01) {
+        this.predictiveTargeting.cleanup()
+      }
+      if (this.profiler) this.profiler.endSection('Predictive Tracking')
+    }
+    
     // Update batteries with threat information
     if (this.profiler) this.profiler.startSection('Battery Updates')
     this.batteries.forEach((battery, index) => {
@@ -78,9 +106,25 @@ export class InterceptionSystem {
     })
     if (this.profiler) this.profiler.endSection('Battery Updates')
     
-    // Periodic coordinator cleanup
-    if (Math.random() < 0.01) { // ~Once per second at 60fps
+    // Periodic coordinator cleanup and validation
+    if (Math.random() < 0.05) { // ~3 times per second at 60fps
       this.batteryCoordinator.cleanup()
+      
+      // Also clear assignments for threats with no active interceptors
+      const assignedThreats = new Set<string>()
+      this.activeInterceptions.forEach(interception => {
+        assignedThreats.add(interception.threat.id)
+      })
+      
+      threats.forEach(threat => {
+        if (!assignedThreats.has(threat.id) && this.getInterceptorCount(threat) === 0) {
+          const assignment = this.batteryCoordinator.getAssignedInterceptorCount(threat.id)
+          if (assignment > 0) {
+            debug.module('Interception').log(`Clearing stale assignment for threat ${threat.id}`)
+            this.batteryCoordinator.clearThreatAssignment(threat.id)
+          }
+        }
+      })
     }
     
     // Update fragmentation system
@@ -141,29 +185,137 @@ export class InterceptionSystem {
   }
 
   private evaluateThreats(threats: Threat[]): void {
-      // Performance check: limit total active interceptors
-      const maxActiveInterceptors = 8  // Prevent triangle count spikes
-      if (this.interceptors.length >= maxActiveInterceptors) {
-        return  // Skip launching more until some are destroyed
+    if (this.useImprovedAlgorithms) {
+      this.evaluateThreatsImproved(threats)
+    } else {
+      this.evaluateThreatsLegacy(threats)
+    }
+  }
+  
+  private evaluateThreatsImproved(threats: Threat[]): void {
+    // Performance check: limit total active interceptors
+    const maxActiveInterceptors = 8
+    if (this.interceptors.length >= maxActiveInterceptors) {
+      return
+    }
+    
+    debug.module('Interception').log(`Evaluating ${threats.length} threats with improved algorithms`)
+    
+    // Filter out threats that are already sufficiently engaged
+    const unassignedThreats = threats.filter(t => {
+      if (!t.isActive || t.getTimeToImpact() <= 0) return false
+      // Check if threat needs more interceptors
+      const existingCount = this.getInterceptorCount(t)
+      const existingAssignment = this.batteryCoordinator.getAssignedInterceptorCount(t.id)
+      
+      if (existingCount > 0 || existingAssignment > 0) {
+        debug.module('Interception').log(`Skipping threat ${t.id}: existingCount=${existingCount}, existingAssignment=${existingAssignment}`)
       }
       
-      debug.module('Interception').log(`Evaluating ${threats.length} threats`)
+      // Only engage if no interceptors are currently assigned or in flight
+      return existingCount === 0 && existingAssignment === 0
+    })
+    
+    if (unassignedThreats.length === 0) {
+      debug.module('Interception').log('No unassigned threats to evaluate')
+      return
+    }
+    
+    debug.module('Interception').log(`Found ${unassignedThreats.length} unassigned threats out of ${threats.length} total`)
+    
+    // Use the improved allocation system
+    const allocationResult = this.interceptorAllocation.optimizeAllocation(
+      unassignedThreats,
+      this.batteries
+    )
+    
+    debug.module('Interception').log(`Allocation result: ${allocationResult.allocations.size} threats allocated, ${allocationResult.unassignedThreats.length} unassigned`)
+    debug.module('Interception').log(`Allocation efficiency: ${(allocationResult.efficiency * 100).toFixed(1)}%`)
+    
+    // Process allocations
+    allocationResult.allocations.forEach((allocation, threatId) => {
+      // Check interceptor limit
+      if (this.interceptors.length >= maxActiveInterceptors) {
+        return
+      }
       
-      // Performance optimization: Early exit if too many threats
+      const threat = threats.find(t => t.id === threatId)
+      if (!threat) return
+      
+      const battery = allocation.battery
+      const batteryIndex = this.batteries.indexOf(battery)
+      const batteryId = `battery_${batteryIndex}`
+      
+      // Fire interceptors with improved targeting
+      let interceptorsFired = 0
+      battery.fireInterceptors(threat, allocation.interceptorCount, (interceptor) => {
+        interceptorsFired++
+        // Use predictive targeting for lead calculation
+        const leadPrediction = this.predictiveTargeting.calculateLeadPrediction(
+          threat,
+          battery.getPosition(),
+          battery.config.interceptorSpeed
+        )
+        
+        if (leadPrediction) {
+          // Update interceptor's target point with prediction
+          interceptor.setTargetPoint(leadPrediction.aimPoint)
+        }
+        
+        // Set up proximity detonation callback
+        interceptor.detonationCallback = (position: THREE.Vector3, quality: number) => {
+          this.handleProximityDetonation(interceptor, threat, position, quality)
+        }
+        
+        this.interceptors.push(interceptor)
+        this.activeInterceptions.push({
+          interceptor,
+          threat,
+          targetPoint: leadPrediction?.aimPoint || threat.getImpactPoint() || threat.getPosition(),
+          launchTime: Date.now()
+        })
+        
+        // Add to instanced renderer if available
+        const renderer = (window as any).__instancedProjectileRenderer
+        if (renderer) {
+          renderer.addProjectile(interceptor)
+        }
+      })
+      
+      // Only record assignment if interceptors were actually fired
+      if (interceptorsFired > 0) {
+        this.batteryCoordinator.assignThreatToBattery(threat.id, batteryId, interceptorsFired)
+        debug.module('Interception').log(`Assigned ${interceptorsFired} interceptors to threat ${threat.id}`)
+      } else {
+        debug.module('Interception').log(`Failed to fire interceptors at threat ${threat.id} - no assignment recorded`)
+      }
+    })
+    
+    // Update success rates based on results
+    if (Math.random() < 0.1) { // Periodic updates
+      this.updateLearningData()
+    }
+  }
+  
+  private evaluateThreatsLegacy(threats: Threat[]): void {
+      // Original implementation
+      const maxActiveInterceptors = 8
+      if (this.interceptors.length >= maxActiveInterceptors) {
+        return
+      }
+      
+      debug.module('Interception').log(`Evaluating ${threats.length} threats (legacy)`)
+      
       const maxThreatsToEvaluate = 20
       const threatsToProcess = threats.length > maxThreatsToEvaluate 
         ? threats.slice(0, maxThreatsToEvaluate) 
         : threats
       
-      // Sort threats by time to impact (most urgent first)
       const sortedThreats = threatsToProcess
         .filter(t => t.isActive && t.getTimeToImpact() > 0)
         .sort((a, b) => a.getTimeToImpact() - b.getTimeToImpact())
-      
-      debug.module('Interception').log(`Active threats with positive time to impact: ${sortedThreats.length}`)
   
       for (const threat of sortedThreats) {
-        // Early exit if we've reached interceptor limit
         if (this.interceptors.length >= maxActiveInterceptors) {
           break
         }
@@ -172,13 +324,17 @@ export class InterceptionSystem {
         const isDrone = threatConfig?.isDrone || false
         debug.module('Interception').log(`Evaluating ${isDrone ? 'DRONE' : 'threat'} ${threat.id}`)
         
-        // Check how many interceptors are already targeting this threat
         const existingInterceptors = this.getInterceptorCount(threat)
         
-        // Use coordinator to find optimal battery
+        // Skip if threat already has interceptors
+        if (existingInterceptors > 0) {
+          debug.module('Interception').log(`Threat ${threat.id} already has ${existingInterceptors} interceptors`)
+          continue
+        }
+        
         const battery = this.batteryCoordinator.findOptimalBattery(threat, existingInterceptors)
         if (!battery) {
-          debug.module('Interception').log(`No capable battery for ${isDrone ? 'DRONE' : 'threat'} ${threat.id} (may already be assigned)`)
+          debug.module('Interception').log(`No capable battery for ${isDrone ? 'DRONE' : 'threat'} ${threat.id}`)
           continue
         }
         if (battery.getInterceptorCount() === 0) {
@@ -186,22 +342,17 @@ export class InterceptionSystem {
           continue
         }
         
-        // Calculate how many interceptors to fire based on threat assessment
         const interceptorsToFire = battery.calculateInterceptorCount(threat, existingInterceptors)
         
         if (interceptorsToFire > 0) {
-          debug.category('Interception', `Firing ${interceptorsToFire} interceptor(s) at threat. Already tracking: ${existingInterceptors}`)
+          debug.category('Interception', `Firing ${interceptorsToFire} interceptor(s) at threat`)
           
-          // Find battery ID for coordinator
           const batteryIndex = this.batteries.indexOf(battery)
           const batteryId = `battery_${batteryIndex}`
           
-          // Record assignment
           this.batteryCoordinator.assignThreatToBattery(threat.id, batteryId, interceptorsToFire)
           
-          // Fire multiple interceptors with callback to handle delayed launches
           battery.fireInterceptors(threat, interceptorsToFire, (interceptor) => {
-            // Set up proximity detonation callback
             interceptor.detonationCallback = (position: THREE.Vector3, quality: number) => {
               this.handleProximityDetonation(interceptor, threat, position, quality)
             }
@@ -214,7 +365,6 @@ export class InterceptionSystem {
               launchTime: Date.now()
             })
             
-            // Add to instanced renderer if available
             const renderer = (window as any).__instancedProjectileRenderer
             if (renderer) {
               renderer.addProjectile(interceptor)
@@ -600,6 +750,22 @@ export class InterceptionSystem {
     })
   }
 
+  private updateLearningData(): void {
+    // Update allocation system with recent interception results
+    this.activeInterceptions.forEach(interception => {
+      if (!interception.interceptor.isActive) {
+        // Interceptor has detonated, check if it was successful
+        const threatStillActive = this.currentThreats.find(t => t.id === interception.threat.id)?.isActive
+        const wasSuccessful = !threatStillActive
+        
+        this.interceptorAllocation.updateSuccessRate(
+          interception.threat.type,
+          wasSuccessful
+        )
+      }
+    })
+  }
+
   getStats() {
     const coordinatorStats = this.batteryCoordinator.getCoordinationStats()
     return {
@@ -609,7 +775,8 @@ export class InterceptionSystem {
       batteries: this.batteries.length,
       totalInterceptors: this.batteries.reduce((sum, b) => sum + b.getInterceptorCount(), 0),
       activeInterceptors: this.interceptors.length,
-      coordination: coordinatorStats
+      coordination: coordinatorStats,
+      algorithmMode: this.useImprovedAlgorithms ? 'improved' : 'legacy'
     }
   }
   

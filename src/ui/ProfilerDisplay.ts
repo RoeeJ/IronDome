@@ -18,15 +18,18 @@ export class ProfilerDisplay {
     this.canvas.style.position = 'absolute'
     this.canvas.style.top = '320px'
     this.canvas.style.left = '10px'
-    this.canvas.style.width = '500px'
-    this.canvas.style.height = '600px'
-    this.canvas.style.backgroundColor = 'rgba(0, 0, 0, 0.8)'
-    this.canvas.style.border = '1px solid #00ff00'
+    this.canvas.style.width = '400px'
+    this.canvas.style.height = '250px'
+    this.canvas.style.backgroundColor = 'rgba(20, 20, 30, 0.95)'
+    this.canvas.style.border = '1px solid rgba(100, 100, 255, 0.3)'
+    this.canvas.style.borderRadius = '8px'
+    this.canvas.style.boxShadow = '0 4px 12px rgba(0, 0, 0, 0.5)'
     this.canvas.style.display = 'none'
     this.canvas.style.pointerEvents = 'none'
     this.canvas.style.zIndex = '1001'
-    this.canvas.width = 500
-    this.canvas.height = 600
+    this.canvas.style.fontFamily = "'SF Mono', Monaco, 'Cascadia Code', 'Roboto Mono', Consolas, monospace"
+    this.canvas.width = 400
+    this.canvas.height = 250
     
     document.body.appendChild(this.canvas)
     this.ctx = this.canvas.getContext('2d')!
@@ -69,42 +72,55 @@ export class ProfilerDisplay {
     if (now - this.lastUpdate < this.updateInterval) return
     this.lastUpdate = now
     
+    // Calculate required height based on content
+    const averages = this.profiler.getAverages()
+    const sectionCount = averages.size
+    const baseHeight = 150  // Header + summary
+    const sectionHeight = 18
+    const requiredHeight = Math.min(600, baseHeight + (sectionCount * sectionHeight))
+    
+    // Resize canvas if needed
+    if (this.canvas.height !== requiredHeight) {
+      this.canvas.height = requiredHeight
+      this.canvas.style.height = requiredHeight + 'px'
+    }
+    
     // Clear canvas
-    this.ctx.fillStyle = 'rgba(0, 0, 0, 0.9)'
+    this.ctx.fillStyle = 'rgba(20, 20, 30, 0.95)'
     this.ctx.fillRect(0, 0, this.canvas.width, this.canvas.height)
     
     // Draw header
-    this.ctx.fillStyle = '#00ff00'
-    this.ctx.font = 'bold 14px monospace'
-    this.ctx.fillText('PERFORMANCE PROFILER (Press P to toggle)', 10, 20)
+    this.ctx.fillStyle = '#6e7edb'
+    this.ctx.font = 'bold 13px monospace'
+    this.ctx.fillText('Performance Profiler (P)', 10, 20)
     
     // Get profiler data
-    const averages = this.profiler.getAverages()
     const hotspots = this.profiler.getHotspots(1) // Show everything above 1ms
     
     // Draw hierarchical timing data
-    let y = 50
-    const barHeight = 18
-    const maxBarWidth = 450
-    const indentWidth = 20
+    let y = 45
+    const barHeight = 16
+    const maxBarWidth = 350
+    const indentWidth = 15
     
     // Find max time for scaling
-    const maxTime = Math.max(...Array.from(averages.values()), 16.67) // At least one frame time
+    const averageValues = Array.from(averages.values())
+    const maxTime = averageValues.length > 0 ? Math.max(...averageValues, 16.67) : 16.67 // At least one frame time
     
     // Draw frame time reference line (60 FPS = 16.67ms)
-    this.ctx.strokeStyle = '#ffff00'
+    this.ctx.strokeStyle = 'rgba(255, 200, 0, 0.5)'
     this.ctx.lineWidth = 1
-    this.ctx.setLineDash([5, 5])
+    this.ctx.setLineDash([3, 3])
     const frameLineX = 10 + (16.67 / maxTime) * maxBarWidth
     this.ctx.beginPath()
-    this.ctx.moveTo(frameLineX, 40)
-    this.ctx.lineTo(frameLineX, this.canvas.height - 40)
+    this.ctx.moveTo(frameLineX, 35)
+    this.ctx.lineTo(frameLineX, this.canvas.height - 20)
     this.ctx.stroke()
     this.ctx.setLineDash([])
     
-    this.ctx.font = '10px monospace'
-    this.ctx.fillStyle = '#ffff00'
-    this.ctx.fillText('16.67ms (60 FPS)', frameLineX + 5, 45)
+    this.ctx.font = '9px monospace'
+    this.ctx.fillStyle = 'rgba(255, 200, 0, 0.8)'
+    this.ctx.fillText('60 FPS', frameLineX + 3, 42)
     
     // Draw hierarchical sections
     const sectionsEndY = this.drawHierarchicalSections(y, barHeight, maxBarWidth, indentWidth, maxTime)
@@ -114,22 +130,22 @@ export class ProfilerDisplay {
     
     // Draw summary
     const totalTime = Array.from(averages.values()).reduce((a, b) => a + b, 0)
-    this.ctx.fillStyle = '#00ff00'
-    this.ctx.font = '12px monospace'
-    this.ctx.fillText(`Total Frame Time: ${totalTime.toFixed(2)}ms`, 10, this.canvas.height - 35)
-    this.ctx.fillText(`Estimated FPS: ${(1000 / totalTime).toFixed(0)}`, 250, this.canvas.height - 35)
+    this.ctx.fillStyle = '#a3b3ff'
+    this.ctx.font = '11px monospace'
+    this.ctx.fillText(`Frame: ${totalTime.toFixed(2)}ms`, 10, this.canvas.height - 25)
+    this.ctx.fillText(`FPS: ${(1000 / totalTime).toFixed(0)}`, 150, this.canvas.height - 25)
     
     // Draw warning if over budget
     if (totalTime > 16.67) {
-      this.ctx.fillStyle = '#ff0000'
-      this.ctx.font = 'bold 12px monospace'
-      this.ctx.fillText('⚠ FRAME BUDGET EXCEEDED', 10, this.canvas.height - 20)
+      this.ctx.fillStyle = '#ff6b6b'
+      this.ctx.font = 'bold 11px monospace'
+      this.ctx.fillText('⚠ OVER BUDGET', 230, this.canvas.height - 25)
     }
     
     // Draw help text
-    this.ctx.fillStyle = '#888888'
-    this.ctx.font = '10px monospace'
-    this.ctx.fillText('Press P to toggle profiler', 10, this.canvas.height - 5)
+    this.ctx.fillStyle = 'rgba(150, 150, 180, 0.6)'
+    this.ctx.font = '9px monospace'
+    this.ctx.fillText('Press P to hide', 10, this.canvas.height - 8)
   }
   
   private drawHierarchicalSections(
@@ -191,21 +207,25 @@ export class ProfilerDisplay {
         const x = 10 + indent * indentWidth
         
         // Color based on performance impact
-        let color = '#00ff00' // Green
-        if (avgTime > 16.67) color = '#ff0000' // Red if over frame budget
-        else if (avgTime > 8) color = '#ffaa00' // Orange if over half frame
-        else if (avgTime > 4) color = '#ffff00' // Yellow if significant
-        else if (avgTime > 2) color = '#aaffaa' // Light green
+        let color = '#4ade80' // Green
+        if (avgTime > 16.67) color = '#ef4444' // Red if over frame budget
+        else if (avgTime > 8) color = '#f97316' // Orange if over half frame
+        else if (avgTime > 4) color = '#fbbf24' // Yellow if significant
+        else if (avgTime > 2) color = '#84cc16' // Light green
+        
+        // Draw bar background
+        this.ctx.fillStyle = 'rgba(100, 100, 150, 0.2)'
+        this.ctx.fillRect(x, y, maxBarWidth, barHeight - 2)
         
         // Draw bar
         this.ctx.fillStyle = color
-        this.ctx.globalAlpha = 0.7
+        this.ctx.globalAlpha = 0.8
         this.ctx.fillRect(x, y, barWidth, barHeight - 2)
         this.ctx.globalAlpha = 1.0
         
         // Draw text
-        this.ctx.font = indent > 0 ? '11px monospace' : '12px monospace'
-        this.ctx.fillStyle = '#ffffff'
+        this.ctx.font = indent > 0 ? '10px monospace' : '11px monospace'
+        this.ctx.fillStyle = indent > 0 ? 'rgba(255, 255, 255, 0.8)' : '#ffffff'
         const prefix = indent > 0 ? '└─ ' : ''
         this.ctx.fillText(
           `${prefix}${sectionName}: ${avgTime.toFixed(2)}ms`,

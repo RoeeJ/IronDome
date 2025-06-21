@@ -92,6 +92,8 @@ The simulator now has:
 - ✅ Battery coordination system
 - ✅ Performance optimizations for large salvos
 - ✅ Material caching to prevent shader compilation freezes
+- ✅ Improved tracking/interception algorithms (Kalman filtering, predictive targeting)
+- ✅ Stats.js integration for performance monitoring (Ctrl+H to toggle)
 
 ## Performance Considerations
 
