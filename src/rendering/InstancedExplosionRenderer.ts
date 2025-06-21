@@ -35,6 +35,7 @@ export class InstancedExplosionRenderer {
   // Launch effect style animations
   private activeEffects: Array<{ update: () => boolean }> = []
   
+  private cachedSmokeTexture: THREE.Texture | null = null  
   constructor(scene: THREE.Scene, maxExplosions: number = 100) {
     this.scene = scene
     this.maxExplosions = maxExplosions
@@ -137,97 +138,105 @@ export class InstancedExplosionRenderer {
   }
   
   update(): void {
-    const currentTime = Date.now()
-    
-    // Update launch style effects
-    this.activeEffects = this.activeEffects.filter(effect => effect.update())
-    
-    // Update all active explosions
-    this.activeExplosions.forEach((explosion, id) => {
-      const elapsed = currentTime - explosion.startTime
-      const progress = Math.min(elapsed / explosion.duration, 1)
-      const smokeProgress = Math.min(elapsed / (explosion.smokeDuration || explosion.duration), 1)
+      const currentTime = Date.now()
       
-      // Only remove when smoke is also done
-      if (smokeProgress >= 1) {
-        this.removeExplosion(id)
-        return
+      // Performance optimization: Limit active effects
+      const maxActiveEffects = 20
+      if (this.activeEffects.length > maxActiveEffects) {
+        // Remove oldest effects
+        this.activeEffects = this.activeEffects.slice(-maxActiveEffects)
       }
       
-      // Calculate scale with easing
-      const easeOutQuad = 1 - Math.pow(1 - progress, 2)
-      const scale = explosion.maxScale * easeOutQuad
+      // Update launch style effects
+      this.activeEffects = this.activeEffects.filter(effect => effect.update())
       
-      // Main explosion sphere (hide after it completes)
-      if (progress < 1) {
-        // Fade out by reducing scale in the last 20% of animation
-        let finalScale = scale
-        if (progress > 0.8) {
-          const fadeProgress = (progress - 0.8) / 0.2
-          finalScale = scale * (1 - fadeProgress)
+      // Update all active explosions
+      this.activeExplosions.forEach((explosion, id) => {
+        const elapsed = currentTime - explosion.startTime
+        const progress = Math.min(elapsed / explosion.duration, 1)
+        const smokeProgress = Math.min(elapsed / (explosion.smokeDuration || explosion.duration), 1)
+        
+        // Only remove when smoke is also done
+        if (smokeProgress >= 1) {
+          this.removeExplosion(id)
+          return
         }
         
-        // Update main explosion sphere
-        this.dummy.position.copy(explosion.position)
-        this.dummy.scale.setScalar(finalScale)
-        this.dummy.updateMatrix()
-        this.sphereMesh.setMatrixAt(explosion.index, this.dummy.matrix)
-      } else {
-        // Hide main explosion after it completes
-        const zeroScale = new THREE.Matrix4().makeScale(0, 0, 0)
-        this.sphereMesh.setMatrixAt(explosion.index, zeroScale)
-      }
-      
-      // Update flash (only for first 20% of explosion)
-      if (progress < 0.2) {
-        const flashScale = scale * 1.5
-        const flashOpacity = 1 - (progress / 0.2)
-        this.dummy.scale.setScalar(flashScale * flashOpacity)
+        // Calculate scale with easing
+        const easeOutQuad = 1 - Math.pow(1 - progress, 2)
+        const scale = explosion.maxScale * easeOutQuad
         
-        // Make flash face camera
-        const camera = (window as any).__camera
-        if (camera) {
-          this.dummy.lookAt(camera.position)
+        // Main explosion sphere (hide after it completes)
+        if (progress < 1) {
+          // Fade out by reducing scale in the last 20% of animation
+          let finalScale = scale
+          if (progress > 0.8) {
+            const fadeProgress = (progress - 0.8) / 0.2
+            finalScale = scale * (1 - fadeProgress)
+          }
+          
+          // Update main explosion sphere
+          this.dummy.position.copy(explosion.position)
+          this.dummy.scale.setScalar(finalScale)
+          this.dummy.updateMatrix()
+          this.sphereMesh.setMatrixAt(explosion.index, this.dummy.matrix)
+        } else {
+          // Hide main explosion after it completes
+          const zeroScale = new THREE.Matrix4().makeScale(0, 0, 0)
+          this.sphereMesh.setMatrixAt(explosion.index, zeroScale)
         }
         
-        this.dummy.updateMatrix()
-        this.flashMesh.setMatrixAt(explosion.index, this.dummy.matrix)
-      } else {
-        // Hide flash
-        const zeroScale = new THREE.Matrix4().makeScale(0, 0, 0)
-        this.flashMesh.setMatrixAt(explosion.index, zeroScale)
-      }
+        // Update flash (only for first 20% of explosion)
+        if (progress < 0.2) {
+          const flashScale = scale * 1.5
+          const flashOpacity = 1 - (progress / 0.2)
+          this.dummy.scale.setScalar(flashScale * flashOpacity)
+          
+          // Make flash face camera
+          const camera = (window as any).__camera
+          if (camera) {
+            this.dummy.lookAt(camera.position)
+          }
+          
+          this.dummy.updateMatrix()
+          this.flashMesh.setMatrixAt(explosion.index, this.dummy.matrix)
+        } else {
+          // Hide flash
+          const zeroScale = new THREE.Matrix4().makeScale(0, 0, 0)
+          this.flashMesh.setMatrixAt(explosion.index, zeroScale)
+        }
+        
+        // Update smoke mesh (appears after explosion, lingers longer)
+        if (explosion.quality > 0.3 && progress > 0.7) {
+          // Use smokeProgress which has longer duration
+          const smokePhase = Math.min((smokeProgress - 0.3) / 0.7, 1)  // 0-1 for smoke lifetime
+          
+          // Position smoke at explosion center
+          this.dummy.position.copy(explosion.position)
+          
+          // Smoke starts at explosion size and expands slowly
+          const smokeScale = explosion.maxScale * (0.8 + smokePhase * 0.4) // 80% to 120% of explosion size
+          const smokeFade = Math.pow(1 - smokePhase, 0.5) // Slower fade
+          
+          this.dummy.scale.setScalar(smokeScale * smokeFade)
+          this.dummy.rotation.set(0, smokePhase * Math.PI * 0.5, 0)
+          this.dummy.updateMatrix()
+          this.smokeMesh.setMatrixAt(explosion.index, this.dummy.matrix)
+        } else {
+          // Hide smoke before it appears
+          const zeroScale = new THREE.Matrix4().makeScale(0, 0, 0)
+          this.smokeMesh.setMatrixAt(explosion.index, zeroScale)
+        }
+      })
       
-      // Update smoke mesh (appears after explosion, lingers longer)
-      if (explosion.quality > 0.3 && progress > 0.7) {
-        // Use smokeProgress which has longer duration
-        const smokePhase = Math.min((smokeProgress - 0.3) / 0.7, 1)  // 0-1 for smoke lifetime
-        
-        // Position smoke at explosion center
-        this.dummy.position.copy(explosion.position)
-        
-        // Smoke starts at explosion size and expands slowly
-        const smokeScale = explosion.maxScale * (0.8 + smokePhase * 0.4) // 80% to 120% of explosion size
-        const smokeFade = Math.pow(1 - smokePhase, 0.5) // Slower fade
-        
-        this.dummy.scale.setScalar(smokeScale * smokeFade)
-        this.dummy.rotation.set(0, smokePhase * Math.PI * 0.5, 0)
-        this.dummy.updateMatrix()
-        this.smokeMesh.setMatrixAt(explosion.index, this.dummy.matrix)
-      } else {
-        // Hide smoke before it appears
-        const zeroScale = new THREE.Matrix4().makeScale(0, 0, 0)
-        this.smokeMesh.setMatrixAt(explosion.index, zeroScale)
+      // Update instance matrices if there were active explosions
+      if (this.activeExplosions.size > 0) {
+        this.sphereMesh.instanceMatrix.needsUpdate = true
+        this.flashMesh.instanceMatrix.needsUpdate = true
+        this.smokeMesh.instanceMatrix.needsUpdate = true
       }
-    })
-    
-    // Update instance matrices if there were active explosions
-    if (this.activeExplosions.size > 0) {
-      this.sphereMesh.instanceMatrix.needsUpdate = true
-      this.flashMesh.instanceMatrix.needsUpdate = true
-      this.smokeMesh.instanceMatrix.needsUpdate = true
     }
-  }
+
   
   private removeExplosion(id: string): void {
     const explosion = this.activeExplosions.get(id)
@@ -281,114 +290,123 @@ export class InstancedExplosionRenderer {
   }
   
   private createSmokeCloud(position: THREE.Vector3, quality: number): void {
-    const particleCount = Math.floor(10 + quality * 15) // 10-25 particles based on quality
-    const geometry = new THREE.BufferGeometry()
-    const positions = new Float32Array(particleCount * 3)
-    const velocities = new Float32Array(particleCount * 3)
-    const lifetimes = new Float32Array(particleCount)
-    const sizes = new Float32Array(particleCount)
-    
-    // Initialize particles
-    for (let i = 0; i < particleCount; i++) {
-      // Random position around explosion center, starting from the edge
-      const angle = Math.random() * Math.PI * 2
-      const radius = 2 + Math.random() * 2 // Start 2-4 units from center
-      const offset = new THREE.Vector3(
-        Math.cos(angle) * radius,
-        Math.random() * 2,
-        Math.sin(angle) * radius
-      )
-      
-      positions[i * 3] = position.x + offset.x
-      positions[i * 3 + 1] = position.y + offset.y
-      positions[i * 3 + 2] = position.z + offset.z
-      
-      // Outward expansion velocity (mostly horizontal)
-      const vel = new THREE.Vector3(
-        (Math.random() - 0.5) * 8, // Outward expansion
-        (Math.random() - 0.5) * 2, // Very minimal vertical movement
-        (Math.random() - 0.5) * 8
-      )
-      
-      velocities[i * 3] = vel.x
-      velocities[i * 3 + 1] = vel.y
-      velocities[i * 3 + 2] = vel.z
-      
-      lifetimes[i] = Math.random() * 0.5
-      sizes[i] = 3 + Math.random() * 4 // Larger particles for explosions
-    }
-    
-    geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3))
-    geometry.setAttribute('velocity', new THREE.BufferAttribute(velocities, 3))
-    geometry.setAttribute('lifetime', new THREE.BufferAttribute(lifetimes, 1))
-    geometry.setAttribute('size', new THREE.BufferAttribute(sizes, 1))
-    
-    const material = new THREE.PointsMaterial({
-      size: 12,
-      color: 0x444444, // Darker smoke
-      map: this.createSmokeTexture(),
-      transparent: true,
-      opacity: 0.4, // Lower initial opacity
-      depthWrite: false,
-      depthTest: true,
-      blending: THREE.NormalBlending,
-      sizeAttenuation: true,
-      vertexColors: false
-    })
-    
-    const points = new THREE.Points(geometry, material)
-    points.renderOrder = 0  // Render smoke particles behind everything
-    this.scene.add(points)
-    
-    // Animate smoke
-    const startTime = Date.now()
-    const duration = 1500 + quality * 1000 // 1.5-2.5 seconds based on quality
-    const effect = {
-      update: () => {
-        const elapsed = (Date.now() - startTime) / 1000
-        if (elapsed > duration / 1000) {
-          this.scene.remove(points)
-          geometry.dispose()
-          material.dispose()
-          if (material.map) material.map.dispose()
-          return false
-        }
-        
-        const positions = geometry.attributes.position.array as Float32Array
-        const velocities = geometry.attributes.velocity.array as Float32Array
-        const lifetimes = geometry.attributes.lifetime.array as Float32Array
-        const sizes = geometry.attributes.size.array as Float32Array
-        
-        for (let i = 0; i < particleCount; i++) {
-          lifetimes[i] += 0.016
-          
-          // Update position
-          positions[i * 3] += velocities[i * 3] * 0.016
-          positions[i * 3 + 1] += velocities[i * 3 + 1] * 0.016
-          positions[i * 3 + 2] += velocities[i * 3 + 2] * 0.016
-          
-          // Rapidly slow down particles (high drag)
-          velocities[i * 3] *= 0.92
-          velocities[i * 3 + 1] *= 0.92 // No upward drift
-          velocities[i * 3 + 2] *= 0.92
-          
-          // Grow over time
-          sizes[i] = (3 + Math.random() * 4) * (1 + lifetimes[i] * 0.5)
-        }
-        
-        geometry.attributes.position.needsUpdate = true
-        geometry.attributes.size.needsUpdate = true
-        
-        // Start fading immediately, fade faster
-        const fadeProgress = elapsed / (duration / 1000)
-        material.opacity = 0.4 * Math.pow(1 - fadeProgress, 2) // Quadratic fade for faster dissipation
-        
-        return true
+      // Performance optimization: Skip smoke particles for low quality or too many explosions
+      if (quality < 0.5 || this.activeExplosions.size > 10) {
+        return
       }
+      
+      const particleCount = Math.floor(5 + quality * 10) // Reduced from 10-25 to 5-15
+      const geometry = new THREE.BufferGeometry()
+      const positions = new Float32Array(particleCount * 3)
+      const velocities = new Float32Array(particleCount * 3)
+      const lifetimes = new Float32Array(particleCount)
+      const sizes = new Float32Array(particleCount)
+      
+      // Initialize particles
+      for (let i = 0; i < particleCount; i++) {
+        // Random position around explosion center, starting from the edge
+        const angle = Math.random() * Math.PI * 2
+        const radius = 2 + Math.random() * 2 // Start 2-4 units from center
+        const offset = new THREE.Vector3(
+          Math.cos(angle) * radius,
+          Math.random() * 2,
+          Math.sin(angle) * radius
+        )
+        
+        positions[i * 3] = position.x + offset.x
+        positions[i * 3 + 1] = position.y + offset.y
+        positions[i * 3 + 2] = position.z + offset.z
+        
+        // Outward expansion velocity (mostly horizontal)
+        const vel = new THREE.Vector3(
+          (Math.random() - 0.5) * 8, // Outward expansion
+          (Math.random() - 0.5) * 2, // Very minimal vertical movement
+          (Math.random() - 0.5) * 8
+        )
+        
+        velocities[i * 3] = vel.x
+        velocities[i * 3 + 1] = vel.y
+        velocities[i * 3 + 2] = vel.z
+        
+        lifetimes[i] = Math.random() * 0.5
+        sizes[i] = 3 + Math.random() * 4 // Larger particles for explosions
+      }
+      
+      geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3))
+      geometry.setAttribute('velocity', new THREE.BufferAttribute(velocities, 3))
+      geometry.setAttribute('lifetime', new THREE.BufferAttribute(lifetimes, 1))
+      geometry.setAttribute('size', new THREE.BufferAttribute(sizes, 1))
+      
+      // Reuse smoke texture if possible
+      const smokeTexture = this.getSmokeTexture()
+      
+      const material = new THREE.PointsMaterial({
+        size: 12,
+        color: 0x444444, // Darker smoke
+        map: smokeTexture,
+        transparent: true,
+        opacity: 0.4, // Lower initial opacity
+        depthWrite: false,
+        depthTest: true,
+        blending: THREE.NormalBlending,
+        sizeAttenuation: true,
+        vertexColors: false
+      })
+      
+      const points = new THREE.Points(geometry, material)
+      points.renderOrder = 0  // Render smoke particles behind everything
+      this.scene.add(points)
+      
+      // Animate smoke
+      const startTime = Date.now()
+      const duration = 1500 + quality * 1000 // 1.5-2.5 seconds based on quality
+      const effect = {
+        update: () => {
+          const elapsed = (Date.now() - startTime) / 1000
+          if (elapsed > duration / 1000) {
+            this.scene.remove(points)
+            geometry.dispose()
+            material.dispose()
+            // Don't dispose shared texture
+            return false
+          }
+          
+          const positions = geometry.attributes.position.array as Float32Array
+          const velocities = geometry.attributes.velocity.array as Float32Array
+          const lifetimes = geometry.attributes.lifetime.array as Float32Array
+          const sizes = geometry.attributes.size.array as Float32Array
+          
+          for (let i = 0; i < particleCount; i++) {
+            lifetimes[i] += 0.016
+            
+            // Update position
+            positions[i * 3] += velocities[i * 3] * 0.016
+            positions[i * 3 + 1] += velocities[i * 3 + 1] * 0.016
+            positions[i * 3 + 2] += velocities[i * 3 + 2] * 0.016
+            
+            // Rapidly slow down particles (high drag)
+            velocities[i * 3] *= 0.92
+            velocities[i * 3 + 1] *= 0.92 // No upward drift
+            velocities[i * 3 + 2] *= 0.92
+            
+            // Grow over time
+            sizes[i] = (3 + Math.random() * 4) * (1 + lifetimes[i] * 0.5)
+          }
+          
+          geometry.attributes.position.needsUpdate = true
+          geometry.attributes.size.needsUpdate = true
+          
+          // Start fading immediately, fade faster
+          const fadeProgress = elapsed / (duration / 1000)
+          material.opacity = 0.4 * Math.pow(1 - fadeProgress, 2) // Quadratic fade for faster dissipation
+          
+          return true
+        }
+      }
+      
+      this.activeEffects.push(effect)
     }
-    
-    this.activeEffects.push(effect)
-  }
+
   
   private createGroundDustRing(position: THREE.Vector3, quality: number): void {
     // Just create expanding dust ring without particles
@@ -449,17 +467,28 @@ export class InstancedExplosionRenderer {
     return texture
   }
   
+    private getSmokeTexture(): THREE.Texture {
+      if (!this.cachedSmokeTexture) {
+        this.cachedSmokeTexture = this.createSmokeTexture()
+      }
+      return this.cachedSmokeTexture
+    }  
   dispose(): void {
-    this.sphereMesh.geometry.dispose()
-    this.flashMesh.geometry.dispose()
-    this.smokeMesh.geometry.dispose()
-    
-    this.explosionMaterial.dispose()
-    this.flashMaterial.dispose()
-    this.smokeMaterial.dispose()
-    
-    this.scene.remove(this.sphereMesh)
-    this.scene.remove(this.flashMesh)
-    this.scene.remove(this.smokeMesh)
-  }
+      this.sphereMesh.geometry.dispose()
+      this.flashMesh.geometry.dispose()
+      this.smokeMesh.geometry.dispose()
+      
+      this.explosionMaterial.dispose()
+      this.flashMaterial.dispose()
+      this.smokeMaterial.dispose()
+      
+      if (this.cachedSmokeTexture) {
+        this.cachedSmokeTexture.dispose()
+      }
+      
+      this.scene.remove(this.sphereMesh)
+      this.scene.remove(this.flashMesh)
+      this.scene.remove(this.smokeMesh)
+    }
+
 }

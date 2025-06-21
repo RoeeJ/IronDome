@@ -89,10 +89,33 @@ The simulator now has:
 - ✅ Iron Dome battery model with auto-intercept
 - ✅ Impact prediction markers
 - ✅ Explosion effects on interception
+- ✅ Battery coordination system
+- ✅ Performance optimizations for large salvos
+- ✅ Material caching to prevent shader compilation freezes
+
+## Performance Considerations
+
+### Performance Limits
+To maintain 60 FPS during intense scenarios:
+- Maximum 50 active threats simultaneously
+- Maximum 8 active interceptors in flight
+- Maximum 20 active explosion effects
+- Maximum 10-15 point lights active
+
+### Material Caching
+The project uses a MaterialCache system to prevent shader compilation freezes:
+- All batteries share common materials to avoid recompilation
+- Shaders are precompiled during initialization
+- This prevents 1000+ ms freezes when spawning multiple batteries
+
+### Optimization Strategies
+1. **Salvo Spawning**: Uses single RAF loop instead of multiple setTimeout calls
+2. **Explosion Effects**: Limited particle counts and active effects
+3. **Interception Evaluation**: Early exit for large threat counts
+4. **Battery Coordination**: Simplified scoring calculations
 
 ## Next Steps
 1. Add sound effects for launches and explosions
-2. Implement multiple battery coordination
-3. Add more realistic missile models
-4. Create scenario system
-5. Optimize performance with object pooling
+2. Add more realistic missile models
+3. Create scenario system
+4. Implement full object pooling for projectiles

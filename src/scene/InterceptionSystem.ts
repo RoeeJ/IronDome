@@ -10,6 +10,7 @@ import { debug } from '../utils/DebugLogger'
 import { ResourceManager } from '../game/ResourceManager'
 import { GameState } from '../game/GameState'
 import { ThreatManager } from './ThreatManager'
+import { BatteryCoordinator } from '../game/BatteryCoordinator'
 
 interface Interception {
   interceptor: Projectile
@@ -35,6 +36,7 @@ export class InterceptionSystem {
   private threatManager?: ThreatManager
   private comboCount: number = 0
   private lastInterceptionTime: number = 0
+  private batteryCoordinator: BatteryCoordinator
 
   constructor(scene: THREE.Scene, world: CANNON.World) {
     this.scene = scene
@@ -43,6 +45,7 @@ export class InterceptionSystem {
     this.debrisSystem = new DebrisSystem(scene, world)
     this.resourceManager = ResourceManager.getInstance()
     this.gameState = GameState.getInstance()
+    this.batteryCoordinator = new BatteryCoordinator()
   }
   
   setThreatManager(threatManager: ThreatManager): void {
@@ -51,6 +54,9 @@ export class InterceptionSystem {
 
   addBattery(battery: IronDomeBattery): void {
     this.batteries.push(battery)
+    // Register with coordinator using array index as ID for now
+    const batteryId = `battery_${this.batteries.length - 1}`
+    this.batteryCoordinator.registerBattery(batteryId, battery)
   }
   
   setProfiler(profiler: Profiler): void {
@@ -65,8 +71,17 @@ export class InterceptionSystem {
     
     // Update batteries with threat information
     if (this.profiler) this.profiler.startSection('Battery Updates')
-    this.batteries.forEach(battery => battery.update(deltaTime, threats))
+    this.batteries.forEach((battery, index) => {
+      battery.update(deltaTime, threats)
+      // Update coordinator with current battery status
+      this.batteryCoordinator.updateBatteryStatus(`battery_${index}`)
+    })
     if (this.profiler) this.profiler.endSection('Battery Updates')
+    
+    // Periodic coordinator cleanup
+    if (Math.random() < 0.01) { // ~Once per second at 60fps
+      this.batteryCoordinator.cleanup()
+    }
     
     // Update fragmentation system
     if (this.profiler) this.profiler.startSection('Fragmentation System')
@@ -126,70 +141,89 @@ export class InterceptionSystem {
   }
 
   private evaluateThreats(threats: Threat[]): void {
-    // Performance check: limit total active interceptors
-    const maxActiveInterceptors = 8  // Prevent triangle count spikes
-    if (this.interceptors.length >= maxActiveInterceptors) {
-      return  // Skip launching more until some are destroyed
-    }
-    
-    debug.module('Interception').log(`Evaluating ${threats.length} threats`)
-    
-    // Sort threats by time to impact (most urgent first)
-    const sortedThreats = threats
-      .filter(t => t.isActive && t.getTimeToImpact() > 0)
-      .sort((a, b) => a.getTimeToImpact() - b.getTimeToImpact())
-    
-    debug.module('Interception').log(`Active threats with positive time to impact: ${sortedThreats.length}`)
-
-    for (const threat of sortedThreats) {
-      const threatConfig = (threat as any).config
-      const isDrone = threatConfig?.isDrone || false
-      debug.module('Interception').log(`Evaluating ${isDrone ? 'DRONE' : 'threat'} ${threat.id}`)
-      
-      // Find best battery to intercept
-      const battery = this.findBestBattery(threat)
-      if (!battery) {
-        debug.module('Interception').log(`No capable battery for ${isDrone ? 'DRONE' : 'threat'} ${threat.id}`)
-        continue
-      }
-      if (battery.getInterceptorCount() === 0) {
-        debug.module('Interception').log(`Battery has no loaded interceptors`)
-        continue
+      // Performance check: limit total active interceptors
+      const maxActiveInterceptors = 8  // Prevent triangle count spikes
+      if (this.interceptors.length >= maxActiveInterceptors) {
+        return  // Skip launching more until some are destroyed
       }
       
-      // Check how many interceptors are already targeting this threat
-      const existingInterceptors = this.getInterceptorCount(threat)
+      debug.module('Interception').log(`Evaluating ${threats.length} threats`)
       
-      // Calculate how many interceptors to fire based on threat assessment
-      const interceptorsToFire = battery.calculateInterceptorCount(threat, existingInterceptors)
+      // Performance optimization: Early exit if too many threats
+      const maxThreatsToEvaluate = 20
+      const threatsToProcess = threats.length > maxThreatsToEvaluate 
+        ? threats.slice(0, maxThreatsToEvaluate) 
+        : threats
       
-      if (interceptorsToFire > 0) {
-        debug.category('Interception', `Firing ${interceptorsToFire} interceptor(s) at threat. Already tracking: ${existingInterceptors}`)
+      // Sort threats by time to impact (most urgent first)
+      const sortedThreats = threatsToProcess
+        .filter(t => t.isActive && t.getTimeToImpact() > 0)
+        .sort((a, b) => a.getTimeToImpact() - b.getTimeToImpact())
+      
+      debug.module('Interception').log(`Active threats with positive time to impact: ${sortedThreats.length}`)
+  
+      for (const threat of sortedThreats) {
+        // Early exit if we've reached interceptor limit
+        if (this.interceptors.length >= maxActiveInterceptors) {
+          break
+        }
         
-        // Fire multiple interceptors with callback to handle delayed launches
-        battery.fireInterceptors(threat, interceptorsToFire, (interceptor) => {
-          // Set up proximity detonation callback
-          interceptor.detonationCallback = (position: THREE.Vector3, quality: number) => {
-            this.handleProximityDetonation(interceptor, threat, position, quality)
-          }
+        const threatConfig = (threat as any).config
+        const isDrone = threatConfig?.isDrone || false
+        debug.module('Interception').log(`Evaluating ${isDrone ? 'DRONE' : 'threat'} ${threat.id}`)
+        
+        // Check how many interceptors are already targeting this threat
+        const existingInterceptors = this.getInterceptorCount(threat)
+        
+        // Use coordinator to find optimal battery
+        const battery = this.batteryCoordinator.findOptimalBattery(threat, existingInterceptors)
+        if (!battery) {
+          debug.module('Interception').log(`No capable battery for ${isDrone ? 'DRONE' : 'threat'} ${threat.id} (may already be assigned)`)
+          continue
+        }
+        if (battery.getInterceptorCount() === 0) {
+          debug.module('Interception').log(`Battery has no loaded interceptors`)
+          continue
+        }
+        
+        // Calculate how many interceptors to fire based on threat assessment
+        const interceptorsToFire = battery.calculateInterceptorCount(threat, existingInterceptors)
+        
+        if (interceptorsToFire > 0) {
+          debug.category('Interception', `Firing ${interceptorsToFire} interceptor(s) at threat. Already tracking: ${existingInterceptors}`)
           
-          this.interceptors.push(interceptor)
-          this.activeInterceptions.push({
-            interceptor,
-            threat,
-            targetPoint: threat.getImpactPoint() || threat.getPosition(),
-            launchTime: Date.now()
+          // Find battery ID for coordinator
+          const batteryIndex = this.batteries.indexOf(battery)
+          const batteryId = `battery_${batteryIndex}`
+          
+          // Record assignment
+          this.batteryCoordinator.assignThreatToBattery(threat.id, batteryId, interceptorsToFire)
+          
+          // Fire multiple interceptors with callback to handle delayed launches
+          battery.fireInterceptors(threat, interceptorsToFire, (interceptor) => {
+            // Set up proximity detonation callback
+            interceptor.detonationCallback = (position: THREE.Vector3, quality: number) => {
+              this.handleProximityDetonation(interceptor, threat, position, quality)
+            }
+            
+            this.interceptors.push(interceptor)
+            this.activeInterceptions.push({
+              interceptor,
+              threat,
+              targetPoint: threat.getImpactPoint() || threat.getPosition(),
+              launchTime: Date.now()
+            })
+            
+            // Add to instanced renderer if available
+            const renderer = (window as any).__instancedProjectileRenderer
+            if (renderer) {
+              renderer.addProjectile(interceptor)
+            }
           })
-          
-          // Add to instanced renderer if available
-          const renderer = (window as any).__instancedProjectileRenderer
-          if (renderer) {
-            renderer.addProjectile(interceptor)
-          }
-        })
+        }
       }
     }
-  }
+
 
   private isBeingIntercepted(threat: Threat): boolean {
     return this.activeInterceptions.some(i => i.threat === threat && i.interceptor.isActive)
@@ -273,6 +307,9 @@ export class InterceptionSystem {
         threat.destroy(this.scene, this.world)
       }
       
+      // Clear assignment from coordinator
+      this.batteryCoordinator.clearThreatAssignment(threat.id)
+      
       // Trigger repurposing check for other interceptors targeting this threat
       this.repurposeInterceptors(threat)
       
@@ -306,6 +343,9 @@ export class InterceptionSystem {
     } else {
       threat.destroy(this.scene, this.world)
     }
+    
+    // Clear assignment from coordinator
+    this.batteryCoordinator.clearThreatAssignment(threat.id)
     
     // Trigger repurposing for interceptors targeting this threat
     this.repurposeInterceptors(threat)
@@ -392,95 +432,100 @@ export class InterceptionSystem {
   }
 
   private createExplosion(position: THREE.Vector3, quality: number = 1.0): void {
-    // Check if instanced explosion renderer is available
-    const instancedRenderer = (window as any).__instancedExplosionRenderer
-    if (instancedRenderer) {
-      // Use instanced renderer for better performance
-      instancedRenderer.createExplosion(position, quality, position.y > 5 ? 'air' : 'ground')
-      
-      // Add point light flash (scaled down to match smaller explosions)
-      const flash = new THREE.PointLight(0xffff00, 5 + quality * 10, 20 + quality * 20)
-      flash.position.copy(position)
-      this.scene.add(flash)
-      
-      // Add ambient light boost for the explosion
-      const ambientBoost = new THREE.PointLight(0xff6600, 2, 30)
-      ambientBoost.position.copy(position)
-      this.scene.add(ambientBoost)
-      
-      // Fade out lights
-      const fadeInterval = setInterval(() => {
-        flash.intensity *= 0.85
-        ambientBoost.intensity *= 0.9
-        if (flash.intensity < 0.1) {
-          clearInterval(fadeInterval)
-          this.scene.remove(flash)
-          this.scene.remove(ambientBoost)
+      // Check if instanced explosion renderer is available
+      const instancedRenderer = (window as any).__instancedExplosionRenderer
+      if (instancedRenderer) {
+        // Use instanced renderer for better performance
+        instancedRenderer.createExplosion(position, quality, position.y > 5 ? 'air' : 'ground')
+        
+        // Performance optimization: Limit point lights
+        const activeLights = this.scene.children.filter(c => c instanceof THREE.PointLight).length
+        if (activeLights < 15) {
+          // Add point light flash (scaled down to match smaller explosions)
+          const flash = new THREE.PointLight(0xffff00, 5 + quality * 10, 20 + quality * 20)
+          flash.position.copy(position)
+          this.scene.add(flash)
+          
+          // Add ambient light boost for the explosion
+          const ambientBoost = new THREE.PointLight(0xff6600, 2, 30)
+          ambientBoost.position.copy(position)
+          this.scene.add(ambientBoost)
+        
+          // Fade out lights
+          const fadeInterval = setInterval(() => {
+            flash.intensity *= 0.85
+            ambientBoost.intensity *= 0.9
+            if (flash.intensity < 0.1) {
+              clearInterval(fadeInterval)
+              this.scene.remove(flash)
+              this.scene.remove(ambientBoost)
+            }
+          }, 50)
+          
+          // Ensure cleanup after max time
+          setTimeout(() => {
+            clearInterval(fadeInterval)
+            this.scene.remove(flash)
+            this.scene.remove(ambientBoost)
+          }, 1000)
         }
-      }, 50)
-      
-      // Ensure cleanup after max time
-      setTimeout(() => {
-        clearInterval(fadeInterval)
-        this.scene.remove(flash)
-        this.scene.remove(ambientBoost)
-      }, 1000)
-      
-      return
-    }
-    
-    // Fallback to old method
-    // Create expanding sphere for explosion
-    const geometry = new THREE.SphereGeometry(1, 16, 8)
-    const material = new THREE.MeshBasicMaterial({
-      color: quality > 0.8 ? 0xffaa00 : 0xff6600,
-      opacity: 0.8,
-      transparent: true
-    })
-    const explosion = new THREE.Mesh(geometry, material)
-    explosion.position.copy(position)
-    this.scene.add(explosion)
-
-    // Animate explosion
-    const startTime = Date.now()
-    const duration = 800 + quality * 400  // 0.8 to 1.2 seconds based on quality
-    const maxScale = 6 + quality * 8  // 6 to 14 based on quality
-
-    const animate = () => {
-      const elapsed = Date.now() - startTime
-      const progress = elapsed / duration
-
-      if (progress >= 1) {
-        this.scene.remove(explosion)
-        explosion.geometry.dispose()
-        material.dispose()
+        
         return
       }
-
-      // Expand and fade
-      const scale = 1 + (maxScale - 1) * progress
-      explosion.scale.set(scale, scale, scale)
-      material.opacity = 0.8 * (1 - progress)
-
-      requestAnimationFrame(animate)
+      
+      // Fallback to old method
+      // Create expanding sphere for explosion
+      const geometry = new THREE.SphereGeometry(1, 16, 8)
+      const material = new THREE.MeshBasicMaterial({
+        color: quality > 0.8 ? 0xffaa00 : 0xff6600,
+        opacity: 0.8,
+        transparent: true
+      })
+      const explosion = new THREE.Mesh(geometry, material)
+      explosion.position.copy(position)
+      this.scene.add(explosion)
+  
+      // Animate explosion
+      const startTime = Date.now()
+      const duration = 800 + quality * 400  // 0.8 to 1.2 seconds based on quality
+      const maxScale = 6 + quality * 8  // 6 to 14 based on quality
+  
+      const animate = () => {
+        const elapsed = Date.now() - startTime
+        const progress = elapsed / duration
+  
+        if (progress >= 1) {
+          this.scene.remove(explosion)
+          explosion.geometry.dispose()
+          material.dispose()
+          return
+        }
+  
+        // Expand and fade
+        const scale = 1 + (maxScale - 1) * progress
+        explosion.scale.set(scale, scale, scale)
+        material.opacity = 0.8 * (1 - progress)
+  
+        requestAnimationFrame(animate)
+      }
+  
+      animate()
+  
+      // Add flash effect
+      const flash = new THREE.PointLight(0xffaa00, 3 + quality * 4, 30 + quality * 30)
+      flash.position.copy(position)
+      this.scene.add(flash)
+  
+      setTimeout(() => {
+        this.scene.remove(flash)
+      }, 200)
+      
+      // Add smoke ring for high quality detonations
+      if (quality > 0.7) {
+        this.createSmokeRing(position)
+      }
     }
 
-    animate()
-
-    // Add flash effect
-    const flash = new THREE.PointLight(0xffaa00, 3 + quality * 4, 30 + quality * 30)
-    flash.position.copy(position)
-    this.scene.add(flash)
-
-    setTimeout(() => {
-      this.scene.remove(flash)
-    }, 200)
-    
-    // Add smoke ring for high quality detonations
-    if (quality > 0.7) {
-      this.createSmokeRing(position)
-    }
-  }
   
   private createSmokeRing(position: THREE.Vector3): void {
     const ringGeometry = new THREE.TorusGeometry(2, 0.5, 8, 16)
@@ -556,13 +601,15 @@ export class InterceptionSystem {
   }
 
   getStats() {
+    const coordinatorStats = this.batteryCoordinator.getCoordinationStats()
     return {
       successful: this.successfulInterceptions,
       failed: this.failedInterceptions,
       active: this.activeInterceptions.length,
       batteries: this.batteries.length,
       totalInterceptors: this.batteries.reduce((sum, b) => sum + b.getInterceptorCount(), 0),
-      activeInterceptors: this.interceptors.length
+      activeInterceptors: this.interceptors.length,
+      coordination: coordinatorStats
     }
   }
   
@@ -572,5 +619,9 @@ export class InterceptionSystem {
   
   getInterceptors(): Projectile[] {
     return [...this.interceptors]
+  }
+  
+  setBatteryCoordination(enabled: boolean): void {
+    this.batteryCoordinator.setCoordinationEnabled(enabled)
   }
 }

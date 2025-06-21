@@ -19,8 +19,10 @@ A realistic 3D simulation of the Iron Dome missile defense system built with Thr
 - **Defense Systems**
   - 4 static radar stations with overlapping coverage
   - Iron Dome battery with 20 interceptor tubes
+  - Multiple battery coordination system
   - Automatic threat detection and prioritization
   - Real-time interception calculations
+  - Resource management in game mode
 
 - **Interactive Controls**
   - Adjustable simulation parameters
@@ -55,6 +57,11 @@ bun run build
 
 ## Usage
 
+### Game Modes
+
+- **Sandbox Mode**: Unlimited resources, experiment freely with the simulation
+- **Game Mode**: Manage resources, purchase interceptors, defend against waves
+
 ### Controls
 
 - **Mouse** - Orbit camera around the scene
@@ -68,7 +75,7 @@ bun run build
 
 ### Simulation Parameters
 
-- **Threat Types**: Short, medium, and long-range ballistic projectiles
+- **Threat Types**: Rockets, mortars, drones, cruise missiles
 - **Interception Range**: 4km - 150km
 - **Radar Coverage**: 300m radius per station
 - **Interceptor Speed**: 150 m/s
@@ -106,10 +113,13 @@ The simulation uses realistic physics including:
 
 ### Performance Optimizations
 
-- Efficient particle pooling
+- Material caching to prevent shader recompilation
+- Efficient particle pooling with limits
 - Spatial partitioning for collision detection
 - LOD system for distant objects
 - Optimized trail rendering
+- Performance limits: 50 threats, 8 interceptors, 20 explosions max
+- Batched salvo spawning to prevent frame drops
 
 ## License
 

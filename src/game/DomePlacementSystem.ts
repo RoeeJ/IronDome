@@ -355,7 +355,7 @@ export class DomePlacementSystem {
       this.threatManager.registerBattery(battery)
     }
     
-    // Add to interception system
+    // Add to interception system (this will register with coordinator)
     if (this.interceptionSystem) {
       this.interceptionSystem.addBattery(battery)
     }

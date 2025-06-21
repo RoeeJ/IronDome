@@ -260,6 +260,11 @@ export class ThreatManager extends EventEmitter {
   }
 
   private spawnThreat(): void {
+    // Performance limit: Skip spawning if too many active threats
+    if (this.threats.length > 50) {
+      return
+    }
+    
     // Chance to spawn multiple threats simultaneously (salvo)
     const isSalvo = Math.random() < this.salvoChance
     const salvoSize = isSalvo ? 2 + Math.floor(Math.random() * 4) : 1  // 2-5 threats in salvo
@@ -579,15 +584,19 @@ export class ThreatManager extends EventEmitter {
     if (instancedRenderer) {
       instancedRenderer.createExplosion(position, 0.8, 'ground')
       
-      // Add point light flash
-      const flash = new THREE.PointLight(0xff6600, 10, 30)
-      flash.position.copy(position)
-      flash.position.y = 2
-      this.scene.add(flash)
-      
-      setTimeout(() => {
-        this.scene.remove(flash)
-      }, 200)
+      // Performance optimization: Limit point lights
+      const activeLights = this.scene.children.filter(c => c instanceof THREE.PointLight).length
+      if (activeLights < 10) {
+        // Add point light flash
+        const flash = new THREE.PointLight(0xff6600, 10, 30)
+        flash.position.copy(position)
+        flash.position.y = 2
+        this.scene.add(flash)
+        
+        setTimeout(() => {
+          this.scene.remove(flash)
+        }, 200)
+      }
       
       // Still create crater effect
       this.createCraterDecal(position)
@@ -791,14 +800,18 @@ export class ThreatManager extends EventEmitter {
     if (instancedRenderer) {
       instancedRenderer.createExplosion(position, 0.8, 'air')
       
-      // Add point light flash
-      const flash = new THREE.PointLight(0xffaa00, 10, 50)
-      flash.position.copy(position)
-      this.scene.add(flash)
-      
-      setTimeout(() => {
-        this.scene.remove(flash)
-      }, 200)
+      // Performance optimization: Limit point lights
+      const activeLights = this.scene.children.filter(c => c instanceof THREE.PointLight).length
+      if (activeLights < 10) {
+        // Add point light flash
+        const flash = new THREE.PointLight(0xffaa00, 10, 50)
+        flash.position.copy(position)
+        this.scene.add(flash)
+        
+        setTimeout(() => {
+          this.scene.remove(flash)
+        }, 200)
+      }
       
       // Create falling debris for drone
       this.createDroneDebris(position)
@@ -1023,57 +1036,85 @@ export class ThreatManager extends EventEmitter {
   
   // Spawn a salvo of threats
   spawnSalvo(size: number, type: string = 'mixed'): void {
-    // Determine which threat types to use
-    let possibleTypes: ThreatType[] = []
-    
-    switch(type) {
-      case 'rocket':
-        possibleTypes = [ThreatType.SHORT_RANGE, ThreatType.MEDIUM_RANGE, ThreatType.QASSAM_1, ThreatType.GRAD_ROCKET]
-        break
-      case 'mortar':
-        possibleTypes = [ThreatType.MORTAR]
-        break
-      case 'ballistic':
-        possibleTypes = [ThreatType.CRUISE_MISSILE]
-        break
-      case 'mixed':
-      default:
-        possibleTypes = [
-          ThreatType.SHORT_RANGE, ThreatType.MEDIUM_RANGE,
-          ThreatType.MORTAR, ThreatType.DRONE_SLOW,
-          ThreatType.QASSAM_1
-        ]
-        break
-    }
-    
-    // Spawn the salvo with slight delays
-    for (let i = 0; i < size; i++) {
-      setTimeout(() => {
+      // Performance optimization: batch spawn threats without individual timers
+      const startTime = Date.now()
+      
+      // Determine which threat types to use
+      let possibleTypes: ThreatType[] = []
+      
+      switch(type) {
+        case 'rocket':
+          possibleTypes = [ThreatType.SHORT_RANGE, ThreatType.MEDIUM_RANGE, ThreatType.QASSAM_1, ThreatType.GRAD_ROCKET]
+          break
+        case 'mortar':
+          possibleTypes = [ThreatType.MORTAR]
+          break
+        case 'ballistic':
+          possibleTypes = [ThreatType.CRUISE_MISSILE]
+          break
+        case 'mixed':
+        default:
+          possibleTypes = [
+            ThreatType.SHORT_RANGE, ThreatType.MEDIUM_RANGE,
+            ThreatType.MORTAR, ThreatType.DRONE_SLOW,
+            ThreatType.QASSAM_1
+          ]
+          break
+      }
+      
+      // Pre-allocate threat configs
+      const salvoThreats: Array<{type: ThreatType, delay: number}> = []
+      for (let i = 0; i < size; i++) {
         const threatType = possibleTypes[Math.floor(Math.random() * possibleTypes.length)]
-        const config = {
+        salvoThreats.push({
           type: threatType,
-          spawnRadius: 150,
-          targetRadius: 40,
-          minInterval: 0,
-          maxInterval: 0
+          delay: i * 0.2 // 200ms delay between each
+        })
+      }
+      
+      // Use a single timer to spawn all threats
+      let currentIndex = 0
+      const spawnNext = () => {
+        const elapsed = (Date.now() - startTime) / 1000
+        
+        // Spawn all threats whose delay has passed
+        while (currentIndex < salvoThreats.length && salvoThreats[currentIndex].delay <= elapsed) {
+          const threat = salvoThreats[currentIndex]
+          const config = {
+            type: threat.type,
+            spawnRadius: 150,
+            targetRadius: 40,
+            minInterval: 0,
+            maxInterval: 0
+          }
+          
+          // Adjust spawn radius based on threat type
+          const threatStats = THREAT_CONFIGS[threat.type]
+          if (threatStats.isDrone) {
+            config.spawnRadius = 200
+          } else if (threatStats.isMortar) {
+            config.spawnRadius = 80
+          } else if (threat.type === ThreatType.CRUISE_MISSILE) {
+            config.spawnRadius = 250
+          }
+          
+          // Temporarily set config and spawn
+          const originalConfigs = this.spawnConfigs
+          this.spawnConfigs = [config]
+          this.spawnSingleThreat(0)
+          this.spawnConfigs = originalConfigs
+          
+          currentIndex++
         }
         
-        // Adjust spawn radius based on threat type
-        const threatStats = THREAT_CONFIGS[threatType]
-        if (threatStats.isDrone) {
-          config.spawnRadius = 200
-        } else if (threatStats.isMortar) {
-          config.spawnRadius = 80
-        } else if (threatType === ThreatType.CRUISE_MISSILE) {
-          config.spawnRadius = 250
+        // Continue if more threats to spawn
+        if (currentIndex < salvoThreats.length) {
+          requestAnimationFrame(spawnNext)
         }
-        
-        // Temporarily set config and spawn
-        const originalConfigs = this.spawnConfigs
-        this.spawnConfigs = [config]
-        this.spawnSingleThreat(0)
-        this.spawnConfigs = originalConfigs
-      }, i * 200) // 200ms delay between each threat in salvo
+      }
+      
+      // Start spawning
+      requestAnimationFrame(spawnNext)
     }
-  }
+
 }

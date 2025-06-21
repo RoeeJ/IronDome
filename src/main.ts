@@ -108,6 +108,21 @@ if (renderer.shadowMap.enabled) {
 
 document.body.appendChild(renderer.domElement)
 
+// Precompile common materials to prevent shader compilation freezes
+import { MaterialCache } from './utils/MaterialCache'
+const materialCache = MaterialCache.getInstance()
+// Pre-create commonly used materials
+materialCache.getMeshStandardMaterial({ color: 0x4a4a4a, roughness: 0.8, metalness: 0.3 })
+materialCache.getMeshStandardMaterial({ color: 0x333333, roughness: 0.7, metalness: 0.4 })
+materialCache.getMeshStandardMaterial({ color: 0x666666, roughness: 0.5, metalness: 0.7 })
+materialCache.getMeshStandardMaterial({ color: 0x555555, roughness: 0.6, metalness: 0.5 })
+materialCache.getMeshStandardMaterial({ color: 0xaaaaaa, roughness: 0.4, metalness: 0.9 })
+// Precompile shaders after scene is set up
+setTimeout(() => {
+  materialCache.precompileShaders(renderer, scene, camera)
+  debug.log('Material shaders precompiled')
+}, 100)
+
 // Controls
 const controls = new OrbitControls(camera, renderer.domElement)
 controls.enableDamping = true
@@ -594,13 +609,15 @@ const perfInfo = {
   threats: 0,
   interceptors: 0,
   drawCalls: 0,
-  triangles: 0
+  triangles: 0,
+  coordinated: 'Enabled'
 }
 perfFolder.add(perfInfo, 'fps').listen().disable()
 perfFolder.add(perfInfo, 'threats').listen().disable()
 perfFolder.add(perfInfo, 'interceptors').listen().disable()
 perfFolder.add(perfInfo, 'drawCalls').listen().disable()
 perfFolder.add(perfInfo, 'triangles').listen().disable()
+perfFolder.add(perfInfo, 'coordinated').listen().disable()
 perfFolder.add({ profiler: '⚡ Press P for Profiler' }, 'profiler').disable()
 
 // Simple notification function
@@ -696,7 +713,11 @@ const sandboxControls = {
   showRadarCoverage: false,
   showTrajectories: true,
   timeScale: 1.0,
-  enableFog: false
+  enableFog: false,
+  
+  // Defense settings
+  autoIntercept: true,
+  batteryCoordination: true
 }
 
 // Threat controls
@@ -735,6 +756,16 @@ visualGroup.add(sandboxControls, 'enableFog').name('Enable Fog').onChange((value
   } else {
     scene.fog = null
   }
+})
+
+// Defense controls
+const defenseGroup = sandboxFolder.addFolder('Defense Settings')
+defenseGroup.add(sandboxControls, 'autoIntercept').name('Auto Intercept').onChange((value: boolean) => {
+  simulationControls.autoIntercept = value
+})
+defenseGroup.add(sandboxControls, 'batteryCoordination').name('Battery Coordination').onChange((value: boolean) => {
+  interceptionSystem.setBatteryCoordination(value)
+  showNotification(value ? 'Battery coordination enabled' : 'Battery coordination disabled')
 })
 
 // Apply initial settings to all batteries
@@ -996,6 +1027,7 @@ function animate() {
     perfInfo.interceptors = allProjectiles.length
     perfInfo.drawCalls = renderer.info.render.calls
     perfInfo.triangles = renderer.info.render.triangles
+    perfInfo.coordinated = stats.coordination ? `${stats.coordination.activeAssignments} active` : 'Disabled'
     
     // Update battery network info
     const allBatteries = domePlacementSystem.getAllBatteries()

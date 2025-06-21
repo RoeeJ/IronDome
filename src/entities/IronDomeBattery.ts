@@ -11,6 +11,7 @@ import { GeometryOptimizer } from '../utils/GeometryOptimizer'
 import { GeometryConfig } from '../config/GeometryConfig'
 import { debug } from '../utils/DebugLogger'
 import { ResourceManager } from '../game/ResourceManager'
+import { MaterialCache } from '../utils/MaterialCache'
 import { EventEmitter } from 'events'
 
 export interface BatteryConfig {
@@ -111,175 +112,182 @@ export class IronDomeBattery extends EventEmitter {
   }
 
   private createBase(): void {
-    // If using instanced rendering, create invisible hitbox for raycasting
-    if (this.useInstancedRendering) {
-      const hitboxGeometry = new THREE.BoxGeometry(22.5, 22.5, 22.5)
-      const hitboxMaterial = new THREE.MeshBasicMaterial({
-        visible: false,
-        transparent: true,
-        opacity: 0
+      // If using instanced rendering, create invisible hitbox for raycasting
+      if (this.useInstancedRendering) {
+        const hitboxGeometry = new THREE.BoxGeometry(22.5, 22.5, 22.5)
+        const hitboxMaterial = MaterialCache.getInstance().getMeshBasicMaterial({
+          visible: false,
+          transparent: true,
+          opacity: 0
+        })
+        const hitbox = new THREE.Mesh(hitboxGeometry, hitboxMaterial)
+        hitbox.position.y = 6
+        hitbox.userData.isHitbox = true
+        hitbox.userData.battery = this  // Store reference to battery
+        this.group.add(hitbox)
+        return
+      }
+      
+      // Base platform
+      const baseGeometry = new THREE.BoxGeometry(6, 1, 6)
+      const baseMaterial = MaterialCache.getInstance().getMeshStandardMaterial({
+        color: 0x4a4a4a,
+        roughness: 0.8,
+        metalness: 0.3
       })
-      const hitbox = new THREE.Mesh(hitboxGeometry, hitboxMaterial)
-      hitbox.position.y = 6
-      hitbox.userData.isHitbox = true
-      hitbox.userData.battery = this  // Store reference to battery
-      this.group.add(hitbox)
-      return
+      const base = new THREE.Mesh(baseGeometry, baseMaterial)
+      base.position.y = 0.5
+      base.castShadow = true
+      base.receiveShadow = true
+      this.group.add(base)
+  
+      // Support pillars
+      const pillarGeometry = new THREE.CylinderGeometry(0.3, 0.3, 2)
+      const pillarMaterial = MaterialCache.getInstance().getMeshStandardMaterial({
+        color: 0x333333,
+        roughness: 0.7,
+        metalness: 0.4
+      })
+      
+      const positions = [
+        [-2, 0, -2], [2, 0, -2], [-2, 0, 2], [2, 0, 2]
+      ]
+      
+      positions.forEach(pos => {
+        const pillar = new THREE.Mesh(pillarGeometry, pillarMaterial)
+        pillar.position.set(pos[0], pos[1] + 1, pos[2])
+        pillar.castShadow = true
+        this.group.add(pillar)
+      })
     }
-    
-    // Base platform
-    const baseGeometry = new THREE.BoxGeometry(6, 1, 6)
-    const baseMaterial = new THREE.MeshStandardMaterial({
-      color: 0x4a4a4a,
-      roughness: 0.8,
-      metalness: 0.3
-    })
-    const base = new THREE.Mesh(baseGeometry, baseMaterial)
-    base.position.y = 0.5
-    base.castShadow = true
-    base.receiveShadow = true
-    this.group.add(base)
 
-    // Support pillars
-    const pillarGeometry = new THREE.CylinderGeometry(0.3, 0.3, 2)
-    const pillarMaterial = new THREE.MeshStandardMaterial({
-      color: 0x333333,
-      roughness: 0.7,
-      metalness: 0.4
-    })
-    
-    const positions = [
-      [-2, 0, -2], [2, 0, -2], [-2, 0, 2], [2, 0, 2]
-    ]
-    
-    positions.forEach(pos => {
-      const pillar = new THREE.Mesh(pillarGeometry, pillarMaterial)
-      pillar.position.set(pos[0], pos[1] + 1, pos[2])
-      pillar.castShadow = true
-      this.group.add(pillar)
-    })
-  }
 
   private createLauncher(): THREE.Group {
-    const launcherGroup = new THREE.Group()
-    
-    // If using instanced rendering, create minimal launcher data without meshes
-    if (this.useInstancedRendering) {
-      // Create launcher tube data without visual meshes
-      for (let i = 0; i < this.config.launcherCount; i++) {
-        const launcherTube: LauncherTube = {
-          index: i,
-          mesh: new THREE.Mesh(), // Dummy mesh for compatibility
-          isLoaded: true,
-          lastFiredTime: 0
-        }
-        this.launcherTubes.push(launcherTube)
-      }
-    } else {
-      // Create full visual meshes for non-instanced rendering
-      const tubeGeometry = new THREE.CylinderGeometry(0.2, 0.2, 3)
-      const tubeMaterial = new THREE.MeshStandardMaterial({
-        color: 0x666666,
-        roughness: 0.5,
-        metalness: 0.7
-      })
+      const launcherGroup = new THREE.Group()
       
-      // Create launch tubes in a circular pattern
-      for (let i = 0; i < this.config.launcherCount; i++) {
-        const angle = (i / this.config.launcherCount) * Math.PI * 2
-        const tube = new THREE.Mesh(tubeGeometry, tubeMaterial)
-        tube.position.x = Math.cos(angle) * 0.8
-        tube.position.z = Math.sin(angle) * 0.8
-        tube.position.y = 0
-        tube.rotation.z = Math.PI / 8  // Slightly angled outward
-        tube.castShadow = true
-        launcherGroup.add(tube)
+      // If using instanced rendering, create minimal launcher data without meshes
+      if (this.useInstancedRendering) {
+        // Create launcher tube data without visual meshes
+        for (let i = 0; i < this.config.launcherCount; i++) {
+          const launcherTube: LauncherTube = {
+            index: i,
+            mesh: new THREE.Mesh(), // Dummy mesh for compatibility
+            isLoaded: true,
+            lastFiredTime: 0
+          }
+          this.launcherTubes.push(launcherTube)
+        }
+      } else {
+        // Create full visual meshes for non-instanced rendering
+        const tubeGeometry = new THREE.CylinderGeometry(0.2, 0.2, 3)
+        const tubeMaterial = MaterialCache.getInstance().getMeshStandardMaterial({
+          color: 0x666666,
+          roughness: 0.5,
+          metalness: 0.7
+        })
         
-        // Create launcher tube data
-        const launcherTube: LauncherTube = {
-          index: i,
-          mesh: tube,
-          isLoaded: true,
-          lastFiredTime: 0
+        // Create launch tubes in a circular pattern
+        for (let i = 0; i < this.config.launcherCount; i++) {
+          const angle = (i / this.config.launcherCount) * Math.PI * 2
+          const tube = new THREE.Mesh(tubeGeometry, tubeMaterial)
+          tube.position.x = Math.cos(angle) * 0.8
+          tube.position.z = Math.sin(angle) * 0.8
+          tube.position.y = 0
+          tube.rotation.z = Math.PI / 8  // Slightly angled outward
+          tube.castShadow = true
+          launcherGroup.add(tube)
+          
+          // Create launcher tube data
+          const launcherTube: LauncherTube = {
+            index: i,
+            mesh: tube,
+            isLoaded: true,
+            lastFiredTime: 0
+          }
+          
+          // Add visual missile in tube
+          this.createMissileInTube(launcherTube, launcherGroup)
+          this.launcherTubes.push(launcherTube)
         }
         
-        // Add visual missile in tube
-        this.createMissileInTube(launcherTube, launcherGroup)
-        this.launcherTubes.push(launcherTube)
+        // Central mounting
+        const mountGeometry = new THREE.CylinderGeometry(1.2, 1.5, 1)
+        const mountMaterial = MaterialCache.getInstance().getMeshStandardMaterial({
+          color: 0x555555,
+          roughness: 0.6,
+          metalness: 0.5
+        })
+        const mount = new THREE.Mesh(mountGeometry, mountMaterial)
+        mount.castShadow = true
+        launcherGroup.add(mount)
       }
       
-      // Central mounting
-      const mountGeometry = new THREE.CylinderGeometry(1.2, 1.5, 1)
-      const mountMaterial = new THREE.MeshStandardMaterial({
-        color: 0x555555,
-        roughness: 0.6,
-        metalness: 0.5
-      })
-      const mount = new THREE.Mesh(mountGeometry, mountMaterial)
-      mount.castShadow = true
-      launcherGroup.add(mount)
+      launcherGroup.position.y = 2.5
+      this.group.add(launcherGroup)
+      
+      return launcherGroup
     }
-    
-    launcherGroup.position.y = 2.5
-    this.group.add(launcherGroup)
-    
-    return launcherGroup
-  }
+
 
   private createMissileInTube(tube: LauncherTube, parent: THREE.Group): void {
-    if (!tube.isLoaded || this.useInstancedRendering) return
-    
-    const missileGeometry = new THREE.ConeGeometry(0.15, 2, 8)
-    const missileMaterial = new THREE.MeshStandardMaterial({
-      color: 0x00ffff,
-      emissive: 0x00ffff,
-      emissiveIntensity: 0.1,
-      roughness: 0.3,
-      metalness: 0.8
-    })
-    
-    const missile = new THREE.Mesh(missileGeometry, missileMaterial)
-    missile.position.copy(tube.mesh.position)
-    missile.position.y += 0.5  // Position at top of tube
-    missile.rotation.z = tube.mesh.rotation.z
-    parent.add(missile)
-    
-    tube.missile = missile
-  }
+      if (!tube.isLoaded || this.useInstancedRendering) return
+      
+      const missileGeometry = new THREE.ConeGeometry(0.15, 2, 8)
+      // Note: MeshStandardMaterial with emissive properties can't be easily cached
+      // since emissive is a complex property. Keep this as-is for now.
+      const missileMaterial = new THREE.MeshStandardMaterial({
+        color: 0x00ffff,
+        emissive: 0x00ffff,
+        emissiveIntensity: 0.1,
+        roughness: 0.3,
+        metalness: 0.8
+      })
+      
+      const missile = new THREE.Mesh(missileGeometry, missileMaterial)
+      missile.position.copy(tube.mesh.position)
+      missile.position.y += 0.5  // Position at top of tube
+      missile.rotation.z = tube.mesh.rotation.z
+      parent.add(missile)
+      
+      tube.missile = missile
+    }
+
 
   private createRadarDome(): THREE.Mesh {
-    // Skip creating radar dome meshes if using instanced rendering
-    if (this.useInstancedRendering) {
-      return new THREE.Mesh() // Return dummy mesh for compatibility
+      // Skip creating radar dome meshes if using instanced rendering
+      if (this.useInstancedRendering) {
+        return new THREE.Mesh() // Return dummy mesh for compatibility
+      }
+      
+      // Radar dome
+      const domeGeometry = new THREE.SphereGeometry(1, 16, 8, 0, Math.PI * 2, 0, Math.PI / 2)
+      // Note: Transparent materials need special handling, keep as-is for now
+      const domeMaterial = new THREE.MeshStandardMaterial({
+        color: 0x888888,
+        roughness: 0.3,
+        metalness: 0.8,
+        opacity: 0.9,
+        transparent: true
+      })
+      const dome = new THREE.Mesh(domeGeometry, domeMaterial)
+      dome.position.y = 4
+      dome.castShadow = true
+      this.group.add(dome)
+      
+      // Radar antenna (simplified)
+      const antennaGeometry = new THREE.BoxGeometry(0.2, 0.8, 0.1)
+      const antennaMaterial = MaterialCache.getInstance().getMeshStandardMaterial({
+        color: 0xaaaaaa,
+        roughness: 0.4,
+        metalness: 0.9
+      })
+      const antenna = new THREE.Mesh(antennaGeometry, antennaMaterial)
+      antenna.position.y = 4
+      this.group.add(antenna)
+      
+      return dome
     }
-    
-    // Radar dome
-    const domeGeometry = new THREE.SphereGeometry(1, 16, 8, 0, Math.PI * 2, 0, Math.PI / 2)
-    const domeMaterial = new THREE.MeshStandardMaterial({
-      color: 0x888888,
-      roughness: 0.3,
-      metalness: 0.8,
-      opacity: 0.9,
-      transparent: true
-    })
-    const dome = new THREE.Mesh(domeGeometry, domeMaterial)
-    dome.position.y = 4
-    dome.castShadow = true
-    this.group.add(dome)
-    
-    // Radar antenna (simplified)
-    const antennaGeometry = new THREE.BoxGeometry(0.2, 0.8, 0.1)
-    const antennaMaterial = new THREE.MeshStandardMaterial({
-      color: 0xaaaaaa,
-      roughness: 0.4,
-      metalness: 0.9
-    })
-    const antenna = new THREE.Mesh(antennaGeometry, antennaMaterial)
-    antenna.position.y = 4
-    this.group.add(antenna)
-    
-    return dome
-  }
+
 
   private createRangeIndicator(): THREE.Line {
     // Range indicator is now handled by RadarSystem
@@ -771,7 +779,7 @@ export class IronDomeBattery extends EventEmitter {
     
     // Background bar
     const bgGeometry = new THREE.PlaneGeometry(20, 3)
-    const bgMaterial = new THREE.MeshBasicMaterial({
+    const bgMaterial = MaterialCache.getInstance().getMeshBasicMaterial({
       color: 0x333333,
       transparent: true,
       opacity: 0.8,
