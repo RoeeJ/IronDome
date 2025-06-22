@@ -511,8 +511,8 @@ export class Projectile {
     const toTarget = targetPos.clone().sub(myPos)
     const distance = toTarget.length()
     
-    // Only guide if we're not too close (avoid overshooting)
-    if (distance < 3) return // Stop guiding when very close
+    // Continue guiding even when close to ensure hit
+    // Proximity fuse will handle detonation
     
     // Calculate time to impact
     const timeToImpact = distance / currentSpeed
@@ -533,8 +533,9 @@ export class Projectile {
     const desiredVelocity = los.multiplyScalar(currentSpeed)
     const velocityError = desiredVelocity.clone().sub(currentVelocity)
     
-    // Apply correction force
-    const correctionForce = velocityError.multiplyScalar(this.body.mass * 2) // P gain of 2
+    // Apply correction force with distance-based gain
+    const gain = distance < 20 ? 3 : 2 // Higher gain when close
+    const correctionForce = velocityError.multiplyScalar(this.body.mass * gain)
     
     // Limit maximum force
     const maxForce = this.body.mass * 40 * 9.81 // 40G max
@@ -555,9 +556,9 @@ export class Projectile {
     
     // Add forward thrust to maintain speed
     const thrustDirection = currentVelocity.clone().normalize()
-    const targetSpeed = 150 // Target speed for interceptors
+    const targetSpeed = Math.max(150, currentSpeed * 0.9) // Don't slow down too much
     const speedError = targetSpeed - currentSpeed
-    const thrustForce = Math.max(0, speedError * this.body.mass * 0.5)
+    const thrustForce = Math.max(0, speedError * this.body.mass * 1.0) // Stronger speed maintenance
     
     if (thrustForce > 0 && thrustDirection.length() > 0) {
       this.body.applyForce(

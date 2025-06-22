@@ -714,10 +714,10 @@ export const GameUI: React.FC<GameUIProps> = ({ waveManager, placementSystem, on
         
         .help-button {
           position: fixed;
-          top: 70px;
+          top: 80px;
           right: 20px;
-          width: 40px;
-          height: 40px;
+          min-width: 50px;
+          min-height: 50px;
           background: #0038b8;
           border: 2px solid #0038b8;
           border-radius: 50%;

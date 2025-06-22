@@ -87,16 +87,16 @@ export class WaveManager extends EventEmitter {
     const threatsPerWave = 3
     const baseDuration = 30
     
-    // Exponential difficulty scaling
-    const difficultyFactor = Math.pow(1.15, waveNumber - 1) // 15% harder each wave
+    // More gradual difficulty scaling
+    const difficultyFactor = Math.pow(1.08, waveNumber - 1) // 8% harder each wave (was 15%)
     
     // Calculate wave parameters with exponential growth
     const threatCount = Math.floor(baseThreats + (waveNumber - 1) * threatsPerWave * difficultyFactor)
     const duration = baseDuration + Math.floor(waveNumber / 3) * 5 // Slightly longer waves
     
-    // Spawn rate increases significantly with waves
+    // Spawn rate increases moderately with waves
     const baseSpawnRate = 0.5
-    const spawnRate = baseSpawnRate + (waveNumber * 0.2) + (Math.floor(waveNumber / 5) * 0.5)
+    const spawnRate = Math.min(baseSpawnRate + (waveNumber * 0.1), 2.0) // Cap at 2 threats/second
     
     // Determine threat types based on wave
     let threatTypes: string[] = ['rockets']
@@ -116,7 +116,7 @@ export class WaveManager extends EventEmitter {
     
     // Every 5th wave is a "boss" wave with increased difficulty
     const isBossWave = waveNumber % 5 === 0
-    const bossMultiplier = isBossWave ? 2.0 : 1.0 // Boss waves are much harder
+    const bossMultiplier = isBossWave ? 1.5 : 1.0 // Reduced from 2.0 to 1.5
     
     // Salvo attacks become more common in later waves
     const salvoChance = Math.min(0.1 + (waveNumber * 0.05), 0.6) // Up to 60% salvo chance
