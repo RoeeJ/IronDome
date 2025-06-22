@@ -3,6 +3,7 @@
 ## Session Summary
 Date: 2025-06-22
 Status: ✅ Phase 1 Complete - All core systems migrated
+Commit: 0a56a2a
 
 ## Completed Migrations
 
@@ -36,6 +37,8 @@ Status: ✅ Phase 1 Complete - All core systems migrated
   - Automatic detection and fallback
   - Support for both line and particle trails
   - Proper cleanup on projectile destruction
+  - Fixed trail rendering with world-space positioning
+  - Resolved visual artifacts (attached lines, trail dragging)
 
 ## Migration Results
 
@@ -77,6 +80,8 @@ These create one-time geometries and have minimal performance impact.
 2. **Backward Compatibility**: Maintained support for legacy systems during transition
 3. **Centralization Benefits**: Dramatic reduction in code duplication
 4. **Performance First**: Focused on high-impact areas (frequently created objects)
+5. **Visual Debugging**: Trail rendering issues required deep understanding of Three.js Line geometry behavior
+6. **World-Space Importance**: Proper trail implementation requires maintaining absolute world positions
 
 ## Next Steps
 

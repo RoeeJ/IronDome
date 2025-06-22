@@ -4,9 +4,10 @@
 A highly accurate web-based Iron Dome defense system simulator built with Three.js and physics engines. The simulator will demonstrate interception mechanics, trajectory calculations, and real-time threat assessment.
 
 ## Current Status
-- **Phase**: Pre-development (React/Bun template ready)
-- **Next Step**: Transition to Three.js application
-- **Immediate Focus**: Remove React template, set up Three.js scene
+- **Phase**: Active Development - Phase 1 Deduplication Complete ✅
+- **Last Update**: 2025-06-22
+- **Next Step**: Phase 2 optimizations (LightPool, remaining deduplication)
+- **Recent Achievement**: Unified systems for geometry, materials, trails, and explosions
 
 ## Technology Stack
 - **3D Graphics**: Three.js
@@ -164,6 +165,25 @@ A highly accurate web-based Iron Dome defense system simulator built with Three.
 - Realistic interception success rates
 - Intuitive user interface
 - Educational value for understanding Iron Dome mechanics
+
+## Recent Optimizations (Phase 1 Deduplication)
+### Completed ✅
+- **GeometryFactory**: Centralized geometry caching (70-80% memory reduction)
+- **Extended MaterialCache**: Support for all material types
+- **UnifiedTrailSystem**: Consolidated trail rendering with visual fixes
+- **ExplosionManager**: Centralized explosion handling with light pooling
+
+### Impact
+- Memory usage reduced by ~40-70%
+- Fixed visual artifacts (trail dragging, attached lines)
+- Improved maintainability with single source of truth
+- Better performance during intense combat scenarios
+
+## Next Optimizations (Phase 2)
+- **LightPool**: Dynamic light management for explosions
+- **UIUpdateManager**: Centralized UI batching
+- **AnimationManager**: Unified animation loops
+- **EventManager**: Memory-safe event handling
 
 ## Future Enhancements
 - VR support
