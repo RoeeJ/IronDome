@@ -161,8 +161,9 @@ export const HelpModal: React.FC<HelpModalProps> = ({ isOpen, onClose, isGameMod
             <h3 className="help-section-title">Game Modes</h3>
             <p className="help-text">
               <strong>Game Mode:</strong> Progress through increasingly difficult waves. 
-              Manage limited resources, earn credits for successful defenses, and unlock 
-              upgrades. Batteries can be damaged and destroyed.
+              Every 10th wave is a boss wave with double difficulty. Manage limited resources, 
+              earn credits for successful defenses, and unlock upgrades. Batteries can be 
+              damaged and destroyed by nearby impacts.
             </p>
             <p className="help-text">
               <strong>Sandbox Mode:</strong> Free play with unlimited resources. Place 
@@ -175,7 +176,10 @@ export const HelpModal: React.FC<HelpModalProps> = ({ isOpen, onClose, isGameMod
             <h3 className="help-section-title">Controls</h3>
             <div className="help-controls">
               <p className="help-text">
-                <span className="help-key">Left Click</span> Rotate camera
+                <span className="help-key">Left Click</span> Fire interceptor at threat / Rotate camera
+              </p>
+              <p className="help-text">
+                <span className="help-key">Shift + Click</span> Mark threat as priority
               </p>
               <p className="help-text">
                 <span className="help-key">Right Click</span> Open battery context menu
@@ -184,10 +188,13 @@ export const HelpModal: React.FC<HelpModalProps> = ({ isOpen, onClose, isGameMod
                 <span className="help-key">Scroll</span> Zoom in/out
               </p>
               <p className="help-text">
-                <span className="help-key">P</span> Toggle performance profiler
+                <span className="help-key">P</span> Toggle performance stats
               </p>
               <p className="help-text">
-                <strong>Mobile:</strong> Touch to rotate, pinch to zoom, long press for menu
+                <span className="help-key">S</span> Toggle extended stats panel
+              </p>
+              <p className="help-text">
+                <strong>Mobile:</strong> Touch to fire/rotate, pinch to zoom, long press for menu
               </p>
             </div>
           </div>
@@ -229,13 +236,25 @@ export const HelpModal: React.FC<HelpModalProps> = ({ isOpen, onClose, isGameMod
           </div>
           
           <div className="help-section">
+            <h3 className="help-section-title">Interception Mechanics</h3>
+            <p className="help-text">
+              • Interceptors use proximity fuses - they detonate within 5m of threats<br/>
+              • Blast damage is physics-based with lethal range of 3m<br/>
+              • Manual targeting (clicking threats) bypasses automatic systems<br/>
+              • Failed intercepts allow other interceptors to try<br/>
+              • Interceptors have limited fuel and guidance time
+            </p>
+          </div>
+          
+          <div className="help-section">
             <h3 className="help-section-title">Tips & Strategy</h3>
             <p className="help-text">
-              • Watch for threat indicators showing impact predictions<br/>
-              • Prioritize threats heading toward populated areas<br/>
-              • Multiple batteries can engage the same threat for higher success<br/>
-              • Upgraded batteries are more effective than many basic ones<br/>
-              • Learn threat patterns to optimize battery placement
+              • Watch for red impact prediction circles on the ground<br/>
+              • Prioritize threats heading toward your batteries<br/>
+              • Multiple interceptors improve success rate against difficult targets<br/>
+              • Place batteries to cover different approach angles<br/>
+              • Save credits for upgrades rather than many basic batteries<br/>
+              • Boss waves (every 10th) require maximum defense readiness
             </p>
           </div>
           

@@ -114,9 +114,9 @@ export class WaveManager extends EventEmitter {
       threatTypes = ['mixed'] // All types
     }
     
-    // Every 5th wave is a "boss" wave with increased difficulty
-    const isBossWave = waveNumber % 5 === 0
-    const bossMultiplier = isBossWave ? 1.5 : 1.0 // Reduced from 2.0 to 1.5
+    // Every 10th wave is a "boss" wave with increased difficulty
+    const isBossWave = waveNumber % 10 === 0
+    const bossMultiplier = isBossWave ? 2.0 : 1.0 // Boss waves are significantly harder
     
     // Salvo attacks become more common in later waves
     const salvoChance = Math.min(0.1 + (waveNumber * 0.05), 0.6) // Up to 60% salvo chance

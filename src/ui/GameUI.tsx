@@ -28,6 +28,9 @@ interface GameOverData {
 }
 
 export const GameUI: React.FC<GameUIProps> = ({ waveManager, placementSystem, onModeChange, isGameMode }) => {
+  const [hasViewedHelp, setHasViewedHelp] = useState(() => {
+    return localStorage.getItem('helpViewed') === 'true'
+  })
   const [credits, setCredits] = useState(0)
   const [interceptors, setInterceptors] = useState(0)
   const [currentWave, setCurrentWave] = useState(1)
@@ -714,8 +717,8 @@ export const GameUI: React.FC<GameUIProps> = ({ waveManager, placementSystem, on
         
         .help-button {
           position: fixed;
-          top: 80px;
-          right: 20px;
+          top: 90px;
+          right: 25px;
           min-width: 50px;
           min-height: 50px;
           background: #0038b8;
@@ -742,6 +745,47 @@ export const GameUI: React.FC<GameUIProps> = ({ waveManager, placementSystem, on
         
         .help-button:active {
           transform: scale(0.95);
+        }
+        
+        .help-button.pulse {
+          animation: helpPulse 2s ease-in-out infinite;
+        }
+        
+        @keyframes helpPulse {
+          0% {
+            transform: scale(1);
+            box-shadow: 0 0 0 0 rgba(0, 56, 184, 0.7);
+          }
+          50% {
+            transform: scale(1.05);
+            box-shadow: 0 0 15px 10px rgba(0, 149, 255, 0.4);
+          }
+          100% {
+            transform: scale(1);
+            box-shadow: 0 0 0 0 rgba(0, 56, 184, 0);
+          }
+        }
+        
+        .help-arrow {
+          position: fixed;
+          top: 92px;
+          right: 90px;
+          font-size: 36px;
+          color: #0095ff;
+          animation: arrowBounce 1s ease-in-out infinite;
+          pointer-events: none;
+          z-index: 999;
+          transform: rotate(45deg);
+          text-shadow: 0 0 10px rgba(0, 149, 255, 0.8);
+        }
+        
+        @keyframes arrowBounce {
+          0%, 100% {
+            transform: translateX(0);
+          }
+          50% {
+            transform: translateX(10px);
+          }
         }
         
         /* Mobile responsive */
@@ -1212,10 +1256,19 @@ export const GameUI: React.FC<GameUIProps> = ({ waveManager, placementSystem, on
         
       `}</style>
       
+      {!hasViewedHelp && (
+        <div className="help-arrow">→</div>
+      )}
+      
       <button 
-        className="help-button"
+        className={`help-button ${!hasViewedHelp ? 'pulse' : ''}`}
         onClick={() => {
           setShowHelp(true)
+          // Mark help as viewed
+          if (!hasViewedHelp) {
+            localStorage.setItem('helpViewed', 'true')
+            setHasViewedHelp(true)
+          }
           // Disable OrbitControls
           const controls = (window as any).__controls
           if (controls) controls.enabled = false

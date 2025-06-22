@@ -55,12 +55,7 @@ export class StatsDisplay {
     this.customStats.dom.style.top = '0px'
     document.body.appendChild(this.customStats.dom)
     
-    // Add keyboard toggle
-    document.addEventListener('keydown', (e) => {
-      if (e.key === 'h' && e.ctrlKey) {
-        this.toggleVisibility()
-      }
-    })
+    // Keyboard toggle removed - using P key in main.ts instead
   }
   
   setInterceptionSystem(system: InterceptionSystem): void {
