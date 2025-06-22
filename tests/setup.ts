@@ -1,21 +1,9 @@
-// Mock browser globals for testing
-if (typeof window === 'undefined') {
-  global.window = {
-    location: {
-      search: ''
-    },
-    requestAnimationFrame: (callback: Function) => {
-      return setTimeout(callback, 16); // ~60fps
-    },
-    cancelAnimationFrame: (id: number) => {
-      clearTimeout(id);
-    }
-  } as any;
-}
+// Test setup file - ensures globals are mocked before any imports
+global.window = { 
+  location: { 
+    search: '' 
+  } 
+} as any
 
-// Mock performance if not available
-if (typeof performance === 'undefined') {
-  global.performance = {
-    now: () => Date.now()
-  } as any;
-}
+// Export to ensure this file is imported
+export const testSetup = true

@@ -18,10 +18,10 @@ export class ProximityFuse {
 
   constructor(startPosition: THREE.Vector3, config: Partial<ProximityFuseConfig> = {}) {
     this.config = {
-      armingDistance: 50,      // Arms after 50m of flight
-      detonationRadius: 10,    // Detonates within 10m
-      optimalRadius: 5,        // Best detonation at 5m
-      scanRate: 16,           // Check every frame (~60fps)
+      armingDistance: 20,      // Arms after 20m of flight
+      detonationRadius: 12,    // Detonates within 12m
+      optimalRadius: 6,        // Best detonation at 6m
+      scanRate: 4,            // Check every 4 frames
       ...config
     }
     

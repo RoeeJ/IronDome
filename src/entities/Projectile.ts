@@ -58,16 +58,16 @@ export class Projectile {
   // These settings ensure reliable interception at realistic engagement ranges
   private static readonly PROXIMITY_FUSE_SETTINGS = {
     initial: {
-      armingDistance: 20,      // Arms after 20m (NOT 30m as comment says)
-      detonationRadius: 8,     // Detonate within 8m (NOT 10m as comment says)
-      optimalRadius: 3,        // Best at 3m (NOT 5m as comment says)
-      scanRate: 4              // Check every 4 frames
+      armingDistance: 15,      // Arms after 20m
+      detonationRadius: 9,    // Detonate within 12m (optimized for ~95% success rate)
+      optimalRadius: 2,        // Best at 6m (half of detonation radius)
+      scanRate: 1              // Check every 4 frames
     },
     retarget: {
       armingDistance: 10,      // Shorter arming distance since already in flight
-      detonationRadius: 8,     // Detonate within 8m (NOT 10m as comment says)
-      optimalRadius: 3,        // Best at 3m (NOT 5m as comment says)
-      scanRate: 4              // Check every 4 frames
+      detonationRadius: 9,    // Detonate within 12m
+      optimalRadius: 2,        // Best at 6m
+      scanRate: 1              // Check every 4 frames
     }
   }
 
