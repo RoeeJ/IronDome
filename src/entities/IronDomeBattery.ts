@@ -4,8 +4,7 @@ import { OBJLoader } from 'three/examples/jsm/loaders/OBJLoader.js'
 import * as BufferGeometryUtils from 'three/examples/jsm/utils/BufferGeometryUtils.js'
 import { Projectile } from './Projectile'
 import { Threat, THREAT_CONFIGS } from './Threat'
-import { TrajectoryCalculator } from '../utils/TrajectoryCalculator'
-import { ImprovedTrajectoryCalculator } from '../utils/ImprovedTrajectoryCalculator'
+import { UnifiedTrajectorySystem } from '../systems/UnifiedTrajectorySystem'
 import { StaticRadarNetwork } from '../scene/StaticRadarNetwork'
 import { LaunchEffectsSystem } from '../systems/LaunchEffectsSystem'
 import { GeometryOptimizer } from '../utils/GeometryOptimizer'
@@ -336,23 +335,17 @@ export class IronDomeBattery extends EventEmitter {
     debug.module('Battery').log(`${threatConfig.isDrone ? 'DRONE' : 'Threat'} ${threat.id} in range: ${distance.toFixed(1)}m ✓`)
     
     // Check if we can reach the threat in time
-    // Use improved calculator if available (can be configured)
-    const useImproved = (window as any).__useImprovedAlgorithms !== false
-    const interceptionPoint = useImproved 
-      ? ImprovedTrajectoryCalculator.calculateInterceptionPoint(
-          threat.getPosition(),
-          threat.getVelocity(),
-          this.config.position,
-          this.config.interceptorSpeed,
-          threatConfig.isDrone || false
-        )
-      : TrajectoryCalculator.calculateInterceptionPoint(
-          threat.getPosition(),
-          threat.getVelocity(),
-          this.config.position,
-          this.config.interceptorSpeed,
-          threatConfig.isDrone || false
-        )
+    // Use unified trajectory system with configurable mode
+    const trajectory = new UnifiedTrajectorySystem({
+      mode: (window as any).__useImprovedAlgorithms !== false ? 'improved' : 'basic'
+    });
+    const interceptionPoint = trajectory.calculateInterceptionPoint(
+      threat.getPosition(),
+      threat.getVelocity(),
+      this.config.position,
+      this.config.interceptorSpeed,
+      threatConfig.isDrone || false
+    )
     
     if (!interceptionPoint) {
       debug.module('Battery').log(`Cannot calculate interception for ${threatConfig.isDrone ? 'DRONE' : 'threat'} ${threat.id}:`, {
@@ -570,7 +563,7 @@ export class IronDomeBattery extends EventEmitter {
     )
     
     // Calculate launch velocity to reach the lead point
-    let launchParams = TrajectoryCalculator.calculateLaunchParameters(
+    let launchParams = UnifiedTrajectorySystem.calculateLaunchParameters(
       this.config.position,
       leadPoint,
       this.config.interceptorSpeed,
@@ -592,7 +585,7 @@ export class IronDomeBattery extends EventEmitter {
     tubeWorldPos.add(this.launchOffset)
     
     // Create interceptor with perfect success rate for manual control
-    const velocity = TrajectoryCalculator.getVelocityVector(launchParams)
+    const velocity = UnifiedTrajectorySystem.getVelocityVector(launchParams)
     const interceptor = new Projectile(this.scene, this.world, {
       position: tubeWorldPos,
       velocity,
@@ -629,7 +622,7 @@ export class IronDomeBattery extends EventEmitter {
   private launchFromTube(tube: LauncherTube, threat: Threat): Projectile | null {
     // Calculate interception point
     const threatConfig = THREAT_CONFIGS[threat.type]
-    const interceptionData = TrajectoryCalculator.calculateInterceptionPoint(
+    const interceptionData = UnifiedTrajectorySystem.calculateInterceptionPoint(
       threat.getPosition(),
       threat.getVelocity(),
       this.config.position,
@@ -642,7 +635,7 @@ export class IronDomeBattery extends EventEmitter {
     }
     
     // Calculate launch parameters with lofted trajectory
-    const launchParams = TrajectoryCalculator.calculateLaunchParameters(
+    const launchParams = UnifiedTrajectorySystem.calculateLaunchParameters(
       this.config.position,
       interceptionData.point,
       this.config.interceptorSpeed,
@@ -679,7 +672,7 @@ export class IronDomeBattery extends EventEmitter {
     }
     
     // Create interceptor with adjusted initial velocity based on launch direction
-    let velocity = TrajectoryCalculator.getVelocityVector(launchParams)
+    let velocity = UnifiedTrajectorySystem.getVelocityVector(launchParams)
     
     // Blend calculated velocity with launch direction for more realistic launch
     // This ensures the missile initially follows the launcher's direction

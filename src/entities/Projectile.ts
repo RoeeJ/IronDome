@@ -53,6 +53,23 @@ export class Projectile {
   // Model orientation debugging
   private static modelForwardVector = new THREE.Vector3(0, 1, 0) // Default: +Y
   private static modelRotationAdjustment = new THREE.Euler(0, 0, 0) // No rotation needed for Y+
+  
+  // Proximity fuse settings - CRITICAL: These values are finely tuned and SHOULD NOT be changed!
+  // These settings ensure reliable interception at realistic engagement ranges
+  private static readonly PROXIMITY_FUSE_SETTINGS = {
+    initial: {
+      armingDistance: 20,      // Arms after 20m (NOT 30m as comment says)
+      detonationRadius: 8,     // Detonate within 8m (NOT 10m as comment says)
+      optimalRadius: 3,        // Best at 3m (NOT 5m as comment says)
+      scanRate: 4              // Check every 4 frames
+    },
+    retarget: {
+      armingDistance: 10,      // Shorter arming distance since already in flight
+      detonationRadius: 8,     // Detonate within 8m (NOT 10m as comment says)
+      optimalRadius: 3,        // Best at 3m (NOT 5m as comment says)
+      scanRate: 4              // Check every 4 frames
+    }
+  }
 
   constructor(
     scene: THREE.Scene,
@@ -147,12 +164,7 @@ export class Projectile {
     
     // Initialize proximity fuse for interceptors with realistic parameters
     if (isInterceptor && target) {
-      this.proximityFuse = new ProximityFuse(position, {
-        armingDistance: 30,      // Arms after 30m
-        detonationRadius: 5,     // Detonate within 5m only
-        optimalRadius: 2,        // Best at 2m
-        scanRate: 2              // Check every 2ms for precise detonation timing
-      })
+      this.proximityFuse = new ProximityFuse(position, Projectile.PROXIMITY_FUSE_SETTINGS.initial)
       
       // Disable thrust vector control for now - it's causing issues
       // this.thrustControl = new ThrustVectorControl({
@@ -376,12 +388,7 @@ export class Projectile {
     
     // Reset proximity fuse for new target with current position
     if (this.proximityFuse) {
-      this.proximityFuse = new ProximityFuse(this.mesh.position, {
-        armingDistance: 30,      // Shorter arming distance since already in flight
-        detonationRadius: 10,    // 10 meters
-        optimalRadius: 5,        // 5 meters for best quality
-        scanRate: 16            // Check every frame
-      })
+      this.proximityFuse = new ProximityFuse(this.mesh.position, Projectile.PROXIMITY_FUSE_SETTINGS.retarget)
     }
   }
   
@@ -489,14 +496,16 @@ export class Projectile {
     
     // Don't guide if moving too slowly
     if (currentSpeed < 10) {
+      debug.category('Guidance', `[SKIP] Speed too low: ${currentSpeed.toFixed(1)} m/s`)
       return
     }
     
-    // Minimal launch clearance before guidance (just to clear the launcher)
+    // Check minimum travel distance before guidance kicks in
     const distanceTraveled = this.proximityFuse?.getDistanceTraveled() || 0
-    const minGuidanceDistance = 3 // 3 meters to clear launcher safely
+    const minGuidanceDistance = 15 // Don't guide for first 15 meters
     if (distanceTraveled < minGuidanceDistance) {
       // Just orient the missile during launch phase
+      debug.category('Guidance', `[LAUNCH PHASE] Distance traveled: ${distanceTraveled.toFixed(1)}m < ${minGuidanceDistance}m`)
       this.orientMissile(currentVelocity)
       return
     }
@@ -511,6 +520,9 @@ export class Projectile {
     const toTarget = targetPos.clone().sub(myPos)
     const distance = toTarget.length()
     
+    // DEBUG: Log basic guidance info
+    debug.category('Guidance', `[UPDATE] Distance to target: ${distance.toFixed(1)}m, Speed: ${currentSpeed.toFixed(1)} m/s, Flight time: ${((Date.now() - this.launchTime) / 1000).toFixed(1)}s`)
+    
     // Continue guiding even when close to ensure hit
     // Proximity fuse will handle detonation
     
@@ -521,27 +533,44 @@ export class Projectile {
     // Predict target future position
     if ('getVelocity' in this.target) {
       const targetVel = (this.target as any).getVelocity()
+      const targetSpeed = targetVel.length()
       // Simple lead calculation
       const leadTime = timeToImpact * 0.5 // Lead by half the time to impact
       predictedTargetPos.add(targetVel.clone().multiplyScalar(leadTime))
+      
+      // DEBUG: Log prediction details
+      debug.category('Guidance', `[PREDICTION] Target speed: ${targetSpeed.toFixed(1)} m/s, Time to impact: ${timeToImpact.toFixed(2)}s, Lead time: ${leadTime.toFixed(2)}s`)
     }
     
     // Calculate line of sight to predicted position
     const los = predictedTargetPos.clone().sub(myPos).normalize()
     
-    // Simple proportional navigation - just turn towards target
+    // Simple proportional navigation
     const desiredVelocity = los.multiplyScalar(currentSpeed)
     const velocityError = desiredVelocity.clone().sub(currentVelocity)
     
-    // Apply correction force with distance-based gain
-    const gain = distance < 20 ? 3 : 2 // Higher gain when close
-    const correctionForce = velocityError.multiplyScalar(this.body.mass * gain)
+    // Only guide if we're not too close (avoid overshooting)
+    if (distance < 3) {
+      debug.category('Guidance', `[CLOSE RANGE] Distance < 5m, letting momentum carry - Distance: ${distance.toFixed(1)}m`)
+      this.orientMissile(currentVelocity)
+      return // Let momentum and proximity fuse handle it
+    }
     
-    // Limit maximum force
-    const maxForce = this.body.mass * 40 * 9.81 // 40G max
+    // Apply correction force
+    const correctionForce = velocityError.multiplyScalar(this.body.mass * 2) // P gain of 2
+    
+    // Realistic missile constraints scaled for simulator
+    const maxGForce = 40 // Higher G-force for better maneuverability
+    const gravity = 9.81
+    const maxAcceleration = maxGForce * gravity
+    const maxForce = this.body.mass * maxAcceleration
+    const forceBeforeLimit = correctionForce.length()
     if (correctionForce.length() > maxForce) {
       correctionForce.normalize().multiplyScalar(maxForce)
     }
+    
+    // DEBUG: Log forces
+    debug.category('Guidance', `[FORCES] Correction force: ${forceBeforeLimit.toFixed(1)}N (limited: ${correctionForce.length().toFixed(1)}N), Max: ${maxForce.toFixed(1)}N`)
     
     // Apply the force with gravity compensation
     const gravityCompensation = this.body.mass * 9.81
@@ -556,11 +585,12 @@ export class Projectile {
     
     // Add forward thrust to maintain speed
     const thrustDirection = currentVelocity.clone().normalize()
-    const targetSpeed = Math.max(150, currentSpeed * 0.9) // Don't slow down too much
+    const targetSpeed = 150 // Target speed for interceptors
     const speedError = targetSpeed - currentSpeed
-    const thrustForce = Math.max(0, speedError * this.body.mass * 1.0) // Stronger speed maintenance
+    const thrustForce = Math.max(0, speedError * this.body.mass * 0.5)
     
     if (thrustForce > 0 && thrustDirection.length() > 0) {
+      debug.category('Guidance', `[THRUST] Thrust force: ${thrustForce.toFixed(1)}N, Current speed: ${currentSpeed.toFixed(1)} m/s, Target: ${targetSpeed} m/s`)
       this.body.applyForce(
         new CANNON.Vec3(
           thrustDirection.x * thrustForce,

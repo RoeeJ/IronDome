@@ -1,6 +1,6 @@
 import * as THREE from 'three'
 import { Threat } from '@/entities/Threat'
-import { TrajectoryCalculator } from '@/utils/TrajectoryCalculator'
+import { UnifiedTrajectorySystem as TrajectoryCalculator } from '@/systems/UnifiedTrajectorySystem'
 import { debug } from '@/utils/DebugLogger'
 
 export interface ImpactAnalysis {

@@ -39,25 +39,31 @@ export class ProximityFuse {
     this.distanceTraveled += distanceThisFrame
     this.lastPosition.copy(currentPosition)
 
+    // DEBUG: Log distance traveled and current distance to target
+    const distanceToTarget = currentPosition.distanceTo(targetPosition)
+    debug.category('ProximityFuse', `[UPDATE] Distance traveled: ${this.distanceTraveled.toFixed(1)}m, Distance to target: ${distanceToTarget.toFixed(1)}m, Armed: ${this.armed}, Detonated: ${this.detonated}`)
+
     // Check if fuse should arm
     if (!this.armed && this.distanceTraveled >= this.config.armingDistance) {
       this.armed = true
-      debug.category('ProximityFuse', 'Armed at distance:', this.distanceTraveled)
+      debug.category('ProximityFuse', `[ARMED] Fuse armed at distance: ${this.distanceTraveled.toFixed(1)}m, Current distance to target: ${distanceToTarget.toFixed(1)}m`)
     }
 
     // Don't check for detonation if not armed or already detonated
     if (!this.armed || this.detonated) {
+      debug.category('ProximityFuse', `[SKIP CHECK] Not checking detonation - Armed: ${this.armed}, Detonated: ${this.detonated}`)
       return { shouldDetonate: false, detonationQuality: 0 }
     }
 
     // Rate limit proximity checks
     if (currentTime - this.lastScanTime < this.config.scanRate) {
+      debug.category('ProximityFuse', `[RATE LIMIT] Skipping scan - Time since last: ${(currentTime - this.lastScanTime).toFixed(1)}ms, Required: ${this.config.scanRate}ms`)
       return { shouldDetonate: false, detonationQuality: 0 }
     }
     this.lastScanTime = currentTime
 
-    // Calculate distance to target
-    const distanceToTarget = currentPosition.distanceTo(targetPosition)
+    // DEBUG: Log proximity check details
+    debug.category('ProximityFuse', `[PROXIMITY CHECK] Distance: ${distanceToTarget.toFixed(1)}m, Detonation radius: ${this.config.detonationRadius}m, Within range: ${distanceToTarget <= this.config.detonationRadius}`)
 
     // Check if within detonation radius
     if (distanceToTarget <= this.config.detonationRadius) {
@@ -66,11 +72,12 @@ export class ProximityFuse {
       // Calculate detonation quality (1.0 at optimal radius, decreasing linearly)
       const detonationQuality = this.calculateDetonationQuality(distanceToTarget)
       
-      debug.category('ProximityFuse', `Detonation at ${distanceToTarget.toFixed(1)}m, quality: ${(detonationQuality * 100).toFixed(0)}%`)
+      debug.category('ProximityFuse', `[DETONATION] Triggering detonation at ${distanceToTarget.toFixed(1)}m, quality: ${(detonationQuality * 100).toFixed(0)}%, Optimal radius: ${this.config.optimalRadius}m`)
       
       return { shouldDetonate: true, detonationQuality }
     }
 
+    debug.category('ProximityFuse', `[NO DETONATION] Target too far: ${distanceToTarget.toFixed(1)}m > ${this.config.detonationRadius}m`)
     return { shouldDetonate: false, detonationQuality: 0 }
   }
 
@@ -96,6 +103,7 @@ export class ProximityFuse {
   ): { isApproaching: boolean; closestApproachDistance: number } {
     // Vector from current position to target
     const toTarget = targetPosition.clone().sub(currentPosition)
+    const currentDistance = currentPosition.distanceTo(targetPosition)
     
     // Check if velocity is pointing towards target
     const dotProduct = velocity.dot(toTarget)
@@ -107,6 +115,9 @@ export class ProximityFuse {
     const projection = velocityNormalized.multiplyScalar(toTarget.dot(velocityNormalized))
     const closestPoint = currentPosition.clone().add(projection)
     const closestApproachDistance = closestPoint.distanceTo(targetPosition)
+
+    // DEBUG: Log approach analysis
+    debug.category('ProximityFuse', `[APPROACH CHECK] Current distance: ${currentDistance.toFixed(1)}m, Approaching: ${isApproaching}, Closest approach: ${closestApproachDistance.toFixed(1)}m, Velocity dot: ${dotProduct.toFixed(2)}`)
 
     return { isApproaching, closestApproachDistance }
   }

@@ -2,7 +2,7 @@ import * as THREE from 'three'
 import * as CANNON from 'cannon-es'
 import { EventEmitter } from 'events'
 import { Threat, ThreatType, THREAT_CONFIGS } from '../entities/Threat'
-import { TrajectoryCalculator } from '../utils/TrajectoryCalculator'
+import { UnifiedTrajectorySystem as TrajectoryCalculator } from '../systems/UnifiedTrajectorySystem'
 import { LaunchEffectsSystem } from '../systems/LaunchEffectsSystem'
 import { IronDomeBattery } from '../entities/IronDomeBattery'
 

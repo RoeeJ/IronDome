@@ -265,10 +265,9 @@ export class InterceptionSystem {
           battery.config.interceptorSpeed
         )
         
-        if (leadPrediction && leadPrediction.aimPoint) {
-          // Update interceptor's target point with prediction
-          interceptor.setTargetPoint(leadPrediction.aimPoint)
-        }
+        // Don't use setTargetPoint - it creates a static target!
+        // The interceptor should track the actual moving threat
+        // Lead prediction is handled in the guidance system itself
         
         // Set up proximity detonation callback
         interceptor.detonationCallback = (position: THREE.Vector3, quality: number) => {

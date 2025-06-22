@@ -49,7 +49,7 @@ export const GameUI: React.FC<GameUIProps> = ({ waveManager, placementSystem, on
   } | null>(null)
   const [showHelp, setShowHelp] = useState(false)
   const [confirmNewGame, setConfirmNewGame] = useState(false)
-  const [autoIntercept, setAutoIntercept] = useState(true)
+  const [autoIntercept, setAutoIntercept] = useState(false) // Default to manual for game mode
   const confirmTimeoutRef = React.useRef<NodeJS.Timeout | null>(null)
   
   // Store interval reference to clear it when needed
@@ -138,6 +138,13 @@ export const GameUI: React.FC<GameUIProps> = ({ waveManager, placementSystem, on
       // Update all displays when new game starts
       updateResourceDisplay()
       setGameOver(null)
+      // Reset to manual mode for new game
+      const controls = (window as any).__simulationControls
+      if (controls) {
+        controls.autoIntercept = false
+        setAutoIntercept(false)
+        localStorage.setItem('ironDome_interceptMode', 'false')
+      }
     }
     
     const handleDomeUnlocked = () => {
@@ -1345,6 +1352,8 @@ export const GameUI: React.FC<GameUIProps> = ({ waveManager, placementSystem, on
                         const newValue = !controls.autoIntercept
                         controls.autoIntercept = newValue
                         setAutoIntercept(newValue)
+                        // Save to localStorage
+                        localStorage.setItem('ironDome_interceptMode', newValue.toString())
                         showNotification(newValue ? 'Auto-Intercept Enabled' : 'Manual Targeting Mode')
                       }}
                       title={autoIntercept ? 'Automatic interception enabled' : 'Click on threats to intercept'}
@@ -1384,6 +1393,8 @@ export const GameUI: React.FC<GameUIProps> = ({ waveManager, placementSystem, on
                       const newValue = !controls.autoIntercept
                       controls.autoIntercept = newValue
                       setAutoIntercept(newValue)
+                      // Save to localStorage
+                      localStorage.setItem('ironDome_interceptMode', newValue.toString())
                       showNotification(newValue ? 'Auto-Intercept Enabled' : 'Manual Targeting Mode')
                     }}
                     title={autoIntercept ? 'Automatic interception enabled' : 'Click on threats to intercept'}

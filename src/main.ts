@@ -6,7 +6,7 @@ import React from 'react'
 import { createRoot } from 'react-dom/client'
 import { Projectile } from './entities/Projectile'
 import { ThreatManager } from './scene/ThreatManager'
-import { TrajectoryCalculator } from './utils/TrajectoryCalculator'
+import { UnifiedTrajectorySystem as TrajectoryCalculator } from './systems/UnifiedTrajectorySystem'
 import { IronDomeBattery } from './entities/IronDomeBattery'
 import { InterceptionSystem } from './scene/InterceptionSystem'
 import { StaticRadarNetwork } from './scene/StaticRadarNetwork'
@@ -286,11 +286,12 @@ const instancedExplosionRenderer = new InstancedExplosionRenderer(scene, 30)
 // Load saved preferences from localStorage
 const savedGameMode = localStorage.getItem('ironDome_gameMode')
 const savedProfilerVisible = localStorage.getItem('ironDome_profilerVisible')
+const savedInterceptMode = localStorage.getItem('ironDome_interceptMode')
 
 // Simulation controls (must be defined before UI)
 const simulationControls = {
   gameMode: savedGameMode !== null ? savedGameMode === 'true' : true,  // Default to true if not saved
-  autoIntercept: false,  // Manual targeting by default in game mode
+  autoIntercept: savedInterceptMode !== null ? savedInterceptMode === 'true' : false,  // Load from storage or default to manual
   pause: false,
   timeScale: 1.0,
   showTrajectories: true,
@@ -389,6 +390,10 @@ const updateUIMode = () => {
           const gameState = GameState.getInstance()
           gameState.startNewGame()
           
+          // Reset to manual mode for game mode
+          simulationControls.autoIntercept = false
+          localStorage.setItem('ironDome_interceptMode', 'false')
+          
           // Resources are managed by GameState, no need for separate reset
           
           // Don't auto-start, wait for user to click start
@@ -402,6 +407,7 @@ const updateUIMode = () => {
           
           // Enable auto-intercept by default in sandbox mode
           simulationControls.autoIntercept = true
+          localStorage.setItem('ironDome_interceptMode', 'true')
         }
         updateUIMode() // Re-render UI
       }
