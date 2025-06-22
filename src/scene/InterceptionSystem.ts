@@ -16,6 +16,7 @@ import { PredictiveTargeting } from '../utils/PredictiveTargeting'
 import { InterceptorAllocation } from '../systems/InterceptorAllocation'
 import { InterceptionOptimizer } from '../systems/InterceptionOptimizer'
 import { BlastPhysics } from '../systems/BlastPhysics'
+import { ExplosionManager, ExplosionType } from '../systems/ExplosionManager'
 
 interface Interception {
   interceptor: Projectile
@@ -620,99 +621,15 @@ export class InterceptionSystem {
   }
 
   public createExplosion(position: THREE.Vector3, quality: number = 1.0): void {
-      // Check if instanced explosion renderer is available
-      const instancedRenderer = (window as any).__instancedExplosionRenderer
-      if (instancedRenderer) {
-        // Use instanced renderer for better performance
-        instancedRenderer.createExplosion(position, quality, position.y > 5 ? 'air' : 'ground')
-        
-        // Performance optimization: Limit point lights
-        const activeLights = this.scene.children.filter(c => c instanceof THREE.PointLight).length
-        if (activeLights < 15) {
-          // Add point light flash (scaled down to match smaller explosions)
-          const flash = new THREE.PointLight(0xffff00, 5 + quality * 10, 20 + quality * 20)
-          flash.position.copy(position)
-          this.scene.add(flash)
-          
-          // Add ambient light boost for the explosion
-          const ambientBoost = new THREE.PointLight(0xff6600, 2, 30)
-          ambientBoost.position.copy(position)
-          this.scene.add(ambientBoost)
-        
-          // Fade out lights
-          const fadeInterval = setInterval(() => {
-            flash.intensity *= 0.85
-            ambientBoost.intensity *= 0.9
-            if (flash.intensity < 0.1) {
-              clearInterval(fadeInterval)
-              this.scene.remove(flash)
-              this.scene.remove(ambientBoost)
-            }
-          }, 50)
-          
-          // Ensure cleanup after max time
-          setTimeout(() => {
-            clearInterval(fadeInterval)
-            this.scene.remove(flash)
-            this.scene.remove(ambientBoost)
-          }, 1000)
-        }
-        
-        return
-      }
-      
-      // Fallback to old method
-      // Create expanding sphere for explosion
-      const geometry = new THREE.SphereGeometry(1, 16, 8)
-      const material = new THREE.MeshBasicMaterial({
-        color: quality > 0.8 ? 0xffaa00 : 0xff6600,
-        opacity: 0.8,
-        transparent: true
+      // Use centralized explosion manager
+      const radius = 10 + quality * 5
+      ExplosionManager.getInstance(this.scene).createExplosion({
+        type: position.y > 5 ? ExplosionType.AIR_INTERCEPTION : ExplosionType.GROUND_IMPACT,
+        position: position,
+        radius: radius,
+        intensity: quality
       })
-      const explosion = new THREE.Mesh(geometry, material)
-      explosion.position.copy(position)
-      this.scene.add(explosion)
-  
-      // Animate explosion
-      const startTime = Date.now()
-      const duration = 800 + quality * 400  // 0.8 to 1.2 seconds based on quality
-      const maxScale = 6 + quality * 8  // 6 to 14 based on quality
-  
-      const animate = () => {
-        const elapsed = Date.now() - startTime
-        const progress = elapsed / duration
-  
-        if (progress >= 1) {
-          this.scene.remove(explosion)
-          explosion.geometry.dispose()
-          material.dispose()
-          return
-        }
-  
-        // Expand and fade
-        const scale = 1 + (maxScale - 1) * progress
-        explosion.scale.set(scale, scale, scale)
-        material.opacity = 0.8 * (1 - progress)
-  
-        requestAnimationFrame(animate)
-      }
-  
-      animate()
-  
-      // Add flash effect
-      const flash = new THREE.PointLight(0xffaa00, 3 + quality * 4, 30 + quality * 30)
-      flash.position.copy(position)
-      this.scene.add(flash)
-  
-      setTimeout(() => {
-        this.scene.remove(flash)
-      }, 200)
-      
-      // Add smoke ring for high quality detonations
-      if (quality > 0.7) {
-        this.createSmokeRing(position)
-      }
-    }
+  }
 
   
   private createSmokeRing(position: THREE.Vector3): void {

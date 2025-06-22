@@ -31,6 +31,8 @@ import { LODInstancedThreatRenderer } from './rendering/LODInstancedThreatRender
 import { StatsDisplay } from './ui/StatsDisplay'
 import { ExtendedStatsDisplay } from './ui/ExtendedStatsDisplay'
 import { BlastPhysics } from './systems/BlastPhysics'
+import { ExplosionManager } from './systems/ExplosionManager'
+import { UnifiedTrailSystem } from './systems/UnifiedTrailSystem'
 
 // Initialize device capabilities
 const deviceCaps = DeviceCapabilities.getInstance()
@@ -1348,6 +1350,17 @@ function animate() {
   profiler.startSection('Controls')
   controls.update()
   profiler.endSection('Controls')
+  
+  // Update centralized systems
+  profiler.startSection('Centralized Systems')
+  
+  // Update explosion manager
+  ExplosionManager.getInstance(scene).update(deltaTime)
+  
+  // Update unified trail system
+  UnifiedTrailSystem.getInstance(scene).update(deltaTime, camera)
+  
+  profiler.endSection('Centralized Systems')
 
   // Render
   profiler.startSection('Render')

@@ -1,75 +1,77 @@
-import * as THREE from 'three'
-import * as CANNON from 'cannon-es'
-import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js'
-import { ProximityFuse } from '../systems/ProximityFuse'
-import { ExhaustTrailSystem } from '../systems/ExhaustTrailSystem'
-import { ModelCache } from '../utils/ModelCache'
-import { debug } from '../utils/DebugLogger'
-import { ThrustVectorControl } from '../systems/ThrustVectorControl'
+import * as THREE from "three";
+import * as CANNON from "cannon-es";
+import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
+import { ProximityFuse } from "../systems/ProximityFuse";
+import { ExhaustTrailSystem } from "../systems/ExhaustTrailSystem";
+import { ModelCache } from "../utils/ModelCache";
+import { debug } from "../utils/DebugLogger";
+import { ThrustVectorControl } from "../systems/ThrustVectorControl";
+import { UnifiedTrailSystem, TrailType } from "../systems/UnifiedTrailSystem";
 
 export interface ProjectileOptions {
-  position: THREE.Vector3
-  velocity: THREE.Vector3
-  color?: number
-  radius?: number
-  mass?: number
-  trailLength?: number
-  isInterceptor?: boolean
-  target?: THREE.Object3D
-  useExhaustTrail?: boolean
-  failureMode?: 'none' | 'motor' | 'guidance' | 'premature'
-  failureTime?: number
-  maxLifetime?: number  // Maximum flight time before self-destruct (seconds)
-  batteryPosition?: THREE.Vector3  // Battery position for self-destruct check
+  position: THREE.Vector3;
+  velocity: THREE.Vector3;
+  color?: number;
+  radius?: number;
+  mass?: number;
+  trailLength?: number;
+  isInterceptor?: boolean;
+  target?: THREE.Object3D;
+  useExhaustTrail?: boolean;
+  failureMode?: "none" | "motor" | "guidance" | "premature";
+  failureTime?: number;
+  maxLifetime?: number; // Maximum flight time before self-destruct (seconds)
+  batteryPosition?: THREE.Vector3; // Battery position for self-destruct check
 }
 
 export class Projectile {
-  id: string
-  mesh: THREE.Mesh
-  body: CANNON.Body
-  trail: THREE.Line
-  trailPositions: THREE.Vector3[]
-  trailGeometry: THREE.BufferGeometry
-  maxTrailLength: number
-  isActive: boolean = true
-  isInterceptor: boolean
-  target?: THREE.Object3D
-  proximityFuse?: ProximityFuse
-  detonationCallback?: (position: THREE.Vector3, quality: number) => void
-  exhaustTrail?: ExhaustTrailSystem
-  thrustControl?: ThrustVectorControl
-  private scene: THREE.Scene
-  private failureMode: string
-  private failureTime: number
-  private launchTime: number
-  private hasFailed: boolean = false
-  private radius: number
-  private maxLifetime: number
-  private batteryPosition?: THREE.Vector3
-  
+  id: string;
+  mesh: THREE.Mesh;
+  body: CANNON.Body;
+  trail: THREE.Line; // Legacy trail for compatibility
+  trailPositions: THREE.Vector3[]; // Legacy trail positions
+  trailGeometry: THREE.BufferGeometry; // Legacy trail geometry
+  maxTrailLength: number;
+  useUnifiedTrail: boolean = false;
+  isActive: boolean = true;
+  isInterceptor: boolean;
+  target?: THREE.Object3D;
+  proximityFuse?: ProximityFuse;
+  detonationCallback?: (position: THREE.Vector3, quality: number) => void;
+  exhaustTrail?: ExhaustTrailSystem;
+  thrustControl?: ThrustVectorControl;
+  private scene: THREE.Scene;
+  private failureMode: string;
+  private failureTime: number;
+  private launchTime: number;
+  private hasFailed: boolean = false;
+  private radius: number;
+  private maxLifetime: number;
+  private batteryPosition?: THREE.Vector3;
+
   // Physics scaling factor for simulator world
-  private static readonly WORLD_SCALE = 0.3 // 30% of real-world values
-  
+  private static readonly WORLD_SCALE = 0.3; // 30% of real-world values
+
   // Model orientation debugging
-  private static modelForwardVector = new THREE.Vector3(0, 1, 0) // Default: +Y
-  private static modelRotationAdjustment = new THREE.Euler(0, 0, 0) // No rotation needed for Y+
-  
+  private static modelForwardVector = new THREE.Vector3(0, 1, 0); // Default: +Y
+  private static modelRotationAdjustment = new THREE.Euler(0, 0, 0); // No rotation needed for Y+
+
   // Proximity fuse settings - CRITICAL: These values are finely tuned and SHOULD NOT be changed!
   // These settings ensure reliable interception at realistic engagement ranges
   private static readonly PROXIMITY_FUSE_SETTINGS = {
     initial: {
-      armingDistance: 15,      // Arms after 20m
-      detonationRadius: 9,    // Detonate within 12m (optimized for ~95% success rate)
-      optimalRadius: 2,        // Best at 6m (half of detonation radius)
-      scanRate: 1              // Check every 4 frames
+      armingDistance: 15, // Arms after 20m
+      detonationRadius: 9, // Detonate within 12m (optimized for ~95% success rate)
+      optimalRadius: 2, // Best at 6m (half of detonation radius)
+      scanRate: 1, // Check every 4 frames
     },
     retarget: {
-      armingDistance: 10,      // Shorter arming distance since already in flight
-      detonationRadius: 9,    // Detonate within 12m
-      optimalRadius: 2,        // Best at 6m
-      scanRate: 1              // Check every 4 frames
-    }
-  }
+      armingDistance: 10, // Shorter arming distance since already in flight
+      detonationRadius: 9, // Detonate within 12m
+      optimalRadius: 2, // Best at 6m
+      scanRate: 1, // Check every 4 frames
+    },
+  };
 
   constructor(
     scene: THREE.Scene,
@@ -86,86 +88,109 @@ export class Projectile {
       isInterceptor = false,
       target,
       useExhaustTrail = true,
-      failureMode = 'none',
+      failureMode = "none",
       failureTime = 0,
-      maxLifetime = isInterceptor ? 10 : 30,  // 10s for interceptors, 30s for threats
-      batteryPosition
-    } = options
-    
-    this.id = `projectile_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`
-    this.scene = scene
-    this.isInterceptor = isInterceptor
-    this.target = target
-    this.failureMode = failureMode
-    this.failureTime = failureTime
-    this.launchTime = Date.now()
-    this.radius = radius
-    this.maxLifetime = maxLifetime
-    this.batteryPosition = batteryPosition
+      maxLifetime = isInterceptor ? 10 : 30, // 10s for interceptors, 30s for threats
+      batteryPosition,
+    } = options;
+
+    this.id = `projectile_${Date.now()}_${Math.random()
+      .toString(36)
+      .substr(2, 9)}`;
+    this.scene = scene;
+    this.isInterceptor = isInterceptor;
+    this.target = target;
+    this.failureMode = failureMode;
+    this.failureTime = failureTime;
+    this.launchTime = Date.now();
+    this.radius = radius;
+    this.maxLifetime = maxLifetime;
+    this.batteryPosition = batteryPosition;
 
     // Create mesh - use model for interceptor, simple geometry for threats
     if (isInterceptor) {
       // Create temporary cone while model loads
-      const geometry = new THREE.ConeGeometry(radius * 0.8, radius * 5, 6) // Reduced from 8 segments
+      const geometry = new THREE.ConeGeometry(radius * 0.8, radius * 5, 6); // Reduced from 8 segments
       const material = new THREE.MeshStandardMaterial({
         color,
         emissive: color,
         emissiveIntensity: 0.2,
         roughness: 0.3,
-        metalness: 0.8
-      })
-      this.mesh = new THREE.Mesh(geometry, material)
+        metalness: 0.8,
+      });
+      this.mesh = new THREE.Mesh(geometry, material);
       // Rotation will be handled by orientMissile()
-      
+
       // Load optimized Tamir model using shared cache (if enabled)
-      const modelQuality = (window as any).__interceptorModelQuality || 'ultra'
-      if (modelQuality !== 'none') {
-        this.loadTamirModelOptimized(scene, radius, modelQuality)
+      const modelQuality = (window as any).__interceptorModelQuality || "ultra";
+      if (modelQuality !== "none") {
+        this.loadTamirModelOptimized(scene, radius, modelQuality);
       }
     } else {
       // Threat missile - simple sphere
-      const geometry = new THREE.SphereGeometry(radius, 12, 6) // Reduced segments
+      const geometry = new THREE.SphereGeometry(radius, 12, 6); // Reduced segments
       const material = new THREE.MeshStandardMaterial({
         color,
         emissive: color,
-        emissiveIntensity: 0.2
-      })
-      this.mesh = new THREE.Mesh(geometry, material)
+        emissiveIntensity: 0.2,
+      });
+      this.mesh = new THREE.Mesh(geometry, material);
     }
-    
-    this.mesh.castShadow = true
-    this.mesh.position.copy(position)
-    scene.add(this.mesh)
+
+    this.mesh.castShadow = true;
+    this.mesh.position.copy(position);
+    scene.add(this.mesh);
 
     // Create physics body
-    const shape = new CANNON.Sphere(radius)
+    const shape = new CANNON.Sphere(radius);
     this.body = new CANNON.Body({
       mass,
       shape,
       position: new CANNON.Vec3(position.x, position.y, position.z),
       velocity: new CANNON.Vec3(velocity.x, velocity.y, velocity.z),
-      linearDamping: 0.01,  // Small amount of drag for stability
-      angularDamping: 0.3   // Moderate damping - allows turning but prevents spin
-    })
-    world.addBody(this.body)
+      linearDamping: 0.01, // Small amount of drag for stability
+      angularDamping: 0.3, // Moderate damping - allows turning but prevents spin
+    });
+    world.addBody(this.body);
 
-    // Create trail
-    this.maxTrailLength = trailLength
-    this.trailPositions = []
-    this.trailGeometry = new THREE.BufferGeometry()
-    
-    const trailMaterial = new THREE.LineBasicMaterial({
-      color: color,
-      opacity: 0.6,
-      transparent: true
-    })
-    this.trail = new THREE.Line(this.trailGeometry, trailMaterial)
-    scene.add(this.trail)
-    
+    // Create trail using UnifiedTrailSystem if available
+    this.maxTrailLength = trailLength;
+    this.trailPositions = [];
+
+    // Try to use UnifiedTrailSystem first
+    try {
+      const unifiedTrail = UnifiedTrailSystem.getInstance(scene);
+      unifiedTrail.createTrail(this.id, {
+        type: TrailType.LINE, // Use line trails for both interceptors and threats
+        color: color,
+        maxPoints: trailLength * 2, // Double the trail length for better visual effect
+        linewidth: isInterceptor ? 2 : 1,
+        fadeOut: true,
+      });
+      this.useUnifiedTrail = true;
+
+      // Create minimal dummy objects for compatibility - NO geometry, NO material, NOT in scene
+      this.trailGeometry = null as any; // Set to null but typed as BufferGeometry for compatibility
+      this.trail = null as any; // Set to null but typed as Line for compatibility
+    } catch (e) {
+      // Fallback to legacy trail
+      this.trailGeometry = new THREE.BufferGeometry();
+      const trailMaterial = new THREE.LineBasicMaterial({
+        color: color,
+        opacity: 0.6,
+        transparent: true,
+      });
+      this.trail = new THREE.Line(this.trailGeometry, trailMaterial);
+      scene.add(this.trail);
+    }
+
     // Initialize proximity fuse for interceptors with realistic parameters
     if (isInterceptor && target) {
-      this.proximityFuse = new ProximityFuse(position, Projectile.PROXIMITY_FUSE_SETTINGS.initial)
-      
+      this.proximityFuse = new ProximityFuse(
+        position,
+        Projectile.PROXIMITY_FUSE_SETTINGS.initial
+      );
+
       // Disable thrust vector control for now - it's causing issues
       // this.thrustControl = new ThrustVectorControl({
       //   maxThrust: 200 * mass,
@@ -174,173 +199,214 @@ export class Projectile {
       //   dacsImpulseBudget: 100 * mass
       // })
     }
-    
+
     // Initialize exhaust trail system
     if (useExhaustTrail) {
-      this.exhaustTrail = isInterceptor 
+      this.exhaustTrail = isInterceptor
         ? ExhaustTrailSystem.createInterceptorTrail(scene)
-        : ExhaustTrailSystem.createMissileTrail(scene)
+        : ExhaustTrailSystem.createMissileTrail(scene);
     }
   }
 
   update(deltaTime: number = 0.016): void {
-    if (!this.isActive) return
-    
+    if (!this.isActive) return;
+
     // Check for failure conditions
-    if (!this.hasFailed && this.failureMode !== 'none') {
-      const elapsed = (Date.now() - this.launchTime) / 1000
+    if (!this.hasFailed && this.failureMode !== "none") {
+      const elapsed = (Date.now() - this.launchTime) / 1000;
       if (elapsed >= this.failureTime) {
-        this.handleFailure()
+        this.handleFailure();
       }
     }
-    
+
     // Check max lifetime for self-destruct
-    const flightTime = (Date.now() - this.launchTime) / 1000
+    const flightTime = (Date.now() - this.launchTime) / 1000;
     if (flightTime >= this.maxLifetime) {
-      debug.category('Projectile', `${this.isInterceptor ? 'Interceptor' : 'Threat'} self-destructing after ${flightTime.toFixed(1)}s`)
-      
+      debug.category(
+        "Projectile",
+        `${
+          this.isInterceptor ? "Interceptor" : "Threat"
+        } self-destructing after ${flightTime.toFixed(1)}s`
+      );
+
       // Trigger detonation callback if available (for visual explosion)
       if (this.detonationCallback) {
-        this.detonationCallback(this.mesh.position.clone(), 0.3) // Low quality explosion
+        this.detonationCallback(this.mesh.position.clone(), 0.3); // Low quality explosion
       }
-      
+
       // Stop exhaust trail
       if (this.exhaustTrail) {
-        this.exhaustTrail.stop()
+        this.exhaustTrail.stop();
       }
-      
-      this.isActive = false
-      return
+
+      this.isActive = false;
+      return;
     }
-    
+
     // Check for interceptor self-destruct near battery
     if (this.isInterceptor && this.batteryPosition) {
       // Calculate predicted landing position
-      const velocity = this.getVelocity()
-      const position = this.getPosition()
-      
+      const velocity = this.getVelocity();
+      const position = this.getPosition();
+
       // Only check if projectile is descending
       if (velocity.y < 0) {
         // Calculate time to ground impact
-        const timeToGround = -position.y / velocity.y
-        
+        const timeToGround = -position.y / velocity.y;
+
         // Predict landing position
         const landingPos = new THREE.Vector3(
           position.x + velocity.x * timeToGround,
           0,
           position.z + velocity.z * timeToGround
-        )
-        
+        );
+
         // Check distance to battery
-        const distanceToBattery = landingPos.distanceTo(this.batteryPosition)
-        const dangerRadius = 15 // Self-destruct if landing within 15m of battery
-        
-        if (distanceToBattery < dangerRadius && position.y < 50) { // Only when low altitude
-          debug.category('Projectile', `Interceptor self-destructing to protect battery (${distanceToBattery.toFixed(1)}m from battery)`)
-          
+        const distanceToBattery = landingPos.distanceTo(this.batteryPosition);
+        const dangerRadius = 15; // Self-destruct if landing within 15m of battery
+
+        if (distanceToBattery < dangerRadius && position.y < 50) {
+          // Only when low altitude
+          debug.category(
+            "Projectile",
+            `Interceptor self-destructing to protect battery (${distanceToBattery.toFixed(
+              1
+            )}m from battery)`
+          );
+
           // Trigger detonation
           if (this.detonationCallback) {
-            this.detonationCallback(this.mesh.position.clone(), 0.5) // Medium quality explosion
+            this.detonationCallback(this.mesh.position.clone(), 0.5); // Medium quality explosion
           }
-          
+
           // Stop exhaust trail
           if (this.exhaustTrail) {
-            this.exhaustTrail.stop()
+            this.exhaustTrail.stop();
           }
-          
-          this.isActive = false
-          return
+
+          this.isActive = false;
+          return;
         }
       }
     }
 
     // Sync mesh position with physics body
-    this.mesh.position.copy(this.body.position as any)
+    this.mesh.position.copy(this.body.position as any);
     // Don't copy quaternion - we'll orient based on velocity instead
-    
+
     // Always orient based on current velocity
-    const currentVel = this.getVelocity()
+    const currentVel = this.getVelocity();
     if (currentVel.length() > 1) {
-      this.orientMissile(currentVel)
+      this.orientMissile(currentVel);
     }
 
     // Update trail
-    this.trailPositions.push(this.mesh.position.clone())
-    if (this.trailPositions.length > this.maxTrailLength) {
-      this.trailPositions.shift()
+    if (this.useUnifiedTrail) {
+      // Update unified trail system
+      const unifiedTrail = UnifiedTrailSystem.getInstance(this.scene);
+      unifiedTrail.updateTrail(this.id, this.mesh.position, this.getVelocity());
+      // Skip all legacy trail updates when using unified system
+    } else if (this.trail && this.trailGeometry) {
+      // Legacy trail update - only if trail objects exist
+      this.trailPositions.push(this.mesh.position.clone());
+      if (this.trailPositions.length > this.maxTrailLength) {
+        this.trailPositions.shift();
+      }
+
+      // Update trail geometry
+      if (this.trailPositions.length > 1) {
+        const positions = new Float32Array(this.trailPositions.length * 3);
+        this.trailPositions.forEach((pos, i) => {
+          positions[i * 3] = pos.x;
+          positions[i * 3 + 1] = pos.y;
+          positions[i * 3 + 2] = pos.z;
+        });
+        this.trailGeometry.setAttribute(
+          "position",
+          new THREE.BufferAttribute(positions, 3)
+        );
+      }
     }
 
-    // Update trail geometry
-    if (this.trailPositions.length > 1) {
-      const positions = new Float32Array(this.trailPositions.length * 3)
-      this.trailPositions.forEach((pos, i) => {
-        positions[i * 3] = pos.x
-        positions[i * 3 + 1] = pos.y
-        positions[i * 3 + 2] = pos.z
-      })
-      this.trailGeometry.setAttribute('position', new THREE.BufferAttribute(positions, 3))
-    }
-    
     // Update exhaust trail
     if (this.exhaustTrail && this.body.velocity.length() > 0.1) {
-      const currentTime = Date.now()
-      const velocity = this.getVelocity()
-      
+      const currentTime = Date.now();
+      const velocity = this.getVelocity();
+
       // Emit from rear of projectile
-      const emitPosition = this.mesh.position.clone()
-      const velocityNormalized = velocity.clone().normalize()
-      emitPosition.sub(velocityNormalized.multiplyScalar(this.radius))
-      
+      const emitPosition = this.mesh.position.clone();
+      const velocityNormalized = velocity.clone().normalize();
+      emitPosition.sub(velocityNormalized.multiplyScalar(this.radius));
+
       // Pass camera for LOD optimization (will be set in main loop)
-      const camera = (this.scene as any).__camera
-      this.exhaustTrail.emit(emitPosition, velocity, currentTime, camera)
-      this.exhaustTrail.update(deltaTime)
+      const camera = (this.scene as any).__camera;
+      this.exhaustTrail.emit(emitPosition, velocity, currentTime, camera);
+      this.exhaustTrail.update(deltaTime);
     }
-    
+
     // Mid-flight guidance for interceptors (if not failed)
-    if (this.isInterceptor && this.target && !this.hasFailed && this.failureMode !== 'guidance') {
-      this.updateGuidance(deltaTime)
+    if (
+      this.isInterceptor &&
+      this.target &&
+      !this.hasFailed &&
+      this.failureMode !== "guidance"
+    ) {
+      this.updateGuidance(deltaTime);
     }
-    
+
     // Check proximity fuse for interceptors
     if (this.isInterceptor && this.proximityFuse && this.target) {
-      const targetPosition = 'getPosition' in this.target 
-        ? (this.target as any).getPosition() 
-        : this.target.position
-      const currentTime = Date.now()
-      
+      const targetPosition =
+        "getPosition" in this.target
+          ? (this.target as any).getPosition()
+          : this.target.position;
+      const currentTime = Date.now();
+
       const { shouldDetonate, detonationQuality } = this.proximityFuse.update(
         this.mesh.position,
         targetPosition,
         deltaTime,
         currentTime
-      )
-      
+      );
+
       if (shouldDetonate) {
         // Stop exhaust trail
         if (this.exhaustTrail) {
-          this.exhaustTrail.stop()
+          this.exhaustTrail.stop();
         }
-        
+
         // Trigger detonation
         if (this.detonationCallback) {
-          this.detonationCallback(this.mesh.position.clone(), detonationQuality)
+          this.detonationCallback(
+            this.mesh.position.clone(),
+            detonationQuality
+          );
         }
-        this.isActive = false
+        this.isActive = false;
       }
     }
   }
 
   destroy(scene: THREE.Scene, world: CANNON.World): void {
-    this.isActive = false
-    scene.remove(this.mesh)
-    scene.remove(this.trail)
-    world.removeBody(this.body)
-    
+    this.isActive = false;
+    scene.remove(this.mesh);
+    world.removeBody(this.body);
+
+    // Remove from unified trail system if used
+    if (this.useUnifiedTrail) {
+      const unifiedTrail = UnifiedTrailSystem.getInstance(scene);
+      unifiedTrail.removeTrail(this.id);
+    } else if (this.trail && this.trailGeometry) {
+      // Remove legacy trail - only if objects exist
+      scene.remove(this.trail);
+      this.trailGeometry.dispose();
+      (this.trail.material as THREE.Material).dispose();
+    }
+
     // Dispose geometry and materials based on mesh type
     if (this.mesh instanceof THREE.Mesh) {
-      this.mesh.geometry.dispose()
-      ;(this.mesh.material as THREE.Material).dispose()
+      this.mesh.geometry.dispose();
+      (this.mesh.material as THREE.Material).dispose();
     } else if (this.mesh instanceof THREE.Group) {
       // For GLTF models, we're using shared geometry so only dispose materials
       this.mesh.traverse((child) => {
@@ -349,26 +415,23 @@ export class Projectile {
           // Only dispose materials which were cloned
           if (child.material) {
             if (Array.isArray(child.material)) {
-              child.material.forEach(mat => mat.dispose())
+              child.material.forEach((mat) => mat.dispose());
             } else {
-              child.material.dispose()
+              child.material.dispose();
             }
           }
         }
-      })
+      });
     }
-    
-    this.trailGeometry.dispose()
-    ;(this.trail.material as THREE.Material).dispose()
-    
+
     // Clean up exhaust trail
     if (this.exhaustTrail) {
-      this.exhaustTrail.dispose()
+      this.exhaustTrail.dispose();
     }
   }
 
   getPosition(): THREE.Vector3 {
-    return this.mesh.position.clone()
+    return this.mesh.position.clone();
   }
 
   getVelocity(): THREE.Vector3 {
@@ -376,204 +439,248 @@ export class Projectile {
       this.body.velocity.x,
       this.body.velocity.y,
       this.body.velocity.z
-    )
+    );
   }
-  
+
   retarget(newTarget: THREE.Object3D): void {
     // Change target for an interceptor mid-flight
-    if (!this.isInterceptor || this.hasFailed) return
-    
-    debug.category('Interceptor', 'Retargeting to new threat')
-    this.target = newTarget
-    
+    if (!this.isInterceptor || this.hasFailed) return;
+
+    debug.category("Interceptor", "Retargeting to new threat");
+    this.target = newTarget;
+
     // Reset proximity fuse for new target with current position
     if (this.proximityFuse) {
-      this.proximityFuse = new ProximityFuse(this.mesh.position, Projectile.PROXIMITY_FUSE_SETTINGS.retarget)
+      this.proximityFuse = new ProximityFuse(
+        this.mesh.position,
+        Projectile.PROXIMITY_FUSE_SETTINGS.retarget
+      );
     }
   }
-  
-  
+
   private handleFailure(): void {
-    this.hasFailed = true
-    debug.category('Interceptor', `Failure: ${this.failureMode}`)
-    
+    this.hasFailed = true;
+    debug.category("Interceptor", `Failure: ${this.failureMode}`);
+
     switch (this.failureMode) {
-      case 'motor':
+      case "motor":
         // Motor failure - stop thrust, let gravity take over
         if (this.exhaustTrail) {
-          this.exhaustTrail.stop()
+          this.exhaustTrail.stop();
         }
         // Reduce velocity significantly
-        this.body.velocity.x *= 0.3
-        this.body.velocity.y *= 0.3
-        this.body.velocity.z *= 0.3
+        this.body.velocity.x *= 0.3;
+        this.body.velocity.y *= 0.3;
+        this.body.velocity.z *= 0.3;
         // Change color to indicate failure
         if (this.mesh instanceof THREE.Mesh) {
-          ;(this.mesh.material as THREE.MeshStandardMaterial).color.setHex(0x666666)
-          ;(this.mesh.material as THREE.MeshStandardMaterial).emissiveIntensity = 0
+          (this.mesh.material as THREE.MeshStandardMaterial).color.setHex(
+            0x666666
+          );
+          (
+            this.mesh.material as THREE.MeshStandardMaterial
+          ).emissiveIntensity = 0;
         } else if (this.mesh instanceof THREE.Group) {
           // For GLTF models, traverse and update materials
           this.mesh.traverse((child) => {
             if (child instanceof THREE.Mesh && child.material) {
               // Handle different material types safely
               if (Array.isArray(child.material)) {
-                child.material.forEach(mat => {
-                  if ('color' in mat && mat.color) {
-                    mat.color.setHex(0x666666)
+                child.material.forEach((mat) => {
+                  if ("color" in mat && mat.color) {
+                    mat.color.setHex(0x666666);
                   }
-                  if ('emissiveIntensity' in mat) {
-                    mat.emissiveIntensity = 0
+                  if ("emissiveIntensity" in mat) {
+                    mat.emissiveIntensity = 0;
                   }
-                })
+                });
               } else {
-                const material = child.material
-                if ('color' in material && material.color) {
-                  material.color.setHex(0x666666)
+                const material = child.material;
+                if ("color" in material && material.color) {
+                  material.color.setHex(0x666666);
                 }
-                if ('emissiveIntensity' in material) {
-                  material.emissiveIntensity = 0
+                if ("emissiveIntensity" in material) {
+                  material.emissiveIntensity = 0;
                 }
               }
             }
-          })
+          });
         }
-        break
-        
-      case 'guidance':
+        break;
+
+      case "guidance":
         // Guidance failure - veer off course
         const randomVeer = new THREE.Vector3(
           (Math.random() - 0.5) * 50,
           (Math.random() - 0.5) * 30,
           (Math.random() - 0.5) * 50
-        )
-        this.body.velocity.x += randomVeer.x
-        this.body.velocity.y += randomVeer.y
-        this.body.velocity.z += randomVeer.z
+        );
+        this.body.velocity.x += randomVeer.x;
+        this.body.velocity.y += randomVeer.y;
+        this.body.velocity.z += randomVeer.z;
         // Disable proximity fuse
-        this.proximityFuse = undefined
-        break
-        
-      case 'premature':
+        this.proximityFuse = undefined;
+        break;
+
+      case "premature":
         // Premature detonation
         if (this.detonationCallback) {
-          this.detonationCallback(this.mesh.position.clone(), 0.3) // Low quality detonation
+          this.detonationCallback(this.mesh.position.clone(), 0.3); // Low quality detonation
         }
-        this.isActive = false
-        break
+        this.isActive = false;
+        break;
     }
   }
-  
+
   setTargetPoint(targetPoint: THREE.Vector3): void {
     // Update the target position for improved targeting
     if (!targetPoint) {
-      debug.warning('setTargetPoint called with undefined targetPoint')
-      return
+      debug.warning("setTargetPoint called with undefined targetPoint");
+      return;
     }
-    
+
     // If target is a Threat object, we shouldn't modify it directly
-    if (this.target && 'getPosition' in this.target) {
+    if (this.target && "getPosition" in this.target) {
       // Target is a Threat, create a separate dummy target for the aim point
-      const dummyTarget = new THREE.Object3D()
-      dummyTarget.position.copy(targetPoint)
-      this.scene.add(dummyTarget)
-      this.target = dummyTarget
+      const dummyTarget = new THREE.Object3D();
+      dummyTarget.position.copy(targetPoint);
+      dummyTarget.visible = false; // Make dummy target invisible
+      this.scene.add(dummyTarget);
+      this.target = dummyTarget;
     } else if (!this.target) {
       // Create a dummy target object if none exists
-      this.target = new THREE.Object3D()
-      this.scene.add(this.target)
-      this.target.position.copy(targetPoint)
+      this.target = new THREE.Object3D();
+      this.target.visible = false; // Make dummy target invisible
+      this.scene.add(this.target);
+      this.target.position.copy(targetPoint);
     } else if (this.target.position) {
       // Target has a position property, update it
-      this.target.position.copy(targetPoint)
+      this.target.position.copy(targetPoint);
     }
   }
 
   private updateGuidance(deltaTime: number): void {
-    if (!this.target || !this.isActive) return
-    
-    const currentVelocity = this.getVelocity()
-    const currentSpeed = currentVelocity.length()
-    
+    if (!this.target || !this.isActive) return;
+
+    const currentVelocity = this.getVelocity();
+    const currentSpeed = currentVelocity.length();
+
     // Don't guide if moving too slowly
     if (currentSpeed < 10) {
-      debug.category('Guidance', `[SKIP] Speed too low: ${currentSpeed.toFixed(1)} m/s`)
-      return
+      debug.category(
+        "Guidance",
+        `[SKIP] Speed too low: ${currentSpeed.toFixed(1)} m/s`
+      );
+      return;
     }
-    
+
     // Check minimum travel distance before guidance kicks in
-    const distanceTraveled = this.proximityFuse?.getDistanceTraveled() || 0
-    const minGuidanceDistance = 15 // Don't guide for first 15 meters
+    const distanceTraveled = this.proximityFuse?.getDistanceTraveled() || 0;
+    const minGuidanceDistance = 15; // Don't guide for first 15 meters
     if (distanceTraveled < minGuidanceDistance) {
       // Just orient the missile during launch phase
-      debug.category('Guidance', `[LAUNCH PHASE] Distance traveled: ${distanceTraveled.toFixed(1)}m < ${minGuidanceDistance}m`)
-      this.orientMissile(currentVelocity)
-      return
+      debug.category(
+        "Guidance",
+        `[LAUNCH PHASE] Distance traveled: ${distanceTraveled.toFixed(
+          1
+        )}m < ${minGuidanceDistance}m`
+      );
+      this.orientMissile(currentVelocity);
+      return;
     }
-    
+
     // Calculate intercept point prediction
-    const targetPos = 'getPosition' in this.target 
-      ? (this.target as any).getPosition() 
-      : this.target.position.clone()
-    const myPos = this.mesh.position.clone()
-    
+    const targetPos =
+      "getPosition" in this.target
+        ? (this.target as any).getPosition()
+        : this.target.position.clone();
+    const myPos = this.mesh.position.clone();
+
     // Proportional navigation
-    const toTarget = targetPos.clone().sub(myPos)
-    const distance = toTarget.length()
-    
+    const toTarget = targetPos.clone().sub(myPos);
+    const distance = toTarget.length();
+
     // DEBUG: Log basic guidance info
-    debug.category('Guidance', `[UPDATE] Distance to target: ${distance.toFixed(1)}m, Speed: ${currentSpeed.toFixed(1)} m/s, Flight time: ${((Date.now() - this.launchTime) / 1000).toFixed(1)}s`)
-    
+    debug.category(
+      "Guidance",
+      `[UPDATE] Distance to target: ${distance.toFixed(
+        1
+      )}m, Speed: ${currentSpeed.toFixed(1)} m/s, Flight time: ${(
+        (Date.now() - this.launchTime) /
+        1000
+      ).toFixed(1)}s`
+    );
+
     // Continue guiding even when close to ensure hit
     // Proximity fuse will handle detonation
-    
+
     // Calculate time to impact
-    const timeToImpact = distance / currentSpeed
-    const predictedTargetPos = targetPos.clone()
-    
+    const timeToImpact = distance / currentSpeed;
+    const predictedTargetPos = targetPos.clone();
+
     // Predict target future position
-    if ('getVelocity' in this.target) {
-      const targetVel = (this.target as any).getVelocity()
-      const targetSpeed = targetVel.length()
+    if ("getVelocity" in this.target) {
+      const targetVel = (this.target as any).getVelocity();
+      const targetSpeed = targetVel.length();
       // Simple lead calculation
-      const leadTime = timeToImpact * 0.5 // Lead by half the time to impact
-      predictedTargetPos.add(targetVel.clone().multiplyScalar(leadTime))
-      
+      const leadTime = timeToImpact * 0.5; // Lead by half the time to impact
+      predictedTargetPos.add(targetVel.clone().multiplyScalar(leadTime));
+
       // DEBUG: Log prediction details
-      debug.category('Guidance', `[PREDICTION] Target speed: ${targetSpeed.toFixed(1)} m/s, Time to impact: ${timeToImpact.toFixed(2)}s, Lead time: ${leadTime.toFixed(2)}s`)
+      debug.category(
+        "Guidance",
+        `[PREDICTION] Target speed: ${targetSpeed.toFixed(
+          1
+        )} m/s, Time to impact: ${timeToImpact.toFixed(
+          2
+        )}s, Lead time: ${leadTime.toFixed(2)}s`
+      );
     }
-    
+
     // Calculate line of sight to predicted position
-    const los = predictedTargetPos.clone().sub(myPos).normalize()
-    
+    const los = predictedTargetPos.clone().sub(myPos).normalize();
+
     // Simple proportional navigation
-    const desiredVelocity = los.multiplyScalar(currentSpeed)
-    const velocityError = desiredVelocity.clone().sub(currentVelocity)
-    
+    const desiredVelocity = los.multiplyScalar(currentSpeed);
+    const velocityError = desiredVelocity.clone().sub(currentVelocity);
+
     // Only guide if we're not too close (avoid overshooting)
     if (distance < 3) {
-      debug.category('Guidance', `[CLOSE RANGE] Distance < 5m, letting momentum carry - Distance: ${distance.toFixed(1)}m`)
-      this.orientMissile(currentVelocity)
-      return // Let momentum and proximity fuse handle it
+      debug.category(
+        "Guidance",
+        `[CLOSE RANGE] Distance < 5m, letting momentum carry - Distance: ${distance.toFixed(
+          1
+        )}m`
+      );
+      this.orientMissile(currentVelocity);
+      return; // Let momentum and proximity fuse handle it
     }
-    
+
     // Apply correction force
-    const correctionForce = velocityError.multiplyScalar(this.body.mass * 2) // P gain of 2
-    
+    const correctionForce = velocityError.multiplyScalar(this.body.mass * 2); // P gain of 2
+
     // Realistic missile constraints scaled for simulator
-    const maxGForce = 40 // Higher G-force for better maneuverability
-    const gravity = 9.81
-    const maxAcceleration = maxGForce * gravity
-    const maxForce = this.body.mass * maxAcceleration
-    const forceBeforeLimit = correctionForce.length()
+    const maxGForce = 40; // Higher G-force for better maneuverability
+    const gravity = 9.81;
+    const maxAcceleration = maxGForce * gravity;
+    const maxForce = this.body.mass * maxAcceleration;
+    const forceBeforeLimit = correctionForce.length();
     if (correctionForce.length() > maxForce) {
-      correctionForce.normalize().multiplyScalar(maxForce)
+      correctionForce.normalize().multiplyScalar(maxForce);
     }
-    
+
     // DEBUG: Log forces
-    debug.category('Guidance', `[FORCES] Correction force: ${forceBeforeLimit.toFixed(1)}N (limited: ${correctionForce.length().toFixed(1)}N), Max: ${maxForce.toFixed(1)}N`)
-    
+    debug.category(
+      "Guidance",
+      `[FORCES] Correction force: ${forceBeforeLimit.toFixed(
+        1
+      )}N (limited: ${correctionForce
+        .length()
+        .toFixed(1)}N), Max: ${maxForce.toFixed(1)}N`
+    );
+
     // Apply the force with gravity compensation
-    const gravityCompensation = this.body.mass * 9.81
+    const gravityCompensation = this.body.mass * 9.81;
     this.body.applyForce(
       new CANNON.Vec3(
         correctionForce.x,
@@ -581,16 +688,23 @@ export class Projectile {
         correctionForce.z
       ),
       new CANNON.Vec3(0, 0, 0)
-    )
-    
+    );
+
     // Add forward thrust to maintain speed
-    const thrustDirection = currentVelocity.clone().normalize()
-    const targetSpeed = 150 // Target speed for interceptors
-    const speedError = targetSpeed - currentSpeed
-    const thrustForce = Math.max(0, speedError * this.body.mass * 0.5)
-    
+    const thrustDirection = currentVelocity.clone().normalize();
+    const targetSpeed = 150; // Target speed for interceptors
+    const speedError = targetSpeed - currentSpeed;
+    const thrustForce = Math.max(0, speedError * this.body.mass * 0.5);
+
     if (thrustForce > 0 && thrustDirection.length() > 0) {
-      debug.category('Guidance', `[THRUST] Thrust force: ${thrustForce.toFixed(1)}N, Current speed: ${currentSpeed.toFixed(1)} m/s, Target: ${targetSpeed} m/s`)
+      debug.category(
+        "Guidance",
+        `[THRUST] Thrust force: ${thrustForce.toFixed(
+          1
+        )}N, Current speed: ${currentSpeed.toFixed(
+          1
+        )} m/s, Target: ${targetSpeed} m/s`
+      );
       this.body.applyForce(
         new CANNON.Vec3(
           thrustDirection.x * thrustForce,
@@ -598,138 +712,185 @@ export class Projectile {
           thrustDirection.z * thrustForce
         ),
         new CANNON.Vec3(0, 0, 0)
-      )
+      );
     }
-    
+
     // Orient the missile model
-    this.orientMissile(currentVelocity)
+    this.orientMissile(currentVelocity);
   }
-  
+
   private orientMissile(velocity: THREE.Vector3): void {
-    if (velocity.length() < 0.1) return
-    
-    const direction = velocity.clone().normalize()
-    
+    if (velocity.length() < 0.1) return;
+
+    const direction = velocity.clone().normalize();
+
     // For GLTF models, we need to handle orientation differently
-    if (this.mesh instanceof THREE.Group || this.mesh.type === 'Group') {
+    if (this.mesh instanceof THREE.Group || this.mesh.type === "Group") {
       // Use static debug values for model orientation
-      const quaternion = new THREE.Quaternion().setFromUnitVectors(Projectile.modelForwardVector, direction)
-      
+      const quaternion = new THREE.Quaternion().setFromUnitVectors(
+        Projectile.modelForwardVector,
+        direction
+      );
+
       // Apply adjustment rotation
-      const adjustmentQuat = new THREE.Quaternion().setFromEuler(Projectile.modelRotationAdjustment)
-      quaternion.multiply(adjustmentQuat)
-      
-      this.mesh.quaternion.copy(quaternion)
+      const adjustmentQuat = new THREE.Quaternion().setFromEuler(
+        Projectile.modelRotationAdjustment
+      );
+      quaternion.multiply(adjustmentQuat);
+
+      this.mesh.quaternion.copy(quaternion);
     } else {
       // For procedural geometry (cone) - cone points up by default in Three.js
-      const defaultForward = new THREE.Vector3(0, 1, 0) // Cone points along +Y
-      const quaternion = new THREE.Quaternion().setFromUnitVectors(defaultForward, direction)
-      this.mesh.quaternion.copy(quaternion)
+      const defaultForward = new THREE.Vector3(0, 1, 0); // Cone points along +Y
+      const quaternion = new THREE.Quaternion().setFromUnitVectors(
+        defaultForward,
+        direction
+      );
+      this.mesh.quaternion.copy(quaternion);
     }
-    
+
     // Add slight roll based on turn rate for realism
     if (this.isInterceptor) {
-      const angularVel = this.body.angularVelocity
-      const rollAmount = Math.min(Math.max(-angularVel.y * 0.1, -0.5), 0.5)
-      this.mesh.rotateZ(rollAmount)
+      const angularVel = this.body.angularVelocity;
+      const rollAmount = Math.min(Math.max(-angularVel.y * 0.1, -0.5), 0.5);
+      this.mesh.rotateZ(rollAmount);
     }
   }
-  
-  private async loadTamirModelOptimized(scene: THREE.Scene, scale: number, quality: string = 'ultra'): Promise<void> {
+
+  private async loadTamirModelOptimized(
+    scene: THREE.Scene,
+    scale: number,
+    quality: string = "ultra"
+  ): Promise<void> {
     try {
-      const modelCache = ModelCache.getInstance()
+      const modelCache = ModelCache.getInstance();
       // Choose model quality based on performance needs
       // Ultra simple: ~10% triangles, Simple: ~20% triangles
-      const modelPath = quality === 'simple' 
-        ? 'assets/tamir/scene_simple.glb'
-        : 'assets/tamir/scene_ultra_simple.glb'
-      const model = await modelCache.createInstance(modelPath)
-      
+      const modelPath =
+        quality === "simple"
+          ? "assets/tamir/scene_simple.glb"
+          : "assets/tamir/scene_ultra_simple.glb";
+      const model = await modelCache.createInstance(modelPath);
+
       // Store reference to old mesh
-      const oldMesh = this.mesh
-      
+      const oldMesh = this.mesh;
+
       // Use the loaded model
-      this.mesh = model
-      
+      this.mesh = model;
+
       // Calculate model bounds and scale appropriately
-      const box = new THREE.Box3().setFromObject(this.mesh)
-      const size = box.getSize(new THREE.Vector3())
-      const maxDimension = Math.max(size.x, size.y, size.z)
-      debug.asset('Model dimensions', `${size.x.toFixed(2)}x${size.y.toFixed(2)}x${size.z.toFixed(2)}`, { max: maxDimension })
-      
+      const box = new THREE.Box3().setFromObject(this.mesh);
+      const size = box.getSize(new THREE.Vector3());
+      const maxDimension = Math.max(size.x, size.y, size.z);
+      debug.asset(
+        "Model dimensions",
+        `${size.x.toFixed(2)}x${size.y.toFixed(2)}x${size.z.toFixed(2)}`,
+        { max: maxDimension }
+      );
+
       // Scale to match the desired size (based on radius parameter)
-      const targetSize = scale * 15 // Increased size - model might be too small
-      const scaleFactor = maxDimension > 0 ? targetSize / maxDimension : 1
-      this.mesh.scale.setScalar(scaleFactor)
-      debug.asset('Scaling model', `${scaleFactor.toFixed(3)}x to target size ${targetSize.toFixed(2)}`)
-      
+      const targetSize = scale * 15; // Increased size - model might be too small
+      const scaleFactor = maxDimension > 0 ? targetSize / maxDimension : 1;
+      this.mesh.scale.setScalar(scaleFactor);
+      debug.asset(
+        "Scaling model",
+        `${scaleFactor.toFixed(3)}x to target size ${targetSize.toFixed(2)}`
+      );
+
       // Set initial rotation to match the cone's orientation
-      this.mesh.rotation.x = Math.PI / 2 // Point forward
-      
-      // Apply materials and properties
+      this.mesh.rotation.x = Math.PI / 2; // Point forward
+
+      // Remove any debug lines and apply materials
+      const toRemove: THREE.Object3D[] = [];
       this.mesh.traverse((child) => {
-        if (child instanceof THREE.Mesh) {
-          child.castShadow = true
-          child.receiveShadow = true
-          child.frustumCulled = true  // Enable frustum culling
-          child.visible = true  // Ensure visible
-          
+        // Remove any Line objects that might be in the model
+        if (
+          child instanceof THREE.Line ||
+          child instanceof THREE.LineSegments ||
+          child.name.toLowerCase().includes("helper") ||
+          child.name.toLowerCase().includes("debug")
+        ) {
+          toRemove.push(child);
+          debug.warn(
+            `Removing debug object from projectile model: ${child.name} (${child.type})`
+          );
+        } else if (child instanceof THREE.Mesh) {
+          child.castShadow = true;
+          child.receiveShadow = true;
+          child.frustumCulled = true; // Enable frustum culling
+          child.visible = true; // Ensure visible
+
           // Simplify material for performance
           if (child.material) {
-            const materials = Array.isArray(child.material) ? child.material : [child.material]
-            materials.forEach(material => {
+            const materials = Array.isArray(child.material)
+              ? child.material
+              : [child.material];
+            materials.forEach((material) => {
               // Only modify properties that exist
-              if ('metalness' in material) {
-                material.metalness = 0.7
+              if ("metalness" in material) {
+                material.metalness = 0.7;
               }
-              if ('roughness' in material) {
-                material.roughness = 0.3
+              if ("roughness" in material) {
+                material.roughness = 0.3;
               }
               // Only set emissive if the property exists
-              if ('emissive' in material && material.emissive) {
-                material.emissive = new THREE.Color(0x0066ff)
+              if ("emissive" in material && material.emissive) {
+                material.emissive = new THREE.Color(0x0066ff);
               }
-              if ('emissiveIntensity' in material) {
-                material.emissiveIntensity = 0.2  // Increased for visibility
+              if ("emissiveIntensity" in material) {
+                material.emissiveIntensity = 0.2; // Increased for visibility
               }
               // Ensure material is visible
-              if ('opacity' in material) {
-                material.opacity = 1.0
+              if ("opacity" in material) {
+                material.opacity = 1.0;
               }
-              if ('visible' in material) {
-                material.visible = true
+              if ("visible" in material) {
+                material.visible = true;
               }
-            })
+            });
           }
         }
-      })
-      
+      });
+
+      // Remove any debug objects
+      toRemove.forEach((obj) => {
+        if (obj.parent) {
+          obj.parent.remove(obj);
+        }
+      });
+
       // Position and add to scene
-      this.mesh.position.copy(this.body.position as any)
-      scene.add(this.mesh)
-      
+      this.mesh.position.copy(this.body.position as any);
+      scene.add(this.mesh);
+
       // Now remove old mesh after new one is added
-      scene.remove(oldMesh)
+      scene.remove(oldMesh);
       if (oldMesh instanceof THREE.Mesh) {
-        oldMesh.geometry.dispose()
-        ;(oldMesh.material as THREE.Material).dispose()
+        oldMesh.geometry.dispose();
+        (oldMesh.material as THREE.Material).dispose();
       }
-      
-      debug.asset('Tamir model loaded', `at position ${this.mesh.position.toArray().map(n => n.toFixed(2)).join(', ')}`)
-      
-      // Debug: Add a bright box to show where the model should be
-      if (debug.isEnabled()) {
-        const debugBox = new THREE.Mesh(
-          new THREE.BoxGeometry(scale * 2, scale * 2, scale * 10),
-          new THREE.MeshBasicMaterial({ color: 0xff00ff, wireframe: true })
-        )
-        debugBox.position.copy(this.mesh.position)
-        debugBox.rotation.copy(this.mesh.rotation)
-        scene.add(debugBox)
-        setTimeout(() => scene.remove(debugBox), 5000) // Remove after 5 seconds
-      }
+
+      debug.asset(
+        "Tamir model loaded",
+        `at position ${this.mesh.position
+          .toArray()
+          .map((n) => n.toFixed(2))
+          .join(", ")}`
+      );
+
+      // Debug: Add a bright box to show where the model should be (disabled to prevent visual artifacts)
+      // if (debug.isEnabled()) {
+      //   const debugBox = new THREE.Mesh(
+      //     new THREE.BoxGeometry(scale * 2, scale * 2, scale * 10),
+      //     new THREE.MeshBasicMaterial({ color: 0xff00ff, wireframe: true })
+      //   )
+      //   debugBox.position.copy(this.mesh.position)
+      //   debugBox.rotation.copy(this.mesh.rotation)
+      //   scene.add(debugBox)
+      //   setTimeout(() => scene.remove(debugBox), 5000) // Remove after 5 seconds
+      // }
     } catch (error) {
-      debug.error('Failed to load optimized Tamir model:', error)
+      debug.error("Failed to load optimized Tamir model:", error);
       // Keep using the simple cone on error
     }
   }

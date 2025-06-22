@@ -1,6 +1,8 @@
 import * as THREE from 'three'
 import * as CANNON from 'cannon-es'
 import { Projectile, ProjectileOptions } from './Projectile'
+import { GeometryFactory } from '../utils/GeometryFactory'
+import { MaterialCache } from '../utils/MaterialCache'
 
 export enum ThreatType {
   // Rockets
@@ -401,8 +403,8 @@ export class Threat extends Projectile {
     ;(this.mesh.material as THREE.Material).dispose()
     
     // Create drone body (flattened box)
-    const bodyGeometry = new THREE.BoxGeometry(config.radius * 2, config.radius * 0.5, config.radius * 1.5)
-    const bodyMaterial = new THREE.MeshStandardMaterial({
+    const bodyGeometry = GeometryFactory.getInstance().getBox(config.radius * 2, config.radius * 0.5, config.radius * 1.5)
+    const bodyMaterial = MaterialCache.getInstance().getMeshStandardMaterial({
       color: config.color,
       roughness: 0.8,
       metalness: 0.2
@@ -411,8 +413,8 @@ export class Threat extends Projectile {
     
     // Add propellers
     const propellerGroup = new THREE.Group()
-    const propGeometry = new THREE.CylinderGeometry(config.radius * 0.8, config.radius * 0.8, 0.05, 8)
-    const propMaterial = new THREE.MeshBasicMaterial({ color: 0x333333 })
+    const propGeometry = GeometryFactory.getInstance().getCylinder(config.radius * 0.8, config.radius * 0.8, 0.05, 8)
+    const propMaterial = MaterialCache.getInstance().getMeshBasicMaterial({ color: 0x333333 })
     
     for (let i = 0; i < 4; i++) {
       const prop = new THREE.Mesh(propGeometry, propMaterial)
@@ -438,13 +440,13 @@ export class Threat extends Projectile {
     ;(this.mesh.material as THREE.Material).dispose()
     
     // Create elongated cylinder for mortar
-    const geometry = new THREE.CylinderGeometry(
+    const geometry = GeometryFactory.getInstance().getCylinder(
       config.radius * 0.6,  // Top radius
       config.radius * 0.8,  // Bottom radius
       config.radius * 3,    // Height
       8                     // Segments
     )
-    const material = new THREE.MeshStandardMaterial({
+    const material = MaterialCache.getInstance().getMeshStandardMaterial({
       color: config.color,
       roughness: 0.6,
       metalness: 0.4
@@ -464,13 +466,13 @@ export class Threat extends Projectile {
     const bodyGroup = new THREE.Group()
     
     // Main body - cylinder
-    const bodyGeometry = new THREE.CylinderGeometry(
+    const bodyGeometry = GeometryFactory.getInstance().getCylinder(
       config.radius * 0.8,
       config.radius * 0.8,
       config.radius * 4,
       8
     )
-    const bodyMaterial = new THREE.MeshStandardMaterial({
+    const bodyMaterial = MaterialCache.getInstance().getMeshStandardMaterial({
       color: config.color,
       roughness: 0.3,
       metalness: 0.7
@@ -480,14 +482,14 @@ export class Threat extends Projectile {
     bodyGroup.add(body)
     
     // Nose cone
-    const noseGeometry = new THREE.ConeGeometry(config.radius * 0.8, config.radius * 1.5, 8)
+    const noseGeometry = GeometryFactory.getInstance().getCone(config.radius * 0.8, config.radius * 1.5, 8)
     const nose = new THREE.Mesh(noseGeometry, bodyMaterial)
     nose.position.x = config.radius * 2.75
     nose.rotation.z = -Math.PI / 2
     bodyGroup.add(nose)
     
     // Wings
-    const wingGeometry = new THREE.BoxGeometry(config.radius * 2, 0.1, config.radius)
+    const wingGeometry = GeometryFactory.getInstance().getBox(config.radius * 2, 0.1, config.radius)
     const wing1 = new THREE.Mesh(wingGeometry, bodyMaterial)
     wing1.position.y = config.radius * 0.6
     bodyGroup.add(wing1)

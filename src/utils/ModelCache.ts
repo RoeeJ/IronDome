@@ -45,8 +45,17 @@ export class ModelCache {
           let totalTriangles = 0
           let meshCount = 0
           
+          // Remove any debug helpers or lines from the model
+          const toRemove: THREE.Object3D[] = []
           model.traverse((child) => {
-            if (child instanceof THREE.Mesh) {
+            // Remove any Line objects or helpers
+            if (child instanceof THREE.Line || 
+                child instanceof THREE.LineSegments ||
+                child.name.toLowerCase().includes('helper') ||
+                child.name.toLowerCase().includes('debug')) {
+              toRemove.push(child)
+              debug.warn(`Removing debug object from model: ${child.name} (${child.type})`)
+            } else if (child instanceof THREE.Mesh) {
               const mesh = child as THREE.Mesh
               meshCount++
               
@@ -69,6 +78,13 @@ export class ModelCache {
                 const materials = Array.isArray(mesh.material) ? mesh.material : [mesh.material]
                 this.materialCache.set(matId, materials)
               }
+            }
+          })
+          
+          // Remove debug objects
+          toRemove.forEach(obj => {
+            if (obj.parent) {
+              obj.parent.remove(obj)
             }
           })
           

@@ -74,6 +74,96 @@ export class MaterialCache {
   }
   
   /**
+   * Get or create a MeshStandardMaterial with emissive properties
+   */
+  getMeshEmissiveMaterial(properties: {
+    color: number
+    emissive: number
+    emissiveIntensity: number
+    roughness: number
+    metalness: number
+  }): THREE.MeshStandardMaterial {
+    const key = `emissive_${properties.color}_${properties.emissive}_${properties.emissiveIntensity}_${properties.roughness}_${properties.metalness}`
+    
+    let material = this.materials.get(key) as THREE.MeshStandardMaterial
+    if (!material) {
+      material = new THREE.MeshStandardMaterial(properties)
+      this.materials.set(key, material)
+    }
+    
+    return material
+  }
+  
+  /**
+   * Get or create a transparent MeshStandardMaterial
+   */
+  getMeshTransparentMaterial(properties: {
+    color: number
+    opacity: number
+    roughness: number
+    metalness: number
+    emissive?: number
+    emissiveIntensity?: number
+  }): THREE.MeshStandardMaterial {
+    const key = `transparent_${properties.color}_${properties.opacity}_${properties.roughness}_${properties.metalness}_${properties.emissive ?? 0}_${properties.emissiveIntensity ?? 0}`
+    
+    let material = this.materials.get(key) as THREE.MeshStandardMaterial
+    if (!material) {
+      material = new THREE.MeshStandardMaterial({
+        ...properties,
+        transparent: true
+      })
+      this.materials.set(key, material)
+    }
+    
+    return material
+  }
+  
+  /**
+   * Get or create a LineBasicMaterial
+   */
+  getLineMaterial(properties: {
+    color: number
+    linewidth?: number
+    opacity?: number
+    transparent?: boolean
+  }): THREE.LineBasicMaterial {
+    const key = `line_${properties.color}_${properties.linewidth ?? 1}_${properties.opacity ?? 1}_${properties.transparent ?? false}`
+    
+    let material = this.materials.get(key) as THREE.LineBasicMaterial
+    if (!material) {
+      material = new THREE.LineBasicMaterial(properties)
+      this.materials.set(key, material)
+    }
+    
+    return material
+  }
+  
+  /**
+   * Get or create a PointsMaterial
+   */
+  getPointsMaterial(properties: {
+    color: number
+    size: number
+    sizeAttenuation?: boolean
+    transparent?: boolean
+    opacity?: number
+    vertexColors?: boolean
+    blending?: THREE.Blending
+    depthWrite?: boolean
+  }): THREE.PointsMaterial {
+    const key = `points_${properties.color}_${properties.size}_${properties.sizeAttenuation ?? true}_${properties.transparent ?? false}_${properties.opacity ?? 1}_${properties.vertexColors ?? false}_${properties.blending ?? THREE.NormalBlending}_${properties.depthWrite ?? true}`
+    
+    let material = this.materials.get(key) as THREE.PointsMaterial
+    if (!material) {
+      material = new THREE.PointsMaterial(properties)
+      this.materials.set(key, material)
+    }
+    
+    return material
+  }
+  
+  /**
    * Pre-compile shaders for all cached materials
    * Call this during initialization to avoid runtime compilation
    */
