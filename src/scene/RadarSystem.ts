@@ -1,4 +1,6 @@
 import * as THREE from 'three'
+import { GeometryFactory } from '../utils/GeometryFactory'
+import { MaterialCache } from '../utils/MaterialCache'
 
 export interface RadarConfig {
   position: THREE.Vector3
@@ -49,7 +51,7 @@ export class RadarSystem {
     }
     
     const ringGeometry = new THREE.BufferGeometry().setFromPoints(ringPoints)
-    const ringMaterial = new THREE.LineBasicMaterial({
+    const ringMaterial = MaterialCache.getInstance().getLineBasicMaterial({
       color: this.config.color,
       opacity: 0.3,
       transparent: true
@@ -58,7 +60,7 @@ export class RadarSystem {
     this.radarGroup.add(this.rangeRing)
     
     // Create dome wireframe to show 3D coverage
-    const domeGeometry = new THREE.SphereGeometry(
+    const domeGeometry = GeometryFactory.getInstance().getSphere(
       this.config.range,
       16,  // width segments
       8,   // height segments
@@ -68,7 +70,7 @@ export class RadarSystem {
       Math.PI / 3   // thetaLength (60 degrees for partial dome)
     )
     
-    const domeMaterial = new THREE.MeshBasicMaterial({
+    const domeMaterial = MaterialCache.getInstance().getMeshBasicMaterial({
       color: this.config.color,
       opacity: 0.1,
       transparent: true,
@@ -83,7 +85,7 @@ export class RadarSystem {
     const sweepHeight = this.config.range * 0.6  // Height of sweep wedge
     
     // Create a custom geometry for the sweep wedge
-    const sweepGeometry = new THREE.ConeGeometry(
+    const sweepGeometry = GeometryFactory.getInstance().getCone(
       this.config.range,
       sweepHeight,
       32,
@@ -93,7 +95,7 @@ export class RadarSystem {
       coneAngleRad
     )
     
-    const sweepMaterial = new THREE.MeshBasicMaterial({
+    const sweepMaterial = MaterialCache.getInstance().getMeshBasicMaterial({
       color: this.config.color,
       opacity: 0.25,
       transparent: true,
@@ -112,7 +114,7 @@ export class RadarSystem {
       new THREE.Vector3(this.config.range, 0, 0)
     ])
     
-    const lineMaterial = new THREE.LineBasicMaterial({
+    const lineMaterial = MaterialCache.getInstance().getLineBasicMaterial({
       color: this.config.color,
       linewidth: 3,
       opacity: 1.0,
@@ -129,8 +131,8 @@ export class RadarSystem {
 
   private createRadarGlow(): void {
     // Center glow
-    const glowGeometry = new THREE.SphereGeometry(2, 16, 8)
-    const glowMaterial = new THREE.MeshBasicMaterial({
+    const glowGeometry = GeometryFactory.getInstance().getSphere(2, 16, 8)
+    const glowMaterial = MaterialCache.getInstance().getMeshBasicMaterial({
       color: this.config.color,
       opacity: 0.5,
       transparent: true
@@ -185,7 +187,7 @@ export class RadarSystem {
 
   private onDetection(threat: THREE.Object3D, relativePos: THREE.Vector3): void {
     // Create ping effect at detection point
-    const pingGeometry = new THREE.RingGeometry(0.5, 2, 16)
+    const pingGeometry = GeometryFactory.getInstance().getRing(0.5, 2, 16)
     const pingMaterial = new THREE.MeshBasicMaterial({
       color: 0xffff00,
       opacity: 0.8,

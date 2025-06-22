@@ -3,6 +3,7 @@ import { InstancedExplosionRenderer } from '../rendering/InstancedExplosionRende
 import { MaterialCache } from '../utils/MaterialCache'
 import { GeometryFactory } from '../utils/GeometryFactory'
 import { debug } from '../utils/DebugLogger'
+import { LightPool } from './LightPool'
 
 export enum ExplosionType {
   AIR_INTERCEPTION = 'air_interception',
@@ -44,9 +45,7 @@ export class ExplosionManager {
   private instancedRenderer: InstancedExplosionRenderer
   private explosions = new Map<string, ExplosionInstance>()
   private nextId = 0
-  private lightPool: THREE.PointLight[] = []
-  private activeLights = new Set<THREE.PointLight>()
-  private maxLights = 10
+  private lightPool: LightPool
   
   // Explosion type configurations
   private typeConfigs = {
@@ -93,7 +92,7 @@ export class ExplosionManager {
   private constructor(scene: THREE.Scene) {
     this.scene = scene
     this.instancedRenderer = new InstancedExplosionRenderer(scene)
-    this.initializeLightPool()
+    this.lightPool = LightPool.getInstance(scene, 20) // Support 20 simultaneous explosion lights
   }
   
   static getInstance(scene: THREE.Scene): ExplosionManager {
@@ -103,15 +102,6 @@ export class ExplosionManager {
     return ExplosionManager.instance
   }
   
-  private initializeLightPool(): void {
-    // Pre-create point lights for explosion flashes
-    for (let i = 0; i < this.maxLights; i++) {
-      const light = new THREE.PointLight(0xffffff, 0, 0)
-      light.visible = false
-      this.scene.add(light)
-      this.lightPool.push(light)
-    }
-  }
   
   /**
    * Create an explosion with the specified configuration
@@ -147,20 +137,23 @@ export class ExplosionManager {
     )
     
     // Create flash effect if enabled
-    if (finalConfig.hasFlash && this.activeLights.size < this.maxLights) {
-      const light = this.getAvailableLight()
+    if (finalConfig.hasFlash) {
+      const flashColor = typeConfig.flashColor || finalConfig.color || 0xff6600
+      const flashIntensity = typeConfig.flashIntensity || 100
+      
+      // Priority based on explosion type (ground impacts have higher priority)
+      const priority = config.type === ExplosionType.GROUND_IMPACT ? 10 : 5
+      
+      const light = this.lightPool.acquire(
+        config.position,
+        flashColor,
+        flashIntensity,
+        config.radius * 10,
+        priority
+      )
+      
       if (light) {
-        const flashColor = typeConfig.flashColor || finalConfig.color || 0xff6600
-        const flashIntensity = typeConfig.flashIntensity || 100
-        
-        light.color.setHex(flashColor)
-        light.intensity = flashIntensity
-        light.distance = config.radius * 10
-        light.position.copy(config.position)
-        light.visible = true
-        
         explosion.flash = light
-        this.activeLights.add(light)
       }
     }
     
@@ -186,14 +179,6 @@ export class ExplosionManager {
     return id
   }
   
-  private getAvailableLight(): THREE.PointLight | null {
-    for (const light of this.lightPool) {
-      if (!this.activeLights.has(light)) {
-        return light
-      }
-    }
-    return null
-  }
   
   private createShockwave(position: THREE.Vector3, radius: number, explosionType?: ExplosionType): void {
     // Only create horizontal shockwaves for ground impacts
@@ -303,9 +288,7 @@ export class ExplosionManager {
     
     // Return light to pool
     if (explosion.flash) {
-      explosion.flash.visible = false
-      explosion.flash.intensity = 0
-      this.activeLights.delete(explosion.flash)
+      this.lightPool.release(explosion.flash)
     }
     
     explosion.active = false
@@ -318,10 +301,13 @@ export class ExplosionManager {
   getStats(): {
     activeExplosions: number
     activeLights: number
+    availableLights: number
   } {
+    const lightStats = this.lightPool.getStats()
     return {
       activeExplosions: this.explosions.size,
-      activeLights: this.activeLights.size
+      activeLights: lightStats.inUse,
+      availableLights: lightStats.available
     }
   }
   
@@ -342,11 +328,7 @@ export class ExplosionManager {
   dispose(): void {
     this.clear()
     
-    // Dispose lights
-    for (const light of this.lightPool) {
-      this.scene.remove(light)
-    }
-    this.lightPool = []
+    // LightPool will handle its own disposal
     
     // Dispose instanced renderer
     this.instancedRenderer.dispose()

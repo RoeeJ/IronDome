@@ -1,4 +1,6 @@
 import * as THREE from 'three'
+import { GeometryFactory } from '@/utils/GeometryFactory'
+import { MaterialCache } from '@/utils/MaterialCache'
 
 export interface LaunchEffectConfig {
   smokeCloudSize: number
@@ -15,6 +17,9 @@ export class LaunchEffectsSystem {
   private activeEffects: Array<{ update: () => boolean }> = []
   private lastEffectTime: number = 0
   private effectCooldown: number = 100 // Increased cooldown to reduce particle creation
+  private geometryFactory = GeometryFactory.getInstance()
+  private materialCache = MaterialCache.getInstance()
+  private smokeTexture: THREE.Texture | null = null
   
   constructor(scene: THREE.Scene) {
     this.scene = scene
@@ -73,9 +78,9 @@ export class LaunchEffectsSystem {
     flashLight.position.add(direction.clone().multiplyScalar(2))
     this.scene.add(flashLight)
     
-    // Flash geometry
-    const flashGeometry = new THREE.ConeGeometry(2, 4, 8)
-    const flashMaterial = new THREE.MeshBasicMaterial({
+    // Flash geometry - use cached cone geometry
+    const flashGeometry = this.geometryFactory.getCone(2, 4, 8)
+    const flashMaterial = this.materialCache.getMeshBasicMaterial({
       color: 0xffff88,
       opacity: 0.9,
       transparent: true,
@@ -100,8 +105,7 @@ export class LaunchEffectsSystem {
         if (elapsed > config.flashDuration) {
           this.scene.remove(flashLight)
           this.scene.remove(flashMesh)
-          flashMesh.geometry.dispose()
-          flashMaterial.dispose()
+          // Don't dispose cached geometry/material
           return false
         }
         
@@ -172,10 +176,15 @@ export class LaunchEffectsSystem {
     geometry.setAttribute('lifetime', new THREE.BufferAttribute(lifetimes, 1))
     geometry.setAttribute('size', new THREE.BufferAttribute(sizes, 1))
     
-    const material = new THREE.PointsMaterial({
+    // Create smoke texture only once
+    if (!this.smokeTexture) {
+      this.smokeTexture = this.createSmokeTexture()
+    }
+    
+    const material = this.materialCache.getPointsMaterial({
       size: config.smokeCloudSize,
       color: 0x888888,
-      map: this.createSmokeTexture(),
+      map: this.smokeTexture,
       transparent: true,
       opacity: 0.7,
       depthWrite: false,
@@ -194,8 +203,7 @@ export class LaunchEffectsSystem {
         if (elapsed > config.smokeDuration / 1000) {
           this.scene.remove(points)
           geometry.dispose()
-          material.dispose()
-          if (material.map) material.map.dispose()
+          // Don't dispose cached material
           return false
         }
         
@@ -233,9 +241,9 @@ export class LaunchEffectsSystem {
   }
   
   private createGroundDust(position: THREE.Vector3, config: LaunchEffectConfig): void {
-    // Create expanding dust ring
-    const ringGeometry = new THREE.RingGeometry(1, config.dustRadius, 16, 1)  // Reduced segments from 32
-    const ringMaterial = new THREE.MeshBasicMaterial({
+    // Create expanding dust ring using cached geometry
+    const ringGeometry = this.geometryFactory.getRing(1, config.dustRadius, 16, 1)
+    const ringMaterial = this.materialCache.getMeshBasicMaterial({
       color: 0x8b7355,
       opacity: 0.6,
       transparent: true,
@@ -269,7 +277,7 @@ export class LaunchEffectsSystem {
     
     dustGeometry.setAttribute('position', new THREE.BufferAttribute(dustPositions, 3))
     
-    const dustMaterial = new THREE.PointsMaterial({
+    const dustMaterial = this.materialCache.getPointsMaterial({
       size: 0.5,
       color: 0x8b7355,
       transparent: true,
@@ -287,10 +295,8 @@ export class LaunchEffectsSystem {
         if (elapsed > 1.5) {
           this.scene.remove(ring)
           this.scene.remove(dustPoints)
-          ringGeometry.dispose()
-          ringMaterial.dispose()
+          // Don't dispose cached geometry/material
           dustGeometry.dispose()
-          dustMaterial.dispose()
           return false
         }
         
@@ -320,8 +326,8 @@ export class LaunchEffectsSystem {
   }
   
   private createScorchMark(position: THREE.Vector3, config: LaunchEffectConfig): void {
-    const geometry = new THREE.CircleGeometry(config.scorchMarkRadius, 16)
-    const material = new THREE.MeshBasicMaterial({
+    const geometry = this.geometryFactory.getCircle(config.scorchMarkRadius, 16)
+    const material = this.materialCache.getMeshBasicMaterial({
       color: 0x222222,
       opacity: 0.7,
       transparent: true
@@ -339,8 +345,7 @@ export class LaunchEffectsSystem {
         const elapsed = (Date.now() - startTime) / 1000
         if (elapsed > 10) {
           this.scene.remove(scorch)
-          geometry.dispose()
-          material.dispose()
+          // Don't dispose cached geometry/material
           return false
         }
         

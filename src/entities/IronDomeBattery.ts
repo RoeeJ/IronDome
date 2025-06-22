@@ -14,6 +14,7 @@ import { ResourceManager } from '../game/ResourceManager'
 import { MaterialCache } from '../utils/MaterialCache'
 import { GeometryFactory } from '../utils/GeometryFactory'
 import { EventEmitter } from 'events'
+import { ExplosionManager, ExplosionType } from '../systems/ExplosionManager'
 
 export interface BatteryConfig {
   position: THREE.Vector3
@@ -290,7 +291,7 @@ export class IronDomeBattery extends EventEmitter {
     // Range indicator is now handled by RadarSystem
     // This method is kept for compatibility but returns an empty line
     const geometry = new THREE.BufferGeometry()
-    const material = new THREE.LineBasicMaterial()
+    const material = MaterialCache.getInstance().getLineMaterial({})
     return new THREE.Line(geometry, material)
   }
 
@@ -866,7 +867,7 @@ export class IronDomeBattery extends EventEmitter {
     this.healthBar = new THREE.Group()
     
     // Background bar
-    const bgGeometry = new THREE.PlaneGeometry(20, 3)
+    const bgGeometry = GeometryFactory.getInstance().getPlane(20, 3)
     const bgMaterial = MaterialCache.getInstance().getMeshBasicMaterial({
       color: 0x333333,
       transparent: true,
@@ -878,8 +879,8 @@ export class IronDomeBattery extends EventEmitter {
     this.healthBar.add(bgBar)
     
     // Health bar
-    const healthGeometry = new THREE.PlaneGeometry(19, 2)
-    const healthMaterial = new THREE.MeshBasicMaterial({
+    const healthGeometry = GeometryFactory.getInstance().getPlane(19, 2)
+    const healthMaterial = MaterialCache.getInstance().getMeshBasicMaterial({
       color: 0x00ff00,
       transparent: true,
       opacity: 0.9,
@@ -955,37 +956,14 @@ export class IronDomeBattery extends EventEmitter {
   }
   
   private onDestroyed(): void {
-    // Create explosion effect
-    const explosionGeometry = new THREE.SphereGeometry(
-      GeometryConfig.explosionSphere.radius,
-      GeometryConfig.explosionSphere.widthSegments,
-      GeometryConfig.explosionSphere.heightSegments
-    )
-    const explosionMaterial = new THREE.MeshBasicMaterial({
-      color: 0xff6600,
-      transparent: true,
-      opacity: 0.8
+    // Create explosion effect using ExplosionManager
+    const explosionManager = ExplosionManager.getInstance(this.scene)
+    explosionManager.createExplosion({
+      type: ExplosionType.GROUND_IMPACT,
+      position: this.config.position,
+      radius: 20,
+      intensity: 2
     })
-    const explosion = new THREE.Mesh(explosionGeometry, explosionMaterial)
-    explosion.position.copy(this.config.position)
-    this.scene.add(explosion)
-    
-    // Animate explosion
-    let scale = 1
-    const animateExplosion = () => {
-      scale += 0.5
-      explosion.scale.set(scale, scale, scale)
-      explosionMaterial.opacity -= 0.04
-      
-      if (explosionMaterial.opacity > 0) {
-        requestAnimationFrame(animateExplosion)
-      } else {
-        this.scene.remove(explosion)
-        explosionGeometry.dispose()
-        explosionMaterial.dispose()
-      }
-    }
-    animateExplosion()
     
     // Disable battery
     this.isDestroyed = true
@@ -1277,24 +1255,18 @@ export class IronDomeBattery extends EventEmitter {
       this.healthBar.traverse((child) => {
         if (child instanceof THREE.Mesh) {
           child.geometry.dispose()
-          if (child.material instanceof THREE.Material) {
-            child.material.dispose()
-          }
+          // Don't dispose materials - they're shared from MaterialCache
         }
       })
       this.scene.remove(this.healthBar)
       this.healthBar = undefined
     }
     
-    // Dispose geometries and materials
+    // Dispose geometries only - materials are shared from MaterialCache
     this.group.traverse((child) => {
       if (child instanceof THREE.Mesh) {
         child.geometry.dispose()
-        if (child.material instanceof THREE.Material) {
-          child.material.dispose()
-        } else if (Array.isArray(child.material)) {
-          child.material.forEach(mat => mat.dispose())
-        }
+        // Don't dispose materials - they're shared from MaterialCache
       }
     })
     

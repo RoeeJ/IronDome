@@ -243,6 +243,31 @@ export class GeometryFactory {
   }
   
   /**
+   * Get or create a circle geometry
+   */
+  getCircle(
+    radius: number = 1,
+    segments: number = 32,
+    thetaStart: number = 0,
+    thetaLength: number = Math.PI * 2
+  ): THREE.CircleGeometry {
+    const key = `circle_${radius}_${segments}_${thetaStart}_${thetaLength}`
+    
+    let geometry = this.geometries.get(key) as THREE.CircleGeometry
+    if (!geometry) {
+      geometry = new THREE.CircleGeometry(
+        radius,
+        segments,
+        thetaStart,
+        thetaLength
+      )
+      this.geometries.set(key, geometry)
+    }
+    
+    return geometry
+  }
+  
+  /**
    * Get or create a buffer geometry from arrays
    */
   getBufferGeometry(

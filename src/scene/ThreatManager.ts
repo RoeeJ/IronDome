@@ -5,6 +5,9 @@ import { Threat, ThreatType, THREAT_CONFIGS } from '../entities/Threat'
 import { UnifiedTrajectorySystem as TrajectoryCalculator } from '../systems/UnifiedTrajectorySystem'
 import { LaunchEffectsSystem } from '../systems/LaunchEffectsSystem'
 import { IronDomeBattery } from '../entities/IronDomeBattery'
+import { ExplosionManager, ExplosionType } from '../systems/ExplosionManager'
+import { GeometryFactory } from '../utils/GeometryFactory'
+import { MaterialCache } from '../utils/MaterialCache'
 
 export interface ThreatSpawnConfig {
   type: ThreatType
@@ -26,6 +29,7 @@ export class ThreatManager extends EventEmitter {
   private launchEffects: LaunchEffectsSystem
   private batteries: IronDomeBattery[] = []
   private salvoChance: number = 0.3  // Default 30% chance
+  private explosionManager: ExplosionManager
 
   constructor(scene: THREE.Scene, world: CANNON.World) {
     super()
@@ -34,6 +38,9 @@ export class ThreatManager extends EventEmitter {
     
     // Initialize launch effects system
     this.launchEffects = new LaunchEffectsSystem(scene)
+    
+    // Initialize explosion manager
+    this.explosionManager = ExplosionManager.getInstance(scene)
     
     // Default spawn configurations with all threat types
     this.spawnConfigs = [
@@ -125,6 +132,9 @@ export class ThreatManager extends EventEmitter {
   update(): void {
     // Update launch effects
     this.launchEffects.update()
+    
+    // Update explosion manager
+    this.explosionManager.update(1/60)
     
     // Update all threats
     for (let i = this.threats.length - 1; i >= 0; i--) {
@@ -218,9 +228,17 @@ export class ThreatManager extends EventEmitter {
           
           // Create explosion (in air if still flying)
           if (threat.getPosition().y > 5) {
-            this.createAirExplosion(threat.getPosition())
+            this.explosionManager.createExplosion({
+              type: ExplosionType.DRONE_DESTRUCTION,
+              position: threat.getPosition(),
+              radius: 10
+            })
           } else {
-            this.createGroundExplosion(threat.getPosition())
+            this.explosionManager.createExplosion({
+              type: ExplosionType.GROUND_IMPACT,
+              position: threat.getPosition(),
+              radius: 15
+            })
           }
           
           this.removeThreat(i, false) // Drone attack
@@ -261,7 +279,11 @@ export class ThreatManager extends EventEmitter {
           })
           
           // Create explosion at impact point
-          this.createGroundExplosion(impactPosition)
+          this.explosionManager.createExplosion({
+            type: ExplosionType.GROUND_IMPACT,
+            position: impactPosition,
+            radius: 15
+          })
           this.removeThreat(i, false) // Missed - hit ground
         } else if (threat.body.position.y < -5) {
           // Remove if somehow went too far below ground
@@ -456,8 +478,8 @@ export class ThreatManager extends EventEmitter {
     if (!impactPoint) return
     
     // Create impact marker
-    const geometry = new THREE.RingGeometry(2, 3, 32)
-    const material = new THREE.MeshBasicMaterial({
+    const geometry = GeometryFactory.getInstance().getRing(2, 3, 32)
+    const material = MaterialCache.getInstance().getMeshBasicMaterial({
       color: 0xff0000,
       opacity: 0.5,
       transparent: true,
@@ -484,8 +506,7 @@ export class ThreatManager extends EventEmitter {
       // Remove marker if threat is destroyed or impact time passed
       if (!threat.isActive || threat.getTimeToImpact() < 0) {
         this.scene.remove(marker)
-        marker.geometry.dispose()
-        ;(marker.material as THREE.Material).dispose()
+        // Don't dispose geometry and material - they're shared from caches
         this.impactMarkers.splice(i, 1)
         continue
       }
@@ -518,8 +539,7 @@ export class ThreatManager extends EventEmitter {
     // Remove all impact markers
     this.impactMarkers.forEach(marker => {
       this.scene.remove(marker)
-      marker.geometry.dispose()
-      ;(marker.material as THREE.Material).dispose()
+      // Don't dispose geometry and material - they're shared from caches
     })
     this.impactMarkers = []
   }
@@ -637,188 +657,12 @@ export class ThreatManager extends EventEmitter {
     }
   }
 
-  private createGroundExplosion(position: THREE.Vector3): void {
-    // Check if instanced explosion renderer is available
-    const instancedRenderer = (window as any).__instancedExplosionRenderer
-    if (instancedRenderer) {
-      instancedRenderer.createExplosion(position, 0.8, 'ground')
-      
-      // Performance optimization: Limit point lights
-      const activeLights = this.scene.children.filter(c => c instanceof THREE.PointLight).length
-      if (activeLights < 10) {
-        // Add point light flash
-        const flash = new THREE.PointLight(0xff6600, 10, 30)
-        flash.position.copy(position)
-        flash.position.y = 2
-        this.scene.add(flash)
-        
-        setTimeout(() => {
-          this.scene.remove(flash)
-        }, 200)
-      }
-      
-      // Still create crater effect
-      this.createCraterDecal(position)
-      return
-    }
-    
-    // Fallback to old method
-    // Main explosion sphere
-    const explosionGeometry = new THREE.SphereGeometry(1, 16, 8)
-    const explosionMaterial = new THREE.MeshBasicMaterial({
-      color: 0xff6600,
-      opacity: 1,
-      transparent: true
-    })
-    const explosion = new THREE.Mesh(explosionGeometry, explosionMaterial)
-    explosion.position.copy(position)
-    explosion.position.y = 0.5
-    this.scene.add(explosion)
-
-    // Shockwave ring
-    const ringGeometry = new THREE.RingGeometry(0.1, 1, 32)
-    const ringMaterial = new THREE.MeshBasicMaterial({
-      color: 0xffaa00,
-      opacity: 0.8,
-      transparent: true,
-      side: THREE.DoubleSide
-    })
-    const shockwave = new THREE.Mesh(ringGeometry, ringMaterial)
-    shockwave.rotation.x = -Math.PI / 2
-    shockwave.position.copy(position)
-    shockwave.position.y = 0.1
-    this.scene.add(shockwave)
-
-    // Debris particles (reduced for performance)
-    const debrisCount = 8
-    const debris: THREE.Mesh[] = []
-    
-    for (let i = 0; i < debrisCount; i++) {
-      const debrisGeometry = new THREE.BoxGeometry(0.2, 0.2, 0.2)
-      const debrisMaterial = new THREE.MeshBasicMaterial({
-        color: 0x333333
-      })
-      const debrisPiece = new THREE.Mesh(debrisGeometry, debrisMaterial)
-      debrisPiece.position.copy(position)
-      debrisPiece.position.y = 0.5
-      
-      // Random initial velocity
-      debrisPiece.userData.velocity = new THREE.Vector3(
-        (Math.random() - 0.5) * 10,
-        Math.random() * 15 + 5,
-        (Math.random() - 0.5) * 10
-      )
-      
-      debris.push(debrisPiece)
-      this.scene.add(debrisPiece)
-    }
-
-    // Animate explosion
-    const startTime = Date.now()
-    const duration = 2000
-
-    const animate = () => {
-      const elapsed = Date.now() - startTime
-      const progress = elapsed / duration
-
-      if (progress >= 1) {
-        // Clean up
-        this.scene.remove(explosion)
-        this.scene.remove(shockwave)
-        explosion.geometry.dispose()
-        explosionMaterial.dispose()
-        shockwave.geometry.dispose()
-        ringMaterial.dispose()
-        
-        debris.forEach(piece => {
-          this.scene.remove(piece)
-          piece.geometry.dispose()
-          ;(piece.material as THREE.Material).dispose()
-        })
-        return
-      }
-
-      // Expand and fade explosion
-      const scale = 1 + progress * 8
-      explosion.scale.set(scale, scale, scale)
-      explosionMaterial.opacity = 1 - progress
-
-      // Expand shockwave (reduced size)
-      const ringScale = 1 + progress * 6
-      shockwave.scale.set(ringScale, ringScale, 1)
-      ringMaterial.opacity = 0.8 * (1 - progress)
-
-      // Animate debris
-      debris.forEach(piece => {
-        if (piece.position.y > 0) {
-          piece.userData.velocity.y -= 30 * 0.016 // Gravity
-          piece.position.add(piece.userData.velocity.clone().multiplyScalar(0.016))
-          piece.rotation.x += 0.1
-          piece.rotation.y += 0.15
-          
-          if (piece.position.y <= 0) {
-            piece.position.y = 0
-            piece.userData.velocity.multiplyScalar(0.3) // Damping on ground hit
-          }
-        }
-      })
-
-      requestAnimationFrame(animate)
-    }
-
-    animate()
-
-    // Add point light flash
-    const flash = new THREE.PointLight(0xff6600, 10, 30)
-    flash.position.copy(position)
-    flash.position.y = 2
-    this.scene.add(flash)
-
-    setTimeout(() => {
-      this.scene.remove(flash)
-    }, 200)
-
-    // Add crater decal (simple dark circle on ground)
-    const craterGeometry = new THREE.CircleGeometry(3, 32)
-    const craterMaterial = new THREE.MeshBasicMaterial({
-      color: 0x222222,
-      opacity: 0.7,
-      transparent: true
-    })
-    const crater = new THREE.Mesh(craterGeometry, craterMaterial)
-    crater.rotation.x = -Math.PI / 2
-    crater.position.copy(position)
-    crater.position.y = 0.01
-    this.scene.add(crater)
-
-    // Fade out crater over time
-    setTimeout(() => {
-      const fadeStart = Date.now()
-      const fadeDuration = 5000
-      
-      const fadeCrater = () => {
-        const elapsed = Date.now() - fadeStart
-        const progress = elapsed / fadeDuration
-        
-        if (progress >= 1) {
-          this.scene.remove(crater)
-          crater.geometry.dispose()
-          craterMaterial.dispose()
-          return
-        }
-        
-        craterMaterial.opacity = 0.7 * (1 - progress)
-        requestAnimationFrame(fadeCrater)
-      }
-      
-      fadeCrater()
-    }, 3000)
-  }
+  // Methods removed - now using ExplosionManager
   
   private createCraterDecal(position: THREE.Vector3): void {
     // Add crater decal (simple dark circle on ground)
     const craterGeometry = new THREE.CircleGeometry(3, 32)
-    const craterMaterial = new THREE.MeshBasicMaterial({
+    const craterMaterial = MaterialCache.getInstance().getMeshBasicMaterial({
       color: 0x222222,
       opacity: 0.7,
       transparent: true
@@ -840,12 +684,12 @@ export class ThreatManager extends EventEmitter {
         
         if (progress >= 1) {
           this.scene.remove(crater)
-          crater.geometry.dispose()
-          craterMaterial.dispose()
+          crater.geometry.dispose() // CircleGeometry is unique, safe to dispose
+          // Don't dispose material - it's shared from MaterialCache
           return
         }
         
-        craterMaterial.opacity = 0.7 * (1 - progress)
+        ;(crater.material as THREE.MeshBasicMaterial).opacity = 0.7 * (1 - progress)
         requestAnimationFrame(fadeCrater)
       }
       
@@ -853,110 +697,7 @@ export class ThreatManager extends EventEmitter {
     }, 3000)
   }
   
-  private createAirExplosion(position: THREE.Vector3): void {
-    // Check if instanced explosion renderer is available
-    const instancedRenderer = (window as any).__instancedExplosionRenderer
-    if (instancedRenderer) {
-      instancedRenderer.createExplosion(position, 0.8, 'air')
-      
-      // Performance optimization: Limit point lights
-      const activeLights = this.scene.children.filter(c => c instanceof THREE.PointLight).length
-      if (activeLights < 10) {
-        // Add point light flash
-        const flash = new THREE.PointLight(0xffaa00, 10, 50)
-        flash.position.copy(position)
-        this.scene.add(flash)
-        
-        setTimeout(() => {
-          this.scene.remove(flash)
-        }, 200)
-      }
-      
-      // Create falling debris for drone
-      this.createDroneDebris(position)
-      return
-    }
-    
-    // Fallback to old method
-    // Create explosion effect in air (for drones)
-    const explosionGeometry = new THREE.SphereGeometry(3, 16, 8)
-    const explosionMaterial = new THREE.MeshBasicMaterial({
-      color: 0xff6600,
-      opacity: 0.8,
-      transparent: true
-    })
-    const explosion = new THREE.Mesh(explosionGeometry, explosionMaterial)
-    explosion.position.copy(position)
-    this.scene.add(explosion)
-    
-    // Flash effect
-    const flash = new THREE.PointLight(0xffaa00, 10, 50)
-    flash.position.copy(position)
-    this.scene.add(flash)
-    
-    // Animate explosion
-    const startTime = Date.now()
-    const animate = () => {
-      const elapsed = Date.now() - startTime
-      const progress = elapsed / 800
-      
-      if (progress >= 1) {
-        this.scene.remove(explosion)
-        this.scene.remove(flash)
-        explosion.geometry.dispose()
-        explosionMaterial.dispose()
-        return
-      }
-      
-      // Expand and fade
-      const scale = 1 + progress * 3
-      explosion.scale.set(scale, scale, scale)
-      explosionMaterial.opacity = 0.8 * (1 - progress)
-      flash.intensity = 10 * (1 - progress)
-      
-      requestAnimationFrame(animate)
-    }
-    animate()
-    
-    // Create falling debris for drone
-    const debrisCount = 5
-    for (let i = 0; i < debrisCount; i++) {
-      const debrisGeometry = new THREE.BoxGeometry(0.3, 0.3, 0.3)
-      const debrisMaterial = new THREE.MeshBasicMaterial({
-        color: 0x333333
-      })
-      const debris = new THREE.Mesh(debrisGeometry, debrisMaterial)
-      debris.position.copy(position)
-      debris.position.x += (Math.random() - 0.5) * 2
-      debris.position.z += (Math.random() - 0.5) * 2
-      
-      this.scene.add(debris)
-      
-      // Animate falling debris
-      const fallSpeed = 5 + Math.random() * 5
-      const rotSpeed = new THREE.Vector3(
-        (Math.random() - 0.5) * 10,
-        (Math.random() - 0.5) * 10,
-        (Math.random() - 0.5) * 10
-      )
-      
-      const animateDebris = () => {
-        debris.position.y -= fallSpeed * 0.016
-        debris.rotation.x += rotSpeed.x * 0.016
-        debris.rotation.y += rotSpeed.y * 0.016
-        debris.rotation.z += rotSpeed.z * 0.016
-        
-        if (debris.position.y < 0) {
-          this.scene.remove(debris)
-          debris.geometry.dispose()
-          debrisMaterial.dispose()
-        } else {
-          requestAnimationFrame(animateDebris)
-        }
-      }
-      animateDebris()
-    }
-  }
+  // Air explosion method removed - now using ExplosionManager
   
   private createDroneDebris(position: THREE.Vector3): void {
     // Use debris system if available

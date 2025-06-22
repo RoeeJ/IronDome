@@ -1,6 +1,8 @@
 import * as THREE from 'three'
 import { OBJLoader } from 'three/examples/jsm/loaders/OBJLoader.js'
 import { debug } from '../utils/DebugLogger'
+import { GeometryFactory } from '../utils/GeometryFactory'
+import { MaterialCache } from '../utils/MaterialCache'
 
 export interface RadarStation {
   position: THREE.Vector3
@@ -24,7 +26,7 @@ export class StaticRadarNetwork {
     
     
     // Material for coverage visualization
-    this.coverageMaterial = new THREE.MeshBasicMaterial({
+    this.coverageMaterial = MaterialCache.getInstance().getMeshBasicMaterial({
       color: 0x00ff00,
       opacity: 0.1,
       transparent: true,
@@ -80,7 +82,7 @@ export class StaticRadarNetwork {
 
   private createCoverageDome(radar: RadarStation): void {
     // Create static coverage dome
-    const domeGeometry = new THREE.SphereGeometry(
+    const domeGeometry = GeometryFactory.getInstance().getSphere(
       this.detectionRadius,
       16,  // Reduced from 32
       8,   // Reduced from 16
@@ -96,7 +98,7 @@ export class StaticRadarNetwork {
     this.coverageMeshes.push(domeMesh)
     
     // Add wireframe overlay
-    const wireframeMaterial = new THREE.MeshBasicMaterial({
+    const wireframeMaterial = MaterialCache.getInstance().getMeshBasicMaterial({
       color: 0x00ff00,
       opacity: 0.2,
       transparent: true,
@@ -109,13 +111,13 @@ export class StaticRadarNetwork {
     this.coverageMeshes.push(wireframeMesh)
     
     // Add range ring
-    const ringGeometry = new THREE.RingGeometry(
+    const ringGeometry = GeometryFactory.getInstance().getRing(
       this.detectionRadius - 1,
       this.detectionRadius,
       64
     )
     
-    const ringMaterial = new THREE.MeshBasicMaterial({
+    const ringMaterial = MaterialCache.getInstance().getMeshBasicMaterial({
       color: 0x00ff00,
       opacity: 0.3,
       transparent: true,
@@ -132,8 +134,8 @@ export class StaticRadarNetwork {
 
   private createProceduralRadar(radar: RadarStation, index: number): void {
     // Tower base - positioned to sit on ground
-    const baseGeometry = new THREE.CylinderGeometry(3, 4, 12)
-    const baseMaterial = new THREE.MeshStandardMaterial({
+    const baseGeometry = GeometryFactory.getInstance().getCylinder(3, 4, 12)
+    const baseMaterial = MaterialCache.getInstance().getMeshStandardMaterial({
       color: 0x2a2a2a,
       roughness: 0.8,
       metalness: 0.3,
@@ -148,8 +150,8 @@ export class StaticRadarNetwork {
     radar.group.add(base)
     
     // Radar dish (half sphere facing forward)
-    const dishGeometry = new THREE.SphereGeometry(6, 16, 8, 0, Math.PI)
-    const dishMaterial = new THREE.MeshStandardMaterial({
+    const dishGeometry = GeometryFactory.getInstance().getSphere(6, 16, 8, 0, Math.PI)
+    const dishMaterial = MaterialCache.getInstance().getMeshStandardMaterial({
       color: 0x888888,
       roughness: 0.4,
       metalness: 0.7,
@@ -165,8 +167,8 @@ export class StaticRadarNetwork {
     radar.group.add(dish)
     
     // Add a bright beacon light on top for visibility
-    const beaconGeometry = new THREE.SphereGeometry(1, 16, 8)
-    const beaconMaterial = new THREE.MeshBasicMaterial({
+    const beaconGeometry = GeometryFactory.getInstance().getSphere(1, 16, 8)
+    const beaconMaterial = MaterialCache.getInstance().getMeshBasicMaterial({
       color: 0xff0000,
       emissive: 0xff0000,
       emissiveIntensity: 1
@@ -183,8 +185,8 @@ export class StaticRadarNetwork {
     
     
     // Add a tall antenna for extra visibility
-    const antennaGeometry = new THREE.CylinderGeometry(0.2, 0.3, 20)
-    const antennaMaterial = new THREE.MeshStandardMaterial({
+    const antennaGeometry = GeometryFactory.getInstance().getCylinder(0.2, 0.3, 20)
+    const antennaMaterial = MaterialCache.getInstance().getMeshStandardMaterial({
       color: 0xaaaaaa,
       metalness: 0.9,
       roughness: 0.2
@@ -233,7 +235,7 @@ export class StaticRadarNetwork {
         // Apply materials
         object.traverse((child) => {
           if (child instanceof THREE.Mesh) {
-            child.material = new THREE.MeshStandardMaterial({
+            child.material = MaterialCache.getInstance().getMeshStandardMaterial({
               color: 0x666666,
               roughness: 0.6,
               metalness: 0.4,

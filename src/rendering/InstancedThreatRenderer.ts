@@ -1,5 +1,7 @@
 import * as THREE from 'three'
 import { Threat, ThreatType, THREAT_CONFIGS } from '../entities/Threat'
+import { GeometryFactory } from '../utils/GeometryFactory'
+import { MaterialCache } from '../utils/MaterialCache'
 
 interface ThreatMeshes {
   rocket: THREE.InstancedMesh
@@ -28,19 +30,19 @@ export class InstancedThreatRenderer {
     this.scene = scene
     this.maxThreatsPerType = maxThreatsPerType
     
-    // Create geometries for each threat type
-    const rocketGeometry = new THREE.ConeGeometry(0.3, 3, 6)
+    // Get geometries from factory for each threat type
+    const rocketGeometry = GeometryFactory.getInstance().getCone(0.3, 3, 6).clone()
     rocketGeometry.rotateX(Math.PI / 2)
     
-    const mortarGeometry = new THREE.SphereGeometry(0.4, 8, 6)
+    const mortarGeometry = GeometryFactory.getInstance().getSphere(0.4, 8, 6)
     
-    const droneGeometry = new THREE.BoxGeometry(1.5, 0.3, 1.5)
+    const droneGeometry = GeometryFactory.getInstance().getBox(1.5, 0.3, 1.5)
     
-    const ballisticGeometry = new THREE.ConeGeometry(0.5, 4, 8)
+    const ballisticGeometry = GeometryFactory.getInstance().getCone(0.5, 4, 8).clone()
     ballisticGeometry.rotateX(Math.PI / 2)
     
-    // Create materials for each type
-    const rocketMaterial = new THREE.MeshStandardMaterial({
+    // Get materials from cache for each type
+    const rocketMaterial = MaterialCache.getInstance().getMeshStandardMaterial({
       color: 0xff0000,
       emissive: 0xff0000,
       emissiveIntensity: 0.2,
@@ -48,19 +50,19 @@ export class InstancedThreatRenderer {
       metalness: 0.6
     })
     
-    const mortarMaterial = new THREE.MeshStandardMaterial({
+    const mortarMaterial = MaterialCache.getInstance().getMeshStandardMaterial({
       color: 0x444444,
       roughness: 0.8,
       metalness: 0.2
     })
     
-    const droneMaterial = new THREE.MeshStandardMaterial({
+    const droneMaterial = MaterialCache.getInstance().getMeshStandardMaterial({
       color: 0x222222,
       roughness: 0.9,
       metalness: 0.1
     })
     
-    const ballisticMaterial = new THREE.MeshStandardMaterial({
+    const ballisticMaterial = MaterialCache.getInstance().getMeshStandardMaterial({
       color: 0xffaa00,
       emissive: 0xffaa00,
       emissiveIntensity: 0.3,
@@ -226,10 +228,9 @@ export class InstancedThreatRenderer {
   
   dispose(): void {
     Object.values(this.threatMeshes).forEach(mesh => {
+      // Dispose cloned geometries (rocket and ballistic are cloned)
       mesh.geometry.dispose()
-      if (mesh.material instanceof THREE.Material) {
-        mesh.material.dispose()
-      }
+      // Don't dispose shared materials from MaterialCache
       this.scene.remove(mesh)
     })
   }

@@ -1,5 +1,7 @@
 import * as THREE from 'three'
 import { Projectile } from '../entities/Projectile'
+import { GeometryFactory } from '../utils/GeometryFactory'
+import { MaterialCache } from '../utils/MaterialCache'
 
 export class InstancedProjectileRenderer {
   private scene: THREE.Scene
@@ -19,11 +21,13 @@ export class InstancedProjectileRenderer {
     this.scene = scene
     this.maxProjectiles = maxProjectiles
     
-    // Create interceptor geometry (cone shape)
-    const interceptorGeometry = new THREE.ConeGeometry(0.3, 2, 8)
-    interceptorGeometry.rotateX(Math.PI / 2) // Point forward
+    // Get interceptor geometry from factory (cone shape)
+    const interceptorGeometry = GeometryFactory.getInstance().getCone(0.3, 2, 8)
+    // Clone and rotate to avoid modifying the shared geometry
+    const rotatedGeometry = interceptorGeometry.clone()
+    rotatedGeometry.rotateX(Math.PI / 2) // Point forward
     
-    const interceptorMaterial = new THREE.MeshStandardMaterial({
+    const interceptorMaterial = MaterialCache.getInstance().getMeshStandardMaterial({
       color: 0x00ffff,
       emissive: 0x00ffff,
       emissiveIntensity: 0.3,
@@ -33,7 +37,7 @@ export class InstancedProjectileRenderer {
     
     // Create instanced mesh
     this.interceptorMesh = new THREE.InstancedMesh(
-      interceptorGeometry,
+      rotatedGeometry,
       interceptorMaterial,
       maxProjectiles
     )
@@ -134,10 +138,9 @@ export class InstancedProjectileRenderer {
   }
   
   dispose(): void {
+    // Dispose the cloned geometry (it's not shared)
     this.interceptorMesh.geometry.dispose()
-    if (this.interceptorMesh.material instanceof THREE.Material) {
-      this.interceptorMesh.material.dispose()
-    }
+    // Don't dispose shared material from MaterialCache
     this.scene.remove(this.interceptorMesh)
   }
 }

@@ -2,11 +2,12 @@ import * as THREE from "three";
 import * as CANNON from "cannon-es";
 import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
 import { ProximityFuse } from "../systems/ProximityFuse";
-import { ExhaustTrailSystem } from "../systems/ExhaustTrailSystem";
 import { ModelCache } from "../utils/ModelCache";
 import { debug } from "../utils/DebugLogger";
 import { ThrustVectorControl } from "../systems/ThrustVectorControl";
 import { UnifiedTrailSystem, TrailType } from "../systems/UnifiedTrailSystem";
+import { GeometryFactory } from "../utils/GeometryFactory";
+import { MaterialCache } from "../utils/MaterialCache";
 
 export interface ProjectileOptions {
   position: THREE.Vector3;
@@ -38,7 +39,7 @@ export class Projectile {
   target?: THREE.Object3D;
   proximityFuse?: ProximityFuse;
   detonationCallback?: (position: THREE.Vector3, quality: number) => void;
-  exhaustTrail?: ExhaustTrailSystem;
+  exhaustTrailId?: string;
   thrustControl?: ThrustVectorControl;
   private scene: THREE.Scene;
   private failureMode: string;
@@ -110,11 +111,9 @@ export class Projectile {
     // Create mesh - use model for interceptor, simple geometry for threats
     if (isInterceptor) {
       // Create temporary cone while model loads
-      const geometry = new THREE.ConeGeometry(radius * 0.8, radius * 5, 6); // Reduced from 8 segments
-      const material = new THREE.MeshStandardMaterial({
+      const geometry = GeometryFactory.getInstance().getCone(radius * 0.8, radius * 5, 6); // Reduced from 8 segments
+      const material = MaterialCache.getInstance().getMeshStandardMaterial({
         color,
-        emissive: color,
-        emissiveIntensity: 0.2,
         roughness: 0.3,
         metalness: 0.8,
       });
@@ -128,11 +127,9 @@ export class Projectile {
       }
     } else {
       // Threat missile - simple sphere
-      const geometry = new THREE.SphereGeometry(radius, 12, 6); // Reduced segments
-      const material = new THREE.MeshStandardMaterial({
+      const geometry = GeometryFactory.getInstance().getSphere(radius, 12, 6); // Reduced segments
+      const material = MaterialCache.getInstance().getMeshStandardMaterial({
         color,
-        emissive: color,
-        emissiveIntensity: 0.2,
       });
       this.mesh = new THREE.Mesh(geometry, material);
     }
@@ -175,7 +172,7 @@ export class Projectile {
     } catch (e) {
       // Fallback to legacy trail
       this.trailGeometry = new THREE.BufferGeometry();
-      const trailMaterial = new THREE.LineBasicMaterial({
+      const trailMaterial = MaterialCache.getInstance().getLineMaterial({
         color: color,
         opacity: 0.6,
         transparent: true,
@@ -200,11 +197,22 @@ export class Projectile {
       // })
     }
 
-    // Initialize exhaust trail system
+    // Initialize exhaust trail system using UnifiedTrailSystem
     if (useExhaustTrail) {
-      this.exhaustTrail = isInterceptor
-        ? ExhaustTrailSystem.createInterceptorTrail(scene)
-        : ExhaustTrailSystem.createMissileTrail(scene);
+      const exhaustTrailId = `exhaust_${this.id}`;
+      const unifiedTrail = UnifiedTrailSystem.getInstance(scene);
+      
+      unifiedTrail.createTrail(exhaustTrailId, {
+        type: TrailType.LINE,
+        color: isInterceptor ? 0xffaa00 : 0xff6600,
+        particleCount: 10,
+        particleSize: 0.8,
+        particleLifetime: 1.0,
+        emissive: true,
+        emissiveIntensity: 0.5
+      });
+      
+      this.exhaustTrailId = exhaustTrailId;
     }
   }
 
@@ -235,8 +243,9 @@ export class Projectile {
       }
 
       // Stop exhaust trail
-      if (this.exhaustTrail) {
-        this.exhaustTrail.stop();
+      if (this.exhaustTrailId) {
+        const unifiedTrail = UnifiedTrailSystem.getInstance(this.scene);
+        unifiedTrail.removeTrail(this.exhaustTrailId);
       }
 
       this.isActive = false;
@@ -280,8 +289,9 @@ export class Projectile {
           }
 
           // Stop exhaust trail
-          if (this.exhaustTrail) {
-            this.exhaustTrail.stop();
+          if (this.exhaustTrailId) {
+            const unifiedTrail = UnifiedTrailSystem.getInstance(this.scene);
+            unifiedTrail.removeTrail(this.exhaustTrailId);
           }
 
           this.isActive = false;
@@ -329,8 +339,7 @@ export class Projectile {
     }
 
     // Update exhaust trail
-    if (this.exhaustTrail && this.body.velocity.length() > 0.1) {
-      const currentTime = Date.now();
+    if (this.exhaustTrailId && this.body.velocity.length() > 0.1) {
       const velocity = this.getVelocity();
 
       // Emit from rear of projectile
@@ -338,10 +347,9 @@ export class Projectile {
       const velocityNormalized = velocity.clone().normalize();
       emitPosition.sub(velocityNormalized.multiplyScalar(this.radius));
 
-      // Pass camera for LOD optimization (will be set in main loop)
-      const camera = (this.scene as any).__camera;
-      this.exhaustTrail.emit(emitPosition, velocity, currentTime, camera);
-      this.exhaustTrail.update(deltaTime);
+      // Update particle trail position
+      const unifiedTrail = UnifiedTrailSystem.getInstance(this.scene);
+      unifiedTrail.updateTrail(this.exhaustTrailId, emitPosition, velocity);
     }
 
     // Mid-flight guidance for interceptors (if not failed)
@@ -399,21 +407,18 @@ export class Projectile {
     } else if (this.trail && this.trailGeometry) {
       // Remove legacy trail - only if objects exist
       scene.remove(this.trail);
-      this.trailGeometry.dispose();
-      (this.trail.material as THREE.Material).dispose();
+      this.trailGeometry.dispose(); // Trail geometry is unique per projectile
+      // Don't dispose trail material - it's shared from MaterialCache
     }
 
-    // Dispose geometry and materials based on mesh type
-    if (this.mesh instanceof THREE.Mesh) {
-      this.mesh.geometry.dispose();
-      (this.mesh.material as THREE.Material).dispose();
-    } else if (this.mesh instanceof THREE.Group) {
-      // For GLTF models, we're using shared geometry so only dispose materials
+    // Don't dispose geometry and materials when using shared caches
+    // They are managed by GeometryFactory and MaterialCache
+    if (this.mesh instanceof THREE.Group) {
+      // For GLTF models, only dispose if materials were cloned
       this.mesh.traverse((child) => {
         if (child instanceof THREE.Mesh) {
-          // Don't dispose geometry - it's shared!
-          // Only dispose materials which were cloned
-          if (child.material) {
+          // Model materials might have been cloned, check if they need disposal
+          if (child.material && child.userData.materialCloned) {
             if (Array.isArray(child.material)) {
               child.material.forEach((mat) => mat.dispose());
             } else {
@@ -423,10 +428,12 @@ export class Projectile {
         }
       });
     }
+    // Note: Shared geometries and materials from caches should NOT be disposed here
 
     // Clean up exhaust trail
-    if (this.exhaustTrail) {
-      this.exhaustTrail.dispose();
+    if (this.exhaustTrailId) {
+      const unifiedTrail = UnifiedTrailSystem.getInstance(scene);
+      unifiedTrail.removeTrail(this.exhaustTrailId);
     }
   }
 

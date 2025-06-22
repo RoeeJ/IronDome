@@ -1,4 +1,5 @@
 import * as THREE from 'three'
+import { GeometryFactory } from '../utils/GeometryFactory'
 
 export interface LODLevel {
   distance: number
@@ -76,37 +77,39 @@ export class LODSystem {
    * Create simplified geometries for threats
    */
   static createThreatLODs(): { [key: string]: LODConfig } {
+    const factory = GeometryFactory.getInstance()
+    
     // High detail geometries (LOD 0)
-    const rocketGeometryHigh = new THREE.ConeGeometry(0.3, 3, 6)
+    const rocketGeometryHigh = factory.getCone(0.3, 3, 6).clone()
     rocketGeometryHigh.rotateX(Math.PI / 2)
     
-    const mortarGeometryHigh = new THREE.SphereGeometry(0.4, 8, 6)
+    const mortarGeometryHigh = factory.getSphere(0.4, 8, 6)
     
-    const droneGeometryHigh = new THREE.BoxGeometry(1.5, 0.3, 1.5)
+    const droneGeometryHigh = factory.getBox(1.5, 0.3, 1.5)
     
-    const ballisticGeometryHigh = new THREE.ConeGeometry(0.5, 4, 8)
+    const ballisticGeometryHigh = factory.getCone(0.5, 4, 8).clone()
     ballisticGeometryHigh.rotateX(Math.PI / 2)
     
     // Medium detail geometries (LOD 1)
-    const rocketGeometryMed = new THREE.ConeGeometry(0.3, 3, 4)
+    const rocketGeometryMed = factory.getCone(0.3, 3, 4).clone()
     rocketGeometryMed.rotateX(Math.PI / 2)
     
-    const mortarGeometryMed = new THREE.SphereGeometry(0.4, 6, 4)
+    const mortarGeometryMed = factory.getSphere(0.4, 6, 4)
     
-    const droneGeometryMed = new THREE.BoxGeometry(1.5, 0.3, 1.5, 1, 1, 1)
+    const droneGeometryMed = factory.getBox(1.5, 0.3, 1.5, 1, 1, 1)
     
-    const ballisticGeometryMed = new THREE.ConeGeometry(0.5, 4, 5)
+    const ballisticGeometryMed = factory.getCone(0.5, 4, 5).clone()
     ballisticGeometryMed.rotateX(Math.PI / 2)
     
     // Low detail geometries (LOD 2)
-    const rocketGeometryLow = new THREE.ConeGeometry(0.3, 3, 3)
+    const rocketGeometryLow = factory.getCone(0.3, 3, 3).clone()
     rocketGeometryLow.rotateX(Math.PI / 2)
     
-    const mortarGeometryLow = new THREE.SphereGeometry(0.4, 4, 3)
+    const mortarGeometryLow = factory.getSphere(0.4, 4, 3)
     
-    const droneGeometryLow = new THREE.BoxGeometry(1.5, 0.3, 1.5, 1, 1, 1)
+    const droneGeometryLow = factory.getBox(1.5, 0.3, 1.5, 1, 1, 1)
     
-    const ballisticGeometryLow = new THREE.ConeGeometry(0.5, 4, 3)
+    const ballisticGeometryLow = factory.getCone(0.5, 4, 3).clone()
     ballisticGeometryLow.rotateX(Math.PI / 2)
     
     return {
@@ -147,12 +150,13 @@ export class LODSystem {
   static createBatteryLODs(): LODConfig {
     // For batteries, we'll create progressively simpler versions
     // Note: This is a placeholder - actual implementation would need the real battery geometries
+    const factory = GeometryFactory.getInstance()
     
     return {
       levels: [
-        { distance: 0, geometry: new THREE.BoxGeometry(10, 5, 10) }, // Full detail
-        { distance: 200, geometry: new THREE.BoxGeometry(10, 5, 10, 2, 2, 2) }, // Medium
-        { distance: 400, geometry: new THREE.BoxGeometry(10, 5, 10, 1, 1, 1) } // Low
+        { distance: 0, geometry: factory.getBox(10, 5, 10) }, // Full detail
+        { distance: 200, geometry: factory.getBox(10, 5, 10, 2, 2, 2) }, // Medium
+        { distance: 400, geometry: factory.getBox(10, 5, 10, 1, 1, 1) } // Low
       ],
       updateInterval: 150 // Batteries update less frequently
     }

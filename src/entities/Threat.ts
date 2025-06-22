@@ -399,8 +399,8 @@ export class Threat extends Projectile {
   private createDroneMesh(scene: THREE.Scene, config: ThreatConfig): void {
     // Replace default sphere with drone shape
     scene.remove(this.mesh)
-    this.mesh.geometry.dispose()
-    ;(this.mesh.material as THREE.Material).dispose()
+    // Don't dispose geometry from GeometryFactory - it's shared
+    // Don't dispose material from MaterialCache - it's shared
     
     // Create drone body (flattened box)
     const bodyGeometry = GeometryFactory.getInstance().getBox(config.radius * 2, config.radius * 0.5, config.radius * 1.5)
@@ -436,8 +436,8 @@ export class Threat extends Projectile {
   private createMortarMesh(scene: THREE.Scene, config: ThreatConfig): void {
     // Replace default sphere with mortar shell shape
     scene.remove(this.mesh)
-    this.mesh.geometry.dispose()
-    ;(this.mesh.material as THREE.Material).dispose()
+    // Don't dispose geometry from GeometryFactory - it's shared
+    // Don't dispose material from MaterialCache - it's shared
     
     // Create elongated cylinder for mortar
     const geometry = GeometryFactory.getInstance().getCylinder(
@@ -459,8 +459,8 @@ export class Threat extends Projectile {
   private createCruiseMissileMesh(scene: THREE.Scene, config: ThreatConfig): void {
     // Replace default sphere with cruise missile shape
     scene.remove(this.mesh)
-    this.mesh.geometry.dispose()
-    ;(this.mesh.material as THREE.Material).dispose()
+    // Don't dispose geometry from GeometryFactory - it's shared
+    // Don't dispose material from MaterialCache - it's shared
     
     // Create missile body
     const bodyGroup = new THREE.Group()

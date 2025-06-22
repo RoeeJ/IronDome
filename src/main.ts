@@ -31,8 +31,10 @@ import { LODInstancedThreatRenderer } from './rendering/LODInstancedThreatRender
 import { StatsDisplay } from './ui/StatsDisplay'
 import { ExtendedStatsDisplay } from './ui/ExtendedStatsDisplay'
 import { BlastPhysics } from './systems/BlastPhysics'
-import { ExplosionManager } from './systems/ExplosionManager'
+import { ExplosionManager, ExplosionType } from './systems/ExplosionManager'
 import { UnifiedTrailSystem } from './systems/UnifiedTrailSystem'
+import { GeometryFactory } from './utils/GeometryFactory'
+import { MaterialCache } from './utils/MaterialCache'
 
 // Initialize device capabilities
 const deviceCaps = DeviceCapabilities.getInstance()
@@ -161,8 +163,8 @@ directionalLight.shadow.mapSize.height = shadowMapSize
 scene.add(directionalLight)
 
 // Ground
-const groundGeometry = new THREE.PlaneGeometry(400, 400)
-const groundMaterial = new THREE.MeshStandardMaterial({ 
+const groundGeometry = GeometryFactory.getInstance().getPlane(400, 400)
+const groundMaterial = MaterialCache.getInstance().getMeshStandardMaterial({ 
   color: 0x3a5f3a,
   roughness: 0.8,
   metalness: 0.2
@@ -960,7 +962,34 @@ const sandboxControls = {
   enableFog: false,
   
   // Defense settings
-  autoIntercept: true
+  autoIntercept: true,
+  
+  // Explosion test
+  testExplosions: () => {
+    const explosionManager = ExplosionManager.getInstance(scene)
+    const count = 25 // Test with 25 simultaneous explosions
+    
+    for (let i = 0; i < count; i++) {
+      const angle = (i / count) * Math.PI * 2
+      const radius = 50 + Math.random() * 50
+      const position = new THREE.Vector3(
+        Math.cos(angle) * radius,
+        10 + Math.random() * 30,
+        Math.sin(angle) * radius
+      )
+      
+      // Alternate between air and ground explosions
+      const isGround = i % 2 === 0
+      explosionManager.createExplosion({
+        type: isGround ? ExplosionType.GROUND_IMPACT : ExplosionType.AIR_INTERCEPTION,
+        position,
+        radius: 10 + Math.random() * 5
+      })
+    }
+    
+    const stats = explosionManager.getStats()
+    showNotification(`Created ${count} explosions. Lights: ${stats.activeLights}/${stats.activeLights + stats.availableLights}`)
+  }
 }
 
 // Threat controls
@@ -1009,6 +1038,10 @@ defenseGroup.add(sandboxControls, 'autoIntercept').name('Auto Intercept').onChan
 // Algorithms and coordination are now always enabled by default
 // No need for controls as they are production-ready
 
+// Performance testing controls
+const testingGroup = sandboxFolder.addFolder('Performance Testing')
+testingGroup.add(sandboxControls, 'testExplosions').name('💥 Test 25 Explosions')
+
 // Apply initial settings to all batteries
 domePlacementSystem.getAllBatteries().forEach(battery => {
   battery.setLaunchOffset(new THREE.Vector3(-2, 14.5, -0.1))
@@ -1037,7 +1070,7 @@ function showTrajectoryPrediction(position: THREE.Vector3, velocity: THREE.Vecto
   const points = TrajectoryCalculator.predictTrajectory(position, velocity)
   
   const geometry = new THREE.BufferGeometry().setFromPoints(points)
-  const material = new THREE.LineBasicMaterial({
+  const material = MaterialCache.getInstance().getLineMaterial({
     color: 0x0038b8,
     opacity: 0.3,
     transparent: true
@@ -1046,11 +1079,11 @@ function showTrajectoryPrediction(position: THREE.Vector3, velocity: THREE.Vecto
   const line = new THREE.Line(geometry, material)
   scene.add(line)
   
-  // Remove after 5 seconds
+  // Remove after 5 seconds - don't dispose shared materials
   setTimeout(() => {
     scene.remove(line)
-    geometry.dispose()
-    material.dispose()
+    geometry.dispose() // Geometry is unique per trajectory, safe to dispose
+    // Don't dispose material - it's shared from MaterialCache
   }, 5000)
 }
 
