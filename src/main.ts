@@ -572,8 +572,8 @@ renderer.domElement.addEventListener('click', (event) => {
                     console.log(`Manual intercept blast: ${damage.damageType} damage, ${(damage.killProbability * 100).toFixed(0)}% kill probability`)
                     
                     if (wasMarked && damage.hit) {
-                      // Destroy the threat
-                      threat.destroy(scene, world)
+                      // Use threatManager to properly destroy and count the threat
+                      threatManager.markThreatIntercepted(threat)
                       
                       // Remove threat from active threats array
                       const threatIndex = threats.indexOf(threat)
