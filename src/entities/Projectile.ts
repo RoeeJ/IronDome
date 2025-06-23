@@ -1,14 +1,14 @@
-import * as THREE from "three";
-import * as CANNON from "cannon-es";
-import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
-import { ProximityFuse } from "../systems/ProximityFuse";
-import { ModelCache } from "../utils/ModelCache";
-import { debug } from "../utils/DebugLogger";
-import { ThrustVectorControl } from "../systems/ThrustVectorControl";
-import { UnifiedTrailSystem, TrailType } from "../systems/UnifiedTrailSystem";
-import { GeometryFactory } from "../utils/GeometryFactory";
-import { MaterialCache } from "../utils/MaterialCache";
-import { MissileModelFactory } from "../utils/MissileModelFactory";
+import * as THREE from 'three';
+import * as CANNON from 'cannon-es';
+import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
+import { ProximityFuse } from '../systems/ProximityFuse';
+import { ModelCache } from '../utils/ModelCache';
+import { debug } from '../utils/DebugLogger';
+import { ThrustVectorControl } from '../systems/ThrustVectorControl';
+import { UnifiedTrailSystem, TrailType } from '../systems/UnifiedTrailSystem';
+import { GeometryFactory } from '../utils/GeometryFactory';
+import { MaterialCache } from '../utils/MaterialCache';
+import { MissileModelFactory } from '../utils/MissileModelFactory';
 
 export interface ProjectileOptions {
   position: THREE.Vector3;
@@ -20,7 +20,7 @@ export interface ProjectileOptions {
   isInterceptor?: boolean;
   target?: THREE.Object3D;
   useExhaustTrail?: boolean;
-  failureMode?: "none" | "motor" | "guidance" | "premature";
+  failureMode?: 'none' | 'motor' | 'guidance' | 'premature';
   failureTime?: number;
   maxLifetime?: number; // Maximum flight time before self-destruct (seconds)
   batteryPosition?: THREE.Vector3; // Battery position for self-destruct check
@@ -75,11 +75,7 @@ export class Projectile {
     },
   };
 
-  constructor(
-    scene: THREE.Scene,
-    world: CANNON.World,
-    options: ProjectileOptions
-  ) {
+  constructor(scene: THREE.Scene, world: CANNON.World, options: ProjectileOptions) {
     const {
       position,
       velocity,
@@ -90,15 +86,13 @@ export class Projectile {
       isInterceptor = false,
       target,
       useExhaustTrail = true,
-      failureMode = "none",
+      failureMode = 'none',
       failureTime = 0,
       maxLifetime = isInterceptor ? 10 : 30, // 10s for interceptors, 30s for threats
       batteryPosition,
     } = options;
 
-    this.id = `projectile_${Date.now()}_${Math.random()
-      .toString(36)
-      .substr(2, 9)}`;
+    this.id = `projectile_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
     this.scene = scene;
     this.isInterceptor = isInterceptor;
     this.target = target;
@@ -114,10 +108,10 @@ export class Projectile {
     if (isInterceptor) {
       // Create interceptor model
       this.mesh = modelFactory.createInterceptorModel(color);
-      
+
       // Load optimized Tamir model using shared cache (if enabled)
-      const modelQuality = (window as any).__interceptorModelQuality || "ultra";
-      if (modelQuality !== "none") {
+      const modelQuality = (window as any).__interceptorModelQuality || 'ultra';
+      if (modelQuality !== 'none') {
         this.loadTamirModelOptimized(scene, radius, modelQuality);
       }
     } else {
@@ -179,10 +173,7 @@ export class Projectile {
 
     // Initialize proximity fuse for interceptors with realistic parameters
     if (isInterceptor && target) {
-      this.proximityFuse = new ProximityFuse(
-        position,
-        Projectile.PROXIMITY_FUSE_SETTINGS.initial
-      );
+      this.proximityFuse = new ProximityFuse(position, Projectile.PROXIMITY_FUSE_SETTINGS.initial);
 
       // Disable thrust vector control for now - it's causing issues
       // this.thrustControl = new ThrustVectorControl({
@@ -197,7 +188,7 @@ export class Projectile {
     if (useExhaustTrail) {
       const exhaustTrailId = `exhaust_${this.id}`;
       const unifiedTrail = UnifiedTrailSystem.getInstance(scene);
-      
+
       unifiedTrail.createTrail(exhaustTrailId, {
         type: TrailType.LINE,
         color: isInterceptor ? 0xffaa00 : 0xff6600,
@@ -205,9 +196,9 @@ export class Projectile {
         particleSize: 0.8,
         particleLifetime: 1.0,
         emissive: true,
-        emissiveIntensity: 0.5
+        emissiveIntensity: 0.5,
       });
-      
+
       this.exhaustTrailId = exhaustTrailId;
     }
   }
@@ -216,7 +207,7 @@ export class Projectile {
     if (!this.isActive) return;
 
     // Check for failure conditions
-    if (!this.hasFailed && this.failureMode !== "none") {
+    if (!this.hasFailed && this.failureMode !== 'none') {
       const elapsed = (Date.now() - this.launchTime) / 1000;
       if (elapsed >= this.failureTime) {
         this.handleFailure();
@@ -227,9 +218,9 @@ export class Projectile {
     const flightTime = (Date.now() - this.launchTime) / 1000;
     if (flightTime >= this.maxLifetime) {
       debug.category(
-        "Projectile",
+        'Projectile',
         `${
-          this.isInterceptor ? "Interceptor" : "Threat"
+          this.isInterceptor ? 'Interceptor' : 'Threat'
         } self-destructing after ${flightTime.toFixed(1)}s`
       );
 
@@ -273,7 +264,7 @@ export class Projectile {
         if (distanceToBattery < dangerRadius && position.y < 50) {
           // Only when low altitude
           debug.category(
-            "Projectile",
+            'Projectile',
             `Interceptor self-destructing to protect battery (${distanceToBattery.toFixed(
               1
             )}m from battery)`
@@ -327,10 +318,7 @@ export class Projectile {
           positions[i * 3 + 1] = pos.y;
           positions[i * 3 + 2] = pos.z;
         });
-        this.trailGeometry.setAttribute(
-          "position",
-          new THREE.BufferAttribute(positions, 3)
-        );
+        this.trailGeometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
       }
     }
 
@@ -349,21 +337,14 @@ export class Projectile {
     }
 
     // Mid-flight guidance for interceptors (if not failed)
-    if (
-      this.isInterceptor &&
-      this.target &&
-      !this.hasFailed &&
-      this.failureMode !== "guidance"
-    ) {
+    if (this.isInterceptor && this.target && !this.hasFailed && this.failureMode !== 'guidance') {
       this.updateGuidance(deltaTime);
     }
 
     // Check proximity fuse for interceptors
     if (this.isInterceptor && this.proximityFuse && this.target) {
       const targetPosition =
-        "getPosition" in this.target
-          ? (this.target as any).getPosition()
-          : this.target.position;
+        'getPosition' in this.target ? (this.target as any).getPosition() : this.target.position;
       const currentTime = Date.now();
 
       const { shouldDetonate, detonationQuality } = this.proximityFuse.update(
@@ -381,10 +362,7 @@ export class Projectile {
 
         // Trigger detonation
         if (this.detonationCallback) {
-          this.detonationCallback(
-            this.mesh.position.clone(),
-            detonationQuality
-          );
+          this.detonationCallback(this.mesh.position.clone(), detonationQuality);
         }
         this.isActive = false;
       }
@@ -411,12 +389,12 @@ export class Projectile {
     // They are managed by GeometryFactory and MaterialCache
     if (this.mesh instanceof THREE.Group) {
       // For GLTF models, only dispose if materials were cloned
-      this.mesh.traverse((child) => {
+      this.mesh.traverse(child => {
         if (child instanceof THREE.Mesh) {
           // Model materials might have been cloned, check if they need disposal
           if (child.material && child.userData.materialCloned) {
             if (Array.isArray(child.material)) {
-              child.material.forEach((mat) => mat.dispose());
+              child.material.forEach(mat => mat.dispose());
             } else {
               child.material.dispose();
             }
@@ -438,18 +416,14 @@ export class Projectile {
   }
 
   getVelocity(): THREE.Vector3 {
-    return new THREE.Vector3(
-      this.body.velocity.x,
-      this.body.velocity.y,
-      this.body.velocity.z
-    );
+    return new THREE.Vector3(this.body.velocity.x, this.body.velocity.y, this.body.velocity.z);
   }
 
   retarget(newTarget: THREE.Object3D): void {
     // Change target for an interceptor mid-flight
     if (!this.isInterceptor || this.hasFailed) return;
 
-    debug.category("Interceptor", "Retargeting to new threat");
+    debug.category('Interceptor', 'Retargeting to new threat');
     this.target = newTarget;
 
     // Reset proximity fuse for new target with current position
@@ -463,10 +437,10 @@ export class Projectile {
 
   private handleFailure(): void {
     this.hasFailed = true;
-    debug.category("Interceptor", `Failure: ${this.failureMode}`);
+    debug.category('Interceptor', `Failure: ${this.failureMode}`);
 
     switch (this.failureMode) {
-      case "motor":
+      case 'motor':
         // Motor failure - stop thrust, let gravity take over
         if (this.exhaustTrail) {
           this.exhaustTrail.stop();
@@ -477,32 +451,28 @@ export class Projectile {
         this.body.velocity.z *= 0.3;
         // Change color to indicate failure
         if (this.mesh instanceof THREE.Mesh) {
-          (this.mesh.material as THREE.MeshStandardMaterial).color.setHex(
-            0x666666
-          );
-          (
-            this.mesh.material as THREE.MeshStandardMaterial
-          ).emissiveIntensity = 0;
+          (this.mesh.material as THREE.MeshStandardMaterial).color.setHex(0x666666);
+          (this.mesh.material as THREE.MeshStandardMaterial).emissiveIntensity = 0;
         } else if (this.mesh instanceof THREE.Group) {
           // For GLTF models, traverse and update materials
-          this.mesh.traverse((child) => {
+          this.mesh.traverse(child => {
             if (child instanceof THREE.Mesh && child.material) {
               // Handle different material types safely
               if (Array.isArray(child.material)) {
-                child.material.forEach((mat) => {
-                  if ("color" in mat && mat.color) {
+                child.material.forEach(mat => {
+                  if ('color' in mat && mat.color) {
                     mat.color.setHex(0x666666);
                   }
-                  if ("emissiveIntensity" in mat) {
+                  if ('emissiveIntensity' in mat) {
                     mat.emissiveIntensity = 0;
                   }
                 });
               } else {
                 const material = child.material;
-                if ("color" in material && material.color) {
+                if ('color' in material && material.color) {
                   material.color.setHex(0x666666);
                 }
-                if ("emissiveIntensity" in material) {
+                if ('emissiveIntensity' in material) {
                   material.emissiveIntensity = 0;
                 }
               }
@@ -511,7 +481,7 @@ export class Projectile {
         }
         break;
 
-      case "guidance":
+      case 'guidance':
         // Guidance failure - veer off course
         const randomVeer = new THREE.Vector3(
           (Math.random() - 0.5) * 50,
@@ -525,7 +495,7 @@ export class Projectile {
         this.proximityFuse = undefined;
         break;
 
-      case "premature":
+      case 'premature':
         // Premature detonation
         if (this.detonationCallback) {
           this.detonationCallback(this.mesh.position.clone(), 0.3); // Low quality detonation
@@ -538,12 +508,12 @@ export class Projectile {
   setTargetPoint(targetPoint: THREE.Vector3): void {
     // Update the target position for improved targeting
     if (!targetPoint) {
-      debug.warning("setTargetPoint called with undefined targetPoint");
+      debug.warning('setTargetPoint called with undefined targetPoint');
       return;
     }
 
     // If target is a Threat object, we shouldn't modify it directly
-    if (this.target && "getPosition" in this.target) {
+    if (this.target && 'getPosition' in this.target) {
       // Target is a Threat, create a separate dummy target for the aim point
       const dummyTarget = new THREE.Object3D();
       dummyTarget.position.copy(targetPoint);
@@ -570,10 +540,7 @@ export class Projectile {
 
     // Don't guide if moving too slowly
     if (currentSpeed < 10) {
-      debug.category(
-        "Guidance",
-        `[SKIP] Speed too low: ${currentSpeed.toFixed(1)} m/s`
-      );
+      debug.category('Guidance', `[SKIP] Speed too low: ${currentSpeed.toFixed(1)} m/s`);
       return;
     }
 
@@ -583,7 +550,7 @@ export class Projectile {
     if (distanceTraveled < minGuidanceDistance) {
       // Just orient the missile during launch phase
       debug.category(
-        "Guidance",
+        'Guidance',
         `[LAUNCH PHASE] Distance traveled: ${distanceTraveled.toFixed(
           1
         )}m < ${minGuidanceDistance}m`
@@ -594,7 +561,7 @@ export class Projectile {
 
     // Calculate intercept point prediction
     const targetPos =
-      "getPosition" in this.target
+      'getPosition' in this.target
         ? (this.target as any).getPosition()
         : this.target.position.clone();
     const myPos = this.mesh.position.clone();
@@ -605,7 +572,7 @@ export class Projectile {
 
     // DEBUG: Log basic guidance info
     debug.category(
-      "Guidance",
+      'Guidance',
       `[UPDATE] Distance to target: ${distance.toFixed(
         1
       )}m, Speed: ${currentSpeed.toFixed(1)} m/s, Flight time: ${(
@@ -622,7 +589,7 @@ export class Projectile {
     const predictedTargetPos = targetPos.clone();
 
     // Predict target future position
-    if ("getVelocity" in this.target) {
+    if ('getVelocity' in this.target) {
       const targetVel = (this.target as any).getVelocity();
       const targetSpeed = targetVel.length();
       // Simple lead calculation
@@ -631,12 +598,10 @@ export class Projectile {
 
       // DEBUG: Log prediction details
       debug.category(
-        "Guidance",
+        'Guidance',
         `[PREDICTION] Target speed: ${targetSpeed.toFixed(
           1
-        )} m/s, Time to impact: ${timeToImpact.toFixed(
-          2
-        )}s, Lead time: ${leadTime.toFixed(2)}s`
+        )} m/s, Time to impact: ${timeToImpact.toFixed(2)}s, Lead time: ${leadTime.toFixed(2)}s`
       );
     }
 
@@ -650,10 +615,8 @@ export class Projectile {
     // Only guide if we're not too close (avoid overshooting)
     if (distance < 3) {
       debug.category(
-        "Guidance",
-        `[CLOSE RANGE] Distance < 5m, letting momentum carry - Distance: ${distance.toFixed(
-          1
-        )}m`
+        'Guidance',
+        `[CLOSE RANGE] Distance < 5m, letting momentum carry - Distance: ${distance.toFixed(1)}m`
       );
       this.orientMissile(currentVelocity);
       return; // Let momentum and proximity fuse handle it
@@ -674,10 +637,8 @@ export class Projectile {
 
     // DEBUG: Log forces
     debug.category(
-      "Guidance",
-      `[FORCES] Correction force: ${forceBeforeLimit.toFixed(
-        1
-      )}N (limited: ${correctionForce
+      'Guidance',
+      `[FORCES] Correction force: ${forceBeforeLimit.toFixed(1)}N (limited: ${correctionForce
         .length()
         .toFixed(1)}N), Max: ${maxForce.toFixed(1)}N`
     );
@@ -701,10 +662,8 @@ export class Projectile {
 
     if (thrustForce > 0 && thrustDirection.length() > 0) {
       debug.category(
-        "Guidance",
-        `[THRUST] Thrust force: ${thrustForce.toFixed(
-          1
-        )}N, Current speed: ${currentSpeed.toFixed(
+        'Guidance',
+        `[THRUST] Thrust force: ${thrustForce.toFixed(1)}N, Current speed: ${currentSpeed.toFixed(
           1
         )} m/s, Target: ${targetSpeed} m/s`
       );
@@ -728,7 +687,7 @@ export class Projectile {
     const direction = velocity.clone().normalize();
 
     // For GLTF models, we need to handle orientation differently
-    if (this.mesh instanceof THREE.Group || this.mesh.type === "Group") {
+    if (this.mesh instanceof THREE.Group || this.mesh.type === 'Group') {
       // Use static debug values for model orientation
       const quaternion = new THREE.Quaternion().setFromUnitVectors(
         Projectile.modelForwardVector,
@@ -745,10 +704,7 @@ export class Projectile {
     } else {
       // For procedural geometry (cone) - cone points up by default in Three.js
       const defaultForward = new THREE.Vector3(0, 1, 0); // Cone points along +Y
-      const quaternion = new THREE.Quaternion().setFromUnitVectors(
-        defaultForward,
-        direction
-      );
+      const quaternion = new THREE.Quaternion().setFromUnitVectors(defaultForward, direction);
       this.mesh.quaternion.copy(quaternion);
     }
 
@@ -763,16 +719,16 @@ export class Projectile {
   private async loadTamirModelOptimized(
     scene: THREE.Scene,
     scale: number,
-    quality: string = "ultra"
+    quality: string = 'ultra'
   ): Promise<void> {
     try {
       const modelCache = ModelCache.getInstance();
       // Choose model quality based on performance needs
       // Ultra simple: ~10% triangles, Simple: ~20% triangles
       const modelPath =
-        quality === "simple"
-          ? "assets/tamir/scene_simple.glb"
-          : "assets/tamir/scene_ultra_simple.glb";
+        quality === 'simple'
+          ? 'assets/tamir/scene_simple.glb'
+          : 'assets/tamir/scene_ultra_simple.glb';
       const model = await modelCache.createInstance(modelPath);
 
       // Store reference to old mesh
@@ -786,7 +742,7 @@ export class Projectile {
       const size = box.getSize(new THREE.Vector3());
       const maxDimension = Math.max(size.x, size.y, size.z);
       debug.asset(
-        "Model dimensions",
+        'Model dimensions',
         `${size.x.toFixed(2)}x${size.y.toFixed(2)}x${size.z.toFixed(2)}`,
         { max: maxDimension }
       );
@@ -796,7 +752,7 @@ export class Projectile {
       const scaleFactor = maxDimension > 0 ? targetSize / maxDimension : 1;
       this.mesh.scale.setScalar(scaleFactor);
       debug.asset(
-        "Scaling model",
+        'Scaling model',
         `${scaleFactor.toFixed(3)}x to target size ${targetSize.toFixed(2)}`
       );
 
@@ -805,18 +761,16 @@ export class Projectile {
 
       // Remove any debug lines and apply materials
       const toRemove: THREE.Object3D[] = [];
-      this.mesh.traverse((child) => {
+      this.mesh.traverse(child => {
         // Remove any Line objects that might be in the model
         if (
           child instanceof THREE.Line ||
           child instanceof THREE.LineSegments ||
-          child.name.toLowerCase().includes("helper") ||
-          child.name.toLowerCase().includes("debug")
+          child.name.toLowerCase().includes('helper') ||
+          child.name.toLowerCase().includes('debug')
         ) {
           toRemove.push(child);
-          debug.warn(
-            `Removing debug object from projectile model: ${child.name} (${child.type})`
-          );
+          debug.warn(`Removing debug object from projectile model: ${child.name} (${child.type})`);
         } else if (child instanceof THREE.Mesh) {
           child.castShadow = true;
           child.receiveShadow = true;
@@ -825,29 +779,27 @@ export class Projectile {
 
           // Simplify material for performance
           if (child.material) {
-            const materials = Array.isArray(child.material)
-              ? child.material
-              : [child.material];
-            materials.forEach((material) => {
+            const materials = Array.isArray(child.material) ? child.material : [child.material];
+            materials.forEach(material => {
               // Only modify properties that exist
-              if ("metalness" in material) {
+              if ('metalness' in material) {
                 material.metalness = 0.7;
               }
-              if ("roughness" in material) {
+              if ('roughness' in material) {
                 material.roughness = 0.3;
               }
               // Only set emissive if the property exists
-              if ("emissive" in material && material.emissive) {
+              if ('emissive' in material && material.emissive) {
                 material.emissive = new THREE.Color(0x0066ff);
               }
-              if ("emissiveIntensity" in material) {
+              if ('emissiveIntensity' in material) {
                 material.emissiveIntensity = 0.2; // Increased for visibility
               }
               // Ensure material is visible
-              if ("opacity" in material) {
+              if ('opacity' in material) {
                 material.opacity = 1.0;
               }
-              if ("visible" in material) {
+              if ('visible' in material) {
                 material.visible = true;
               }
             });
@@ -856,7 +808,7 @@ export class Projectile {
       });
 
       // Remove any debug objects
-      toRemove.forEach((obj) => {
+      toRemove.forEach(obj => {
         if (obj.parent) {
           obj.parent.remove(obj);
         }
@@ -874,11 +826,11 @@ export class Projectile {
       }
 
       debug.asset(
-        "Tamir model loaded",
+        'Tamir model loaded',
         `at position ${this.mesh.position
           .toArray()
-          .map((n) => n.toFixed(2))
-          .join(", ")}`
+          .map(n => n.toFixed(2))
+          .join(', ')}`
       );
 
       // Debug: Add a bright box to show where the model should be (disabled to prevent visual artifacts)
@@ -893,7 +845,7 @@ export class Projectile {
       //   setTimeout(() => scene.remove(debugBox), 5000) // Remove after 5 seconds
       // }
     } catch (error) {
-      debug.error("Failed to load optimized Tamir model:", error);
+      debug.error('Failed to load optimized Tamir model:', error);
       // Keep using the simple cone on error
     }
   }

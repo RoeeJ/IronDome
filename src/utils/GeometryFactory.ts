@@ -1,13 +1,13 @@
-import * as THREE from 'three'
+import * as THREE from 'three';
 
 /**
  * Centralized geometry factory that caches and reuses geometry instances
  * to prevent duplicate geometry creation and reduce memory usage.
- * 
+ *
  * This factory implements a singleton pattern and uses a cache key system
  * based on geometry type and parameters to ensure geometries are only
  * created once and shared across all objects that need them.
- * 
+ *
  * Usage:
  * ```typescript
  * const sphereGeometry = GeometryFactory.getInstance().getSphere(1, 16, 8)
@@ -15,18 +15,18 @@ import * as THREE from 'three'
  * ```
  */
 export class GeometryFactory {
-  private static instance: GeometryFactory
-  private geometries = new Map<string, THREE.BufferGeometry>()
-  
+  private static instance: GeometryFactory;
+  private geometries = new Map<string, THREE.BufferGeometry>();
+
   private constructor() {}
-  
+
   static getInstance(): GeometryFactory {
     if (!this.instance) {
-      this.instance = new GeometryFactory()
+      this.instance = new GeometryFactory();
     }
-    return this.instance
+    return this.instance;
   }
-  
+
   /**
    * Get or create a sphere geometry
    */
@@ -39,9 +39,9 @@ export class GeometryFactory {
     thetaStart?: number,
     thetaLength?: number
   ): THREE.SphereGeometry {
-    const key = `sphere_${radius}_${widthSegments}_${heightSegments}_${phiStart ?? 0}_${phiLength ?? Math.PI * 2}_${thetaStart ?? 0}_${thetaLength ?? Math.PI}`
-    
-    let geometry = this.geometries.get(key) as THREE.SphereGeometry
+    const key = `sphere_${radius}_${widthSegments}_${heightSegments}_${phiStart ?? 0}_${phiLength ?? Math.PI * 2}_${thetaStart ?? 0}_${thetaLength ?? Math.PI}`;
+
+    let geometry = this.geometries.get(key) as THREE.SphereGeometry;
     if (!geometry) {
       geometry = new THREE.SphereGeometry(
         radius,
@@ -51,13 +51,13 @@ export class GeometryFactory {
         phiLength,
         thetaStart,
         thetaLength
-      )
-      this.geometries.set(key, geometry)
+      );
+      this.geometries.set(key, geometry);
     }
-    
-    return geometry
+
+    return geometry;
   }
-  
+
   /**
    * Get or create a box geometry
    */
@@ -69,9 +69,9 @@ export class GeometryFactory {
     heightSegments: number = 1,
     depthSegments: number = 1
   ): THREE.BoxGeometry {
-    const key = `box_${width}_${height}_${depth}_${widthSegments}_${heightSegments}_${depthSegments}`
-    
-    let geometry = this.geometries.get(key) as THREE.BoxGeometry
+    const key = `box_${width}_${height}_${depth}_${widthSegments}_${heightSegments}_${depthSegments}`;
+
+    let geometry = this.geometries.get(key) as THREE.BoxGeometry;
     if (!geometry) {
       geometry = new THREE.BoxGeometry(
         width,
@@ -80,13 +80,13 @@ export class GeometryFactory {
         widthSegments,
         heightSegments,
         depthSegments
-      )
-      this.geometries.set(key, geometry)
+      );
+      this.geometries.set(key, geometry);
     }
-    
-    return geometry
+
+    return geometry;
   }
-  
+
   /**
    * Get or create a cone geometry
    */
@@ -99,9 +99,9 @@ export class GeometryFactory {
     thetaStart?: number,
     thetaLength?: number
   ): THREE.ConeGeometry {
-    const key = `cone_${radius}_${height}_${radialSegments}_${heightSegments}_${openEnded}_${thetaStart ?? 0}_${thetaLength ?? Math.PI * 2}`
-    
-    let geometry = this.geometries.get(key) as THREE.ConeGeometry
+    const key = `cone_${radius}_${height}_${radialSegments}_${heightSegments}_${openEnded}_${thetaStart ?? 0}_${thetaLength ?? Math.PI * 2}`;
+
+    let geometry = this.geometries.get(key) as THREE.ConeGeometry;
     if (!geometry) {
       geometry = new THREE.ConeGeometry(
         radius,
@@ -111,13 +111,13 @@ export class GeometryFactory {
         openEnded,
         thetaStart,
         thetaLength
-      )
-      this.geometries.set(key, geometry)
+      );
+      this.geometries.set(key, geometry);
     }
-    
-    return geometry
+
+    return geometry;
   }
-  
+
   /**
    * Get or create a cylinder geometry
    */
@@ -131,9 +131,9 @@ export class GeometryFactory {
     thetaStart?: number,
     thetaLength?: number
   ): THREE.CylinderGeometry {
-    const key = `cylinder_${radiusTop}_${radiusBottom}_${height}_${radialSegments}_${heightSegments}_${openEnded}_${thetaStart ?? 0}_${thetaLength ?? Math.PI * 2}`
-    
-    let geometry = this.geometries.get(key) as THREE.CylinderGeometry
+    const key = `cylinder_${radiusTop}_${radiusBottom}_${height}_${radialSegments}_${heightSegments}_${openEnded}_${thetaStart ?? 0}_${thetaLength ?? Math.PI * 2}`;
+
+    let geometry = this.geometries.get(key) as THREE.CylinderGeometry;
     if (!geometry) {
       geometry = new THREE.CylinderGeometry(
         radiusTop,
@@ -144,13 +144,13 @@ export class GeometryFactory {
         openEnded,
         thetaStart,
         thetaLength
-      )
-      this.geometries.set(key, geometry)
+      );
+      this.geometries.set(key, geometry);
     }
-    
-    return geometry
+
+    return geometry;
   }
-  
+
   /**
    * Get or create a plane geometry
    */
@@ -160,17 +160,17 @@ export class GeometryFactory {
     widthSegments: number = 1,
     heightSegments: number = 1
   ): THREE.PlaneGeometry {
-    const key = `plane_${width}_${height}_${widthSegments}_${heightSegments}`
-    
-    let geometry = this.geometries.get(key) as THREE.PlaneGeometry
+    const key = `plane_${width}_${height}_${widthSegments}_${heightSegments}`;
+
+    let geometry = this.geometries.get(key) as THREE.PlaneGeometry;
     if (!geometry) {
-      geometry = new THREE.PlaneGeometry(width, height, widthSegments, heightSegments)
-      this.geometries.set(key, geometry)
+      geometry = new THREE.PlaneGeometry(width, height, widthSegments, heightSegments);
+      this.geometries.set(key, geometry);
     }
-    
-    return geometry
+
+    return geometry;
   }
-  
+
   /**
    * Get or create a torus geometry
    */
@@ -181,23 +181,17 @@ export class GeometryFactory {
     tubularSegments: number = 48,
     arc?: number
   ): THREE.TorusGeometry {
-    const key = `torus_${radius}_${tube}_${radialSegments}_${tubularSegments}_${arc ?? Math.PI * 2}`
-    
-    let geometry = this.geometries.get(key) as THREE.TorusGeometry
+    const key = `torus_${radius}_${tube}_${radialSegments}_${tubularSegments}_${arc ?? Math.PI * 2}`;
+
+    let geometry = this.geometries.get(key) as THREE.TorusGeometry;
     if (!geometry) {
-      geometry = new THREE.TorusGeometry(
-        radius,
-        tube,
-        radialSegments,
-        tubularSegments,
-        arc
-      )
-      this.geometries.set(key, geometry)
+      geometry = new THREE.TorusGeometry(radius, tube, radialSegments, tubularSegments, arc);
+      this.geometries.set(key, geometry);
     }
-    
-    return geometry
+
+    return geometry;
   }
-  
+
   /**
    * Get or create a ring geometry
    */
@@ -209,9 +203,9 @@ export class GeometryFactory {
     thetaStart?: number,
     thetaLength?: number
   ): THREE.RingGeometry {
-    const key = `ring_${innerRadius}_${outerRadius}_${thetaSegments}_${phiSegments}_${thetaStart ?? 0}_${thetaLength ?? Math.PI * 2}`
-    
-    let geometry = this.geometries.get(key) as THREE.RingGeometry
+    const key = `ring_${innerRadius}_${outerRadius}_${thetaSegments}_${phiSegments}_${thetaStart ?? 0}_${thetaLength ?? Math.PI * 2}`;
+
+    let geometry = this.geometries.get(key) as THREE.RingGeometry;
     if (!geometry) {
       geometry = new THREE.RingGeometry(
         innerRadius,
@@ -220,28 +214,28 @@ export class GeometryFactory {
         phiSegments,
         thetaStart,
         thetaLength
-      )
-      this.geometries.set(key, geometry)
+      );
+      this.geometries.set(key, geometry);
     }
-    
-    return geometry
+
+    return geometry;
   }
-  
+
   /**
    * Get or create an octahedron geometry
    */
   getOctahedron(radius: number = 1, detail: number = 0): THREE.OctahedronGeometry {
-    const key = `octahedron_${radius}_${detail}`
-    
-    let geometry = this.geometries.get(key) as THREE.OctahedronGeometry
+    const key = `octahedron_${radius}_${detail}`;
+
+    let geometry = this.geometries.get(key) as THREE.OctahedronGeometry;
     if (!geometry) {
-      geometry = new THREE.OctahedronGeometry(radius, detail)
-      this.geometries.set(key, geometry)
+      geometry = new THREE.OctahedronGeometry(radius, detail);
+      this.geometries.set(key, geometry);
     }
-    
-    return geometry
+
+    return geometry;
   }
-  
+
   /**
    * Get or create a circle geometry
    */
@@ -251,22 +245,17 @@ export class GeometryFactory {
     thetaStart: number = 0,
     thetaLength: number = Math.PI * 2
   ): THREE.CircleGeometry {
-    const key = `circle_${radius}_${segments}_${thetaStart}_${thetaLength}`
-    
-    let geometry = this.geometries.get(key) as THREE.CircleGeometry
+    const key = `circle_${radius}_${segments}_${thetaStart}_${thetaLength}`;
+
+    let geometry = this.geometries.get(key) as THREE.CircleGeometry;
     if (!geometry) {
-      geometry = new THREE.CircleGeometry(
-        radius,
-        segments,
-        thetaStart,
-        thetaLength
-      )
-      this.geometries.set(key, geometry)
+      geometry = new THREE.CircleGeometry(radius, segments, thetaStart, thetaLength);
+      this.geometries.set(key, geometry);
     }
-    
-    return geometry
+
+    return geometry;
   }
-  
+
   /**
    * Get or create a buffer geometry from arrays
    */
@@ -277,45 +266,45 @@ export class GeometryFactory {
     indices?: Uint16Array | Uint32Array
   ): THREE.BufferGeometry {
     // Create a hash from the array data
-    const posHash = this.hashArray(positions)
-    const key = `buffer_${posHash}_${normals ? this.hashArray(normals) : 'none'}_${uvs ? this.hashArray(uvs) : 'none'}_${indices ? this.hashArray(indices) : 'none'}`
-    
-    let geometry = this.geometries.get(key)
+    const posHash = this.hashArray(positions);
+    const key = `buffer_${posHash}_${normals ? this.hashArray(normals) : 'none'}_${uvs ? this.hashArray(uvs) : 'none'}_${indices ? this.hashArray(indices) : 'none'}`;
+
+    let geometry = this.geometries.get(key);
     if (!geometry) {
-      geometry = new THREE.BufferGeometry()
-      geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3))
-      
+      geometry = new THREE.BufferGeometry();
+      geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+
       if (normals) {
-        geometry.setAttribute('normal', new THREE.BufferAttribute(normals, 3))
+        geometry.setAttribute('normal', new THREE.BufferAttribute(normals, 3));
       }
-      
+
       if (uvs) {
-        geometry.setAttribute('uv', new THREE.BufferAttribute(uvs, 2))
+        geometry.setAttribute('uv', new THREE.BufferAttribute(uvs, 2));
       }
-      
+
       if (indices) {
-        geometry.setIndex(new THREE.BufferAttribute(indices, 1))
+        geometry.setIndex(new THREE.BufferAttribute(indices, 1));
       }
-      
-      this.geometries.set(key, geometry)
+
+      this.geometries.set(key, geometry);
     }
-    
-    return geometry
+
+    return geometry;
   }
-  
+
   /**
    * Create a simple hash from array data for cache key generation
    */
   private hashArray(array: ArrayLike<number>): string {
-    let hash = 0
-    const len = Math.min(array.length, 100) // Sample first 100 elements
+    let hash = 0;
+    const len = Math.min(array.length, 100); // Sample first 100 elements
     for (let i = 0; i < len; i++) {
-      hash = ((hash << 5) - hash) + array[i]
-      hash = hash & hash // Convert to 32bit integer
+      hash = (hash << 5) - hash + array[i];
+      hash = hash & hash; // Convert to 32bit integer
     }
-    return `${hash}_${array.length}`
+    return `${hash}_${array.length}`;
   }
-  
+
   /**
    * Apply transformations to a geometry (creates a new instance)
    */
@@ -325,80 +314,80 @@ export class GeometryFactory {
     rotation?: THREE.Euler,
     scale?: THREE.Vector3
   ): THREE.BufferGeometry {
-    const transformed = geometry.clone()
-    
+    const transformed = geometry.clone();
+
     if (position) {
-      transformed.translate(position.x, position.y, position.z)
+      transformed.translate(position.x, position.y, position.z);
     }
-    
+
     if (rotation) {
-      transformed.rotateX(rotation.x)
-      transformed.rotateY(rotation.y)
-      transformed.rotateZ(rotation.z)
+      transformed.rotateX(rotation.x);
+      transformed.rotateY(rotation.y);
+      transformed.rotateZ(rotation.z);
     }
-    
+
     if (scale) {
-      transformed.scale(scale.x, scale.y, scale.z)
+      transformed.scale(scale.x, scale.y, scale.z);
     }
-    
-    return transformed
+
+    return transformed;
   }
-  
+
   /**
    * Get statistics about cached geometries
    */
   getStats(): {
-    totalGeometries: number
-    byType: Record<string, number>
-    memoryEstimate: number
+    totalGeometries: number;
+    byType: Record<string, number>;
+    memoryEstimate: number;
   } {
-    const byType: Record<string, number> = {}
-    let memoryEstimate = 0
-    
+    const byType: Record<string, number> = {};
+    let memoryEstimate = 0;
+
     this.geometries.forEach((geometry, key) => {
-      const type = key.split('_')[0]
-      byType[type] = (byType[type] || 0) + 1
-      
+      const type = key.split('_')[0];
+      byType[type] = (byType[type] || 0) + 1;
+
       // Estimate memory usage
       if (geometry.attributes.position) {
-        memoryEstimate += geometry.attributes.position.array.length * 4 // 4 bytes per float
+        memoryEstimate += geometry.attributes.position.array.length * 4; // 4 bytes per float
       }
       if (geometry.attributes.normal) {
-        memoryEstimate += geometry.attributes.normal.array.length * 4
+        memoryEstimate += geometry.attributes.normal.array.length * 4;
       }
       if (geometry.attributes.uv) {
-        memoryEstimate += geometry.attributes.uv.array.length * 4
+        memoryEstimate += geometry.attributes.uv.array.length * 4;
       }
       if (geometry.index) {
-        memoryEstimate += geometry.index.array.length * 2 // 2 bytes per uint16
+        memoryEstimate += geometry.index.array.length * 2; // 2 bytes per uint16
       }
-    })
-    
+    });
+
     return {
       totalGeometries: this.geometries.size,
       byType,
-      memoryEstimate
-    }
+      memoryEstimate,
+    };
   }
-  
+
   /**
    * Clear all cached geometries
    */
   clear(): void {
-    this.geometries.forEach(geometry => geometry.dispose())
-    this.geometries.clear()
+    this.geometries.forEach(geometry => geometry.dispose());
+    this.geometries.clear();
   }
-  
+
   /**
    * Remove a specific geometry from cache
    */
   remove(key: string): boolean {
-    const geometry = this.geometries.get(key)
+    const geometry = this.geometries.get(key);
     if (geometry) {
-      geometry.dispose()
-      this.geometries.delete(key)
-      return true
+      geometry.dispose();
+      this.geometries.delete(key);
+      return true;
     }
-    return false
+    return false;
   }
 }

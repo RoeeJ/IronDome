@@ -3,7 +3,11 @@ import { TrajectoryCalculator, LaunchParameters } from '@/utils/TrajectoryCalcul
 import { ImprovedTrajectoryCalculator } from '@/utils/ImprovedTrajectoryCalculator';
 import { PredictiveTargeting } from '@/utils/PredictiveTargeting';
 import { ProportionalNavigation } from '@/physics/ProportionalNavigation';
-import { AdvancedBallistics, EnvironmentalFactors, BallisticCoefficients } from '@/physics/AdvancedBallistics';
+import {
+  AdvancedBallistics,
+  EnvironmentalFactors,
+  BallisticCoefficients,
+} from '@/physics/AdvancedBallistics';
 import { debug } from '@/utils/DebugLogger';
 
 export type TrajectoryMode = 'basic' | 'improved' | 'advanced';
@@ -39,21 +43,21 @@ export class UnifiedTrajectorySystem {
   private predictiveTargeting: PredictiveTargeting | null = null;
   private proportionalNav: ProportionalNavigation | null = null;
   private advancedBallistics: AdvancedBallistics | null = null;
-  
+
   private static instance: UnifiedTrajectorySystem | null = null;
-  
+
   constructor(config: Partial<TrajectoryConfig> = {}) {
     this.config = {
       mode: config.mode || 'basic',
       useKalmanFilter: config.useKalmanFilter ?? false,
       useEnvironmental: config.useEnvironmental ?? false,
       guidanceMode: config.guidanceMode || 'none',
-      enableDebug: config.enableDebug ?? false
+      enableDebug: config.enableDebug ?? false,
     };
-    
+
     this.initializeSubsystems();
   }
-  
+
   /**
    * Get singleton instance (for backward compatibility)
    */
@@ -63,7 +67,7 @@ export class UnifiedTrajectorySystem {
     }
     return UnifiedTrajectorySystem.instance;
   }
-  
+
   /**
    * Update configuration at runtime
    */
@@ -71,26 +75,26 @@ export class UnifiedTrajectorySystem {
     this.config = { ...this.config, ...config };
     this.initializeSubsystems();
   }
-  
+
   private initializeSubsystems(): void {
     // Initialize subsystems based on configuration
     if (this.config.useKalmanFilter || this.config.mode === 'improved') {
       this.predictiveTargeting = new PredictiveTargeting();
     }
-    
+
     if (this.config.guidanceMode !== 'none') {
       this.proportionalNav = new ProportionalNavigation();
     }
-    
+
     if (this.config.mode === 'advanced' || this.config.useEnvironmental) {
       this.advancedBallistics = new AdvancedBallistics();
     }
-    
+
     if (this.config.enableDebug) {
       debug.module('UnifiedTrajectory').log('Initialized with config:', this.config);
     }
   }
-  
+
   /**
    * Calculate launch parameters - backward compatible with TrajectoryCalculator
    */
@@ -102,17 +106,20 @@ export class UnifiedTrajectorySystem {
   ): LaunchParameters | null {
     // All modes use the same basic launch calculation
     return TrajectoryCalculator.calculateLaunchParameters(
-      launchPos, targetPos, velocity, preferLofted
+      launchPos,
+      targetPos,
+      velocity,
+      preferLofted
     );
   }
-  
+
   /**
    * Convert launch parameters to velocity vector
    */
   getVelocityVector(params: LaunchParameters): THREE.Vector3 {
     return TrajectoryCalculator.getVelocityVector(params);
   }
-  
+
   /**
    * Calculate optimal interception point with mode-based behavior
    */
@@ -125,26 +132,38 @@ export class UnifiedTrajectorySystem {
     threat?: any // Optional threat object for advanced features
   ): InterceptionResult | null {
     let result: any = null;
-    
+
     switch (this.config.mode) {
       case 'basic':
         result = TrajectoryCalculator.calculateInterceptionPoint(
-          threatPos, threatVel, interceptorPos, interceptorSpeed, isDrone
+          threatPos,
+          threatVel,
+          interceptorPos,
+          interceptorSpeed,
+          isDrone
         );
         break;
-        
+
       case 'improved':
         result = ImprovedTrajectoryCalculator.calculateInterceptionPoint(
-          threatPos, threatVel, interceptorPos, interceptorSpeed, isDrone
+          threatPos,
+          threatVel,
+          interceptorPos,
+          interceptorSpeed,
+          isDrone
         );
         break;
-        
+
       case 'advanced':
         // For advanced mode, use improved calculator with environmental adjustments
         result = ImprovedTrajectoryCalculator.calculateInterceptionPoint(
-          threatPos, threatVel, interceptorPos, interceptorSpeed, isDrone
+          threatPos,
+          threatVel,
+          interceptorPos,
+          interceptorSpeed,
+          isDrone
         );
-        
+
         // Apply environmental corrections if available
         if (result && this.advancedBallistics && this.config.useEnvironmental) {
           // TODO: Apply wind and other environmental factors
@@ -152,37 +171,39 @@ export class UnifiedTrajectorySystem {
         }
         break;
     }
-    
+
     // Apply Kalman filtering if enabled and threat object provided
     if (result && this.predictiveTargeting && threat && this.config.useKalmanFilter) {
       this.predictiveTargeting.updateThreatTracking(threat);
       const prediction = this.predictiveTargeting.calculateLeadPrediction(
-        threat, interceptorPos, interceptorSpeed
+        threat,
+        interceptorPos,
+        interceptorSpeed
       );
-      
+
       if (prediction && prediction.confidence > 0.8) {
         result = {
           point: prediction.aimPoint,
           time: prediction.timeToIntercept,
           confidence: prediction.confidence,
-          canIntercept: true
+          canIntercept: true,
         };
       }
     }
-    
+
     // Normalize result format
     if (result) {
       return {
         point: result.point,
         time: result.time,
         confidence: result.confidence || 1.0,
-        canIntercept: true
+        canIntercept: true,
       };
     }
-    
+
     return null;
   }
-  
+
   /**
    * Predict trajectory for visualization
    */
@@ -198,22 +219,26 @@ export class UnifiedTrajectorySystem {
   ): TrajectoryPoint[] {
     const timeStep = options?.timeStep || 0.1;
     const maxTime = options?.maxTime || 20;
-    
-    if (this.config.mode === 'advanced' && this.advancedBallistics && 
-        options?.environmental && options?.coefficients) {
+
+    if (
+      this.config.mode === 'advanced' &&
+      this.advancedBallistics &&
+      options?.environmental &&
+      options?.coefficients
+    ) {
       // Use advanced ballistics for trajectory prediction
       const points: TrajectoryPoint[] = [];
       let currentPos = position.clone();
       let currentVel = velocity.clone();
       let t = 0;
-      
+
       while (t <= maxTime && currentPos.y > 0) {
         points.push({
           position: currentPos.clone(),
           velocity: currentVel.clone(),
-          time: t
+          time: t,
         });
-        
+
         const result = this.advancedBallistics.calculateTrajectory(
           currentPos,
           currentVel,
@@ -221,27 +246,25 @@ export class UnifiedTrajectorySystem {
           options.environmental,
           timeStep
         );
-        
+
         currentPos = result.position;
         currentVel = result.velocity;
         t += timeStep;
       }
-      
+
       return points;
     } else {
       // Use basic trajectory prediction
-      const points = TrajectoryCalculator.predictTrajectory(
-        position, velocity, timeStep, maxTime
-      );
-      
+      const points = TrajectoryCalculator.predictTrajectory(position, velocity, timeStep, maxTime);
+
       // Convert to TrajectoryPoint format
       return points.map((pos, i) => ({
         position: pos,
-        time: i * timeStep
+        time: i * timeStep,
       }));
     }
   }
-  
+
   /**
    * Calculate guidance command for interceptor
    */
@@ -254,13 +277,17 @@ export class UnifiedTrajectorySystem {
     if (!this.proportionalNav || this.config.guidanceMode === 'none') {
       return null;
     }
-    
+
     const useAugmented = this.config.guidanceMode === 'augmented';
     return this.proportionalNav.calculateGuidanceCommand(
-      interceptorPos, interceptorVel, targetPos, targetVel, useAugmented
+      interceptorPos,
+      interceptorVel,
+      targetPos,
+      targetVel,
+      useAugmented
     );
   }
-  
+
   /**
    * Clean up resources (for predictive targeting)
    */
@@ -269,14 +296,14 @@ export class UnifiedTrajectorySystem {
       this.predictiveTargeting.cleanup();
     }
   }
-  
+
   /**
    * Get current configuration
    */
   getConfig(): TrajectoryConfig {
     return { ...this.config };
   }
-  
+
   /**
    * Static helper methods for backward compatibility
    */
@@ -287,14 +314,17 @@ export class UnifiedTrajectorySystem {
     preferLofted: boolean = false
   ): LaunchParameters | null {
     return TrajectoryCalculator.calculateLaunchParameters(
-      launchPos, targetPos, velocity, preferLofted
+      launchPos,
+      targetPos,
+      velocity,
+      preferLofted
     );
   }
-  
+
   static getVelocityVector(params: LaunchParameters): THREE.Vector3 {
     return TrajectoryCalculator.getVelocityVector(params);
   }
-  
+
   static calculateInterceptionPoint(
     threatPos: THREE.Vector3,
     threatVel: THREE.Vector3,
@@ -305,19 +335,23 @@ export class UnifiedTrajectorySystem {
     // Check global algorithm setting and update singleton config if needed
     const useImproved = (window as any).__useImprovedAlgorithms !== false;
     const instance = UnifiedTrajectorySystem.getInstance();
-    
+
     // Update mode if it doesn't match global setting
     const currentMode = instance.getConfig().mode;
     const expectedMode = useImproved ? 'improved' : 'basic';
     if (currentMode !== expectedMode) {
       instance.updateConfig({ mode: expectedMode });
     }
-    
+
     return instance.calculateInterceptionPoint(
-      threatPos, threatVel, interceptorPos, interceptorSpeed, isDrone
+      threatPos,
+      threatVel,
+      interceptorPos,
+      interceptorSpeed,
+      isDrone
     );
   }
-  
+
   static predictTrajectory(
     position: THREE.Vector3,
     velocity: THREE.Vector3,

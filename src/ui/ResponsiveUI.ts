@@ -1,9 +1,9 @@
-import GUI from "lil-gui";
-import { DeviceCapabilities } from "../utils/DeviceCapabilities";
-import { debug } from "../utils/DebugLogger";
+import GUI from 'lil-gui';
+import { DeviceCapabilities } from '../utils/DeviceCapabilities';
+import { debug } from '../utils/DebugLogger';
 
 export interface UILayout {
-  position: "top-left" | "top-right" | "bottom-left" | "bottom-right";
+  position: 'top-left' | 'top-right' | 'bottom-left' | 'bottom-right';
   scale: number;
   collapsed: boolean;
   opacity: number;
@@ -32,7 +32,7 @@ export class ResponsiveUI {
 
     if (deviceInfo.isMobile) {
       return {
-        position: "top-left",
+        position: 'top-left',
         scale: 1.2, // Larger for touch
         collapsed: true, // Start collapsed on mobile
         opacity: 0.9,
@@ -40,7 +40,7 @@ export class ResponsiveUI {
       };
     } else if (deviceInfo.isTablet) {
       return {
-        position: "top-left",
+        position: 'top-left',
         scale: 1.1,
         collapsed: false,
         opacity: 0.95,
@@ -48,7 +48,7 @@ export class ResponsiveUI {
       };
     } else {
       return {
-        position: "top-left",
+        position: 'top-left',
         scale: 1,
         collapsed: false,
         opacity: 1,
@@ -62,39 +62,39 @@ export class ResponsiveUI {
     const deviceInfo = this.deviceCaps.getDeviceInfo();
 
     // Base styles
-    guiElement.style.position = "absolute";
+    guiElement.style.position = 'absolute';
     guiElement.style.opacity = this.layout.opacity.toString();
     guiElement.style.fontSize = `${this.layout.fontSize}px`;
     guiElement.style.transform = `scale(${this.layout.scale})`;
-    guiElement.style.transformOrigin = "top right";
-    guiElement.style.maxHeight = "90vh";
-    guiElement.style.overflowY = "auto";
-    guiElement.style.zIndex = "999";
+    guiElement.style.transformOrigin = 'top right';
+    guiElement.style.maxHeight = '90vh';
+    guiElement.style.overflowY = 'auto';
+    guiElement.style.zIndex = '999';
 
     // Position based on layout
     switch (this.layout.position) {
-      case "top-right":
-        guiElement.style.top = "10px";
-        guiElement.style.right = "10px";
+      case 'top-right':
+        guiElement.style.top = '10px';
+        guiElement.style.right = '10px';
         break;
-      case "top-left":
-        guiElement.style.top = "10px";
-        guiElement.style.left = "10px";
+      case 'top-left':
+        guiElement.style.top = '10px';
+        guiElement.style.left = '10px';
         break;
-      case "bottom-right":
-        guiElement.style.bottom = "10px";
-        guiElement.style.right = "10px";
+      case 'bottom-right':
+        guiElement.style.bottom = '10px';
+        guiElement.style.right = '10px';
         break;
-      case "bottom-left":
-        guiElement.style.bottom = "10px";
-        guiElement.style.left = "10px";
+      case 'bottom-left':
+        guiElement.style.bottom = '10px';
+        guiElement.style.left = '10px';
         break;
     }
 
     // Mobile-specific styles
     if (deviceInfo.isMobile || deviceInfo.isTablet) {
       // Add touch-friendly spacing
-      const style = document.createElement("style");
+      const style = document.createElement('style');
       style.textContent = `
         .lil-gui {
           --widget-height: 32px !important;
@@ -147,8 +147,8 @@ export class ResponsiveUI {
   }
 
   private createMobileMenuButton() {
-    this.mobileMenuButton = document.createElement("div");
-    this.mobileMenuButton.innerHTML = "☰";
+    this.mobileMenuButton = document.createElement('div');
+    this.mobileMenuButton.innerHTML = '☰';
     this.mobileMenuButton.style.cssText = `
       position: absolute;
       top: 10px;
@@ -169,7 +169,7 @@ export class ResponsiveUI {
       -webkit-user-select: none;
     `;
 
-    this.mobileMenuButton.addEventListener("click", () => {
+    this.mobileMenuButton.addEventListener('click', () => {
       this.toggleGUI();
     });
 
@@ -180,7 +180,7 @@ export class ResponsiveUI {
   }
 
   private createTouchControlsOverlay() {
-    this.touchControlsOverlay = document.createElement("div");
+    this.touchControlsOverlay = document.createElement('div');
     this.touchControlsOverlay.style.cssText = `
       position: absolute;
       bottom: 20px;
@@ -213,8 +213,8 @@ export class ResponsiveUI {
     // Hide after 5 seconds
     setTimeout(() => {
       if (this.touchControlsOverlay) {
-        this.touchControlsOverlay.style.transition = "opacity 1s";
-        this.touchControlsOverlay.style.opacity = "0";
+        this.touchControlsOverlay.style.transition = 'opacity 1s';
+        this.touchControlsOverlay.style.opacity = '0';
         setTimeout(() => {
           this.touchControlsOverlay?.remove();
         }, 1000);
@@ -226,12 +226,12 @@ export class ResponsiveUI {
     if (this.gui._closed) {
       this.gui.open();
       if (this.mobileMenuButton) {
-        this.mobileMenuButton.innerHTML = "✕";
+        this.mobileMenuButton.innerHTML = '✕';
       }
     } else {
       this.gui.close();
       if (this.mobileMenuButton) {
-        this.mobileMenuButton.innerHTML = "☰";
+        this.mobileMenuButton.innerHTML = '☰';
       }
     }
     this.updateMenuButtonPosition();
@@ -246,18 +246,18 @@ export class ResponsiveUI {
       const guiWidth = this.gui.domElement.offsetWidth * this.layout.scale;
       this.mobileMenuButton.style.right = `${guiWidth + 20}px`;
     } else {
-      this.mobileMenuButton.style.right = "10px";
+      this.mobileMenuButton.style.right = '10px';
     }
   }
 
   private setupOrientationHandler() {
     let lastOrientation = window.orientation;
 
-    window.addEventListener("orientationchange", () => {
+    window.addEventListener('orientationchange', () => {
       const newOrientation = window.orientation;
       const isLandscape = Math.abs(newOrientation) === 90;
 
-      debug.log("Orientation changed:", {
+      debug.log('Orientation changed:', {
         from: lastOrientation,
         to: newOrientation,
         isLandscape,
@@ -267,11 +267,11 @@ export class ResponsiveUI {
       if (this.deviceCaps.isMobile()) {
         if (isLandscape) {
           // In landscape, move GUI to the side
-          this.layout.position = "top-right";
+          this.layout.position = 'top-right';
           this.layout.scale = 1.0;
         } else {
           // In portrait, keep GUI compact
-          this.layout.position = "top-right";
+          this.layout.position = 'top-right';
           this.layout.scale = 1.2;
         }
 
@@ -284,7 +284,7 @@ export class ResponsiveUI {
 
   // Public methods
   public showNotification(message: string, duration: number = 3000) {
-    const notification = document.createElement("div");
+    const notification = document.createElement('div');
     notification.style.cssText = `
       position: absolute;
       top: 50%;
@@ -303,7 +303,7 @@ export class ResponsiveUI {
     notification.textContent = message;
 
     // Add fade-in animation
-    const style = document.createElement("style");
+    const style = document.createElement('style');
     style.textContent = `
       @keyframes fadeIn {
         from { opacity: 0; transform: translate(-50%, -50%) scale(0.8); }
@@ -315,8 +315,8 @@ export class ResponsiveUI {
     document.body.appendChild(notification);
 
     setTimeout(() => {
-      notification.style.transition = "opacity 0.3s";
-      notification.style.opacity = "0";
+      notification.style.transition = 'opacity 0.3s';
+      notification.style.opacity = '0';
       setTimeout(() => {
         notification.remove();
         style.remove();
@@ -324,11 +324,8 @@ export class ResponsiveUI {
     }, duration);
   }
 
-  public createMobileButton(
-    text: string,
-    onClick: () => void
-  ): HTMLButtonElement {
-    const button = document.createElement("button");
+  public createMobileButton(text: string, onClick: () => void): HTMLButtonElement {
+    const button = document.createElement('button');
     button.textContent = text;
     button.style.cssText = `
       position: absolute;
@@ -346,10 +343,10 @@ export class ResponsiveUI {
       -webkit-user-select: none;
     `;
 
-    button.addEventListener("click", () => {
+    button.addEventListener('click', () => {
       onClick();
       // Haptic feedback
-      if ("vibrate" in navigator) {
+      if ('vibrate' in navigator) {
         navigator.vibrate(10);
       }
     });

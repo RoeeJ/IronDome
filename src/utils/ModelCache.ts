@@ -1,129 +1,131 @@
-import * as THREE from 'three'
-import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js'
-import { debug } from './DebugLogger'
+import * as THREE from 'three';
+import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
+import { debug } from './DebugLogger';
 
 /**
  * Singleton cache for loaded 3D models to prevent duplicate loading
  * and enable efficient instancing
  */
 export class ModelCache {
-  private static instance: ModelCache
-  private loader: GLTFLoader
-  private cache: Map<string, Promise<THREE.Group>> = new Map()
-  private geometryCache: Map<string, THREE.BufferGeometry> = new Map()
-  private materialCache: Map<string, THREE.Material[]> = new Map()
-  
+  private static instance: ModelCache;
+  private loader: GLTFLoader;
+  private cache: Map<string, Promise<THREE.Group>> = new Map();
+  private geometryCache: Map<string, THREE.BufferGeometry> = new Map();
+  private materialCache: Map<string, THREE.Material[]> = new Map();
+
   private constructor() {
-    this.loader = new GLTFLoader()
+    this.loader = new GLTFLoader();
   }
-  
+
   static getInstance(): ModelCache {
     if (!ModelCache.instance) {
-      ModelCache.instance = new ModelCache()
+      ModelCache.instance = new ModelCache();
     }
-    return ModelCache.instance
+    return ModelCache.instance;
   }
-  
+
   /**
    * Load a model once and return clones for each request
    */
   async loadModel(url: string): Promise<THREE.Group> {
     // If already loading/loaded, return the cached promise
     if (this.cache.has(url)) {
-      const model = await this.cache.get(url)!
-      return model.clone()  // Return a clone, not the original
+      const model = await this.cache.get(url)!;
+      return model.clone(); // Return a clone, not the original
     }
-    
+
     // Start loading and cache the promise
     const loadPromise = new Promise<THREE.Group>((resolve, reject) => {
       this.loader.load(
         url,
-        (gltf) => {
-          const model = gltf.scene
-          
+        gltf => {
+          const model = gltf.scene;
+
           // Cache geometries and materials for efficient cloning
-          let totalTriangles = 0
-          let meshCount = 0
-          
+          let totalTriangles = 0;
+          let meshCount = 0;
+
           // Remove any debug helpers or lines from the model
-          const toRemove: THREE.Object3D[] = []
-          model.traverse((child) => {
+          const toRemove: THREE.Object3D[] = [];
+          model.traverse(child => {
             // Remove any Line objects or helpers
-            if (child instanceof THREE.Line || 
-                child instanceof THREE.LineSegments ||
-                child.name.toLowerCase().includes('helper') ||
-                child.name.toLowerCase().includes('debug')) {
-              toRemove.push(child)
-              debug.warn(`Removing debug object from model: ${child.name} (${child.type})`)
+            if (
+              child instanceof THREE.Line ||
+              child instanceof THREE.LineSegments ||
+              child.name.toLowerCase().includes('helper') ||
+              child.name.toLowerCase().includes('debug')
+            ) {
+              toRemove.push(child);
+              debug.warn(`Removing debug object from model: ${child.name} (${child.type})`);
             } else if (child instanceof THREE.Mesh) {
-              const mesh = child as THREE.Mesh
-              meshCount++
-              
+              const mesh = child as THREE.Mesh;
+              meshCount++;
+
               // Cache geometry
               if (mesh.geometry) {
-                const geomId = `${url}_${mesh.name}_geom`
-                this.geometryCache.set(geomId, mesh.geometry)
-                
+                const geomId = `${url}_${mesh.name}_geom`;
+                this.geometryCache.set(geomId, mesh.geometry);
+
                 // Count triangles
                 if (mesh.geometry.index) {
-                  totalTriangles += mesh.geometry.index.count / 3
+                  totalTriangles += mesh.geometry.index.count / 3;
                 } else if (mesh.geometry.attributes.position) {
-                  totalTriangles += mesh.geometry.attributes.position.count / 3
+                  totalTriangles += mesh.geometry.attributes.position.count / 3;
                 }
               }
-              
+
               // Cache materials
               if (mesh.material) {
-                const matId = `${url}_${mesh.name}_mat`
-                const materials = Array.isArray(mesh.material) ? mesh.material : [mesh.material]
-                this.materialCache.set(matId, materials)
+                const matId = `${url}_${mesh.name}_mat`;
+                const materials = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
+                this.materialCache.set(matId, materials);
               }
             }
-          })
-          
+          });
+
           // Remove debug objects
           toRemove.forEach(obj => {
             if (obj.parent) {
-              obj.parent.remove(obj)
+              obj.parent.remove(obj);
             }
-          })
-          
-          debug.asset('Model loaded', url, { 
-            meshes: meshCount, 
+          });
+
+          debug.asset('Model loaded', url, {
+            meshes: meshCount,
             triangles: totalTriangles,
-            memory: `${(totalTriangles * 32) / 1024}KB` // Rough estimate
-          })
-          
+            memory: `${(totalTriangles * 32) / 1024}KB`, // Rough estimate
+          });
+
           // Debug: Check model structure
           if (meshCount === 0) {
-            debug.warn('No meshes found in model!', model)
+            debug.warn('No meshes found in model!', model);
           }
-          resolve(model)
+          resolve(model);
         },
         undefined,
-        (error) => {
-          debug.error(`Failed to load model: ${url}`, error)
-          reject(error)
+        error => {
+          debug.error(`Failed to load model: ${url}`, error);
+          reject(error);
         }
-      )
-    })
-    
-    this.cache.set(url, loadPromise)
-    const model = await loadPromise
-    return model.clone()
+      );
+    });
+
+    this.cache.set(url, loadPromise);
+    const model = await loadPromise;
+    return model.clone();
   }
-  
+
   /**
    * Create an efficient instance of a cached model
    * This reuses geometries and materials instead of cloning them
    */
   async createInstance(url: string): Promise<THREE.Group> {
     // Ensure model is loaded
-    const originalModel = await this.loadModel(url)
-    
+    const originalModel = await this.loadModel(url);
+
     // For now, just return a clone until we debug the instance creation
-    return originalModel.clone()
-    
+    return originalModel.clone();
+
     /* Instance creation code - temporarily disabled for debugging
     const instance = new THREE.Group()
     const cachedModel = await this.cache.get(url)!
@@ -160,16 +162,16 @@ export class ModelCache {
     return instance
     */
   }
-  
+
   /**
    * Preload models during initialization
    */
   async preloadModels(urls: string[]): Promise<void> {
-    const promises = urls.map(url => this.loadModel(url))
-    await Promise.all(promises)
-    debug.asset('Preloaded models', `${urls.length} models`, this.getStats())
+    const promises = urls.map(url => this.loadModel(url));
+    await Promise.all(promises);
+    debug.asset('Preloaded models', `${urls.length} models`, this.getStats());
   }
-  
+
   /**
    * Get cache statistics
    */
@@ -177,7 +179,7 @@ export class ModelCache {
     return {
       models: this.cache.size,
       geometries: this.geometryCache.size,
-      materials: this.materialCache.size
-    }
+      materials: this.materialCache.size,
+    };
   }
 }

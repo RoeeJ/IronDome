@@ -1,0 +1,27 @@
+# Dependencies
+node_modules/
+bun.lockb
+
+# Build outputs
+dist/
+build/
+*.html
+
+# IDE
+.vscode/
+.idea/
+
+# Assets
+assets/
+public/
+
+# Config files that might have specific formatting
+tsconfig.json
+package-lock.json
+yarn.lock
+
+# Markdown files (optional - remove if you want to format markdown)
+*.md
+
+# Generated files
+*.generated.*

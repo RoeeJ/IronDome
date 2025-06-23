@@ -1,13 +1,13 @@
-import React, { useState, useEffect } from "react";
-import { GameState } from "../game/GameState";
-import { WaveManager } from "../game/WaveManager";
-import { ResourceManager } from "../game/ResourceManager";
-import { DomePlacementSystem } from "../game/DomePlacementSystem";
-import { DeviceCapabilities } from "../utils/DeviceCapabilities";
-import { DomeContextMenu } from "./DomeContextMenu";
-import { HelpModal } from "./HelpModal";
-import { SoundSystem } from "../systems/SoundSystem";
-import * as THREE from "three";
+import React, { useState, useEffect } from 'react';
+import { GameState } from '../game/GameState';
+import { WaveManager } from '../game/WaveManager';
+import { ResourceManager } from '../game/ResourceManager';
+import { DomePlacementSystem } from '../game/DomePlacementSystem';
+import { DeviceCapabilities } from '../utils/DeviceCapabilities';
+import { DomeContextMenu } from './DomeContextMenu';
+import { HelpModal } from './HelpModal';
+import { SoundSystem } from '../systems/SoundSystem';
+import * as THREE from 'three';
 
 interface GameUIProps {
   waveManager: WaveManager;
@@ -35,7 +35,7 @@ export const GameUI: React.FC<GameUIProps> = ({
   isGameMode,
 }) => {
   const [hasViewedHelp, setHasViewedHelp] = useState(() => {
-    return localStorage.getItem("helpViewed") === "true";
+    return localStorage.getItem('helpViewed') === 'true';
   });
   const [credits, setCredits] = useState(0);
   const [interceptors, setInterceptors] = useState(0);
@@ -62,7 +62,20 @@ export const GameUI: React.FC<GameUIProps> = ({
   const [autoIntercept, setAutoIntercept] = useState(false); // Default to manual for game mode
   const [isPaused, setIsPaused] = useState(false);
   const [shopCollapsed, setShopCollapsed] = useState(true); // Shop starts collapsed
+  const [currentCameraMode, setCurrentCameraMode] = useState('orbit');
   const confirmTimeoutRef = React.useRef<NodeJS.Timeout | null>(null);
+
+  // Camera mode options
+  const cameraModesGame = [
+    { value: 'orbit', label: 'Orbit' },
+    { value: 'tactical', label: 'Tactical' },
+    { value: 'battle_overview', label: 'Overview' },
+    { value: 'follow_threat', label: 'Follow Threat' },
+    { value: 'follow_interceptor', label: 'Follow Interceptor' },
+    { value: 'cinematic', label: 'Cinematic' },
+  ];
+
+  const cameraModesSandbox = [...cameraModesGame, { value: 'first_person', label: 'First Person' }];
 
   // Store interval reference to clear it when needed
   const preparationIntervalRef = React.useRef<NodeJS.Timeout | null>(null);
@@ -82,6 +95,14 @@ export const GameUI: React.FC<GameUIProps> = ({
       setAutoIntercept(controls.autoIntercept);
     }
 
+    // Set up camera mode change callback
+    const cameraController = (window as any).__cameraController;
+    if (cameraController) {
+      cameraController.setModeChangeCallback((mode: string) => {
+        setCurrentCameraMode(mode);
+      });
+    }
+
     // Check placement mode periodically to stay in sync
     const placementCheckInterval = setInterval(() => {
       const currentMode = placementSystem.isInPlacementMode();
@@ -97,8 +118,7 @@ export const GameUI: React.FC<GameUIProps> = ({
 
     // Subscribe to game events
     const handleCreditsChanged = () => setCredits(gameState.getCredits());
-    const handleInterceptorsChanged = () =>
-      setInterceptors(gameState.getInterceptorStock());
+    const handleInterceptorsChanged = () => setInterceptors(gameState.getInterceptorStock());
     const handleScoreChanged = () => {
       setScore(gameState.getScore());
       setHighScore(gameState.getHighScore());
@@ -133,16 +153,12 @@ export const GameUI: React.FC<GameUIProps> = ({
 
     const handleWaveCompleted = (data: any) => {
       // Show wave complete notification
-      showNotification(
-        `Wave ${data.waveNumber} Complete! +${data.creditsEarned} credits`
-      );
+      showNotification(`Wave ${data.waveNumber} Complete! +${data.creditsEarned} credits`);
 
       // Check if auto-intercept was just unlocked
       if (data.waveNumber === 4 && isGameMode) {
         setTimeout(() => {
-          showNotification(
-            "🎆 AUTO-INTERCEPT UNLOCKED! Toggle between manual and auto modes."
-          );
+          showNotification('🎆 AUTO-INTERCEPT UNLOCKED! Toggle between manual and auto modes.');
           // Enable auto-intercept by default when unlocked
           const controls = (window as any).__simulationControls;
           controls.autoIntercept = true;
@@ -160,7 +176,7 @@ export const GameUI: React.FC<GameUIProps> = ({
       if (controls) {
         controls.autoIntercept = false;
         setAutoIntercept(false);
-        localStorage.setItem("ironDome_interceptMode", "false");
+        localStorage.setItem('ironDome_interceptMode', 'false');
       }
     };
 
@@ -174,9 +190,7 @@ export const GameUI: React.FC<GameUIProps> = ({
       if (!isGameMode) return;
 
       const allBatteries = placementSystem.getAllBatteries();
-      const operationalBatteries = allBatteries.filter((battery) =>
-        battery.isOperational()
-      );
+      const operationalBatteries = allBatteries.filter(battery => battery.isOperational());
 
       if (operationalBatteries.length === 0 && allBatteries.length > 0) {
         // All batteries destroyed - game over!
@@ -211,7 +225,7 @@ export const GameUI: React.FC<GameUIProps> = ({
       event.preventDefault();
 
       // Cast ray to find clicked battery
-      const canvas = document.querySelector("canvas");
+      const canvas = document.querySelector('canvas');
       if (!canvas) return;
 
       const rect = canvas.getBoundingClientRect();
@@ -242,12 +256,10 @@ export const GameUI: React.FC<GameUIProps> = ({
             const batteryId = placementSystem.getBatteryId(hitBattery);
             if (batteryId) {
               // Ensure battery is in game state before showing context menu
-              const placement = gameState
-                .getDomePlacements()
-                .find((p) => p.id === batteryId);
+              const placement = gameState.getDomePlacements().find(p => p.id === batteryId);
               if (!placement) {
                 console.warn(
-                  "[GameUI] Battery (hitbox) found but not in game state, adding it now"
+                  '[GameUI] Battery (hitbox) found but not in game state, adding it now'
                 );
                 const pos = hitBattery.getPosition();
                 gameState.addDomePlacement(batteryId, { x: pos.x, z: pos.z });
@@ -268,13 +280,9 @@ export const GameUI: React.FC<GameUIProps> = ({
             const batteryId = placementSystem.getBatteryId(battery);
             if (batteryId) {
               // Ensure battery is in game state before showing context menu
-              const placement = gameState
-                .getDomePlacements()
-                .find((p) => p.id === batteryId);
+              const placement = gameState.getDomePlacements().find(p => p.id === batteryId);
               if (!placement) {
-                console.warn(
-                  "[GameUI] Battery found but not in game state, adding it now"
-                );
+                console.warn('[GameUI] Battery found but not in game state, adding it now');
                 const pos = battery.getPosition();
                 gameState.addDomePlacement(batteryId, { x: pos.x, z: pos.z });
               }
@@ -294,7 +302,7 @@ export const GameUI: React.FC<GameUIProps> = ({
       }
     };
 
-    document.addEventListener("contextmenu", handleContextMenu);
+    document.addEventListener('contextmenu', handleContextMenu);
 
     // Handle long press for mobile
     let longPressTimer: NodeJS.Timeout | null = null;
@@ -308,7 +316,7 @@ export const GameUI: React.FC<GameUIProps> = ({
 
       longPressTimer = setTimeout(() => {
         // Simulate right-click
-        const mouseEvent = new MouseEvent("contextmenu", {
+        const mouseEvent = new MouseEvent('contextmenu', {
           clientX: touch.clientX,
           clientY: touch.clientY,
           bubbles: true,
@@ -331,8 +339,7 @@ export const GameUI: React.FC<GameUIProps> = ({
 
       const touch = event.touches[0];
       const distance = Math.sqrt(
-        Math.pow(touch.clientX - touchStartPos.x, 2) +
-          Math.pow(touch.clientY - touchStartPos.y, 2)
+        Math.pow(touch.clientX - touchStartPos.x, 2) + Math.pow(touch.clientY - touchStartPos.y, 2)
       );
 
       // Cancel long press if moved too far
@@ -343,11 +350,11 @@ export const GameUI: React.FC<GameUIProps> = ({
     };
 
     if (deviceInfo?.hasTouch) {
-      document.addEventListener("touchstart", handleTouchStart, {
+      document.addEventListener('touchstart', handleTouchStart, {
         passive: true,
       });
-      document.addEventListener("touchend", handleTouchEnd);
-      document.addEventListener("touchmove", handleTouchMove, {
+      document.addEventListener('touchend', handleTouchEnd);
+      document.addEventListener('touchmove', handleTouchMove, {
         passive: true,
       });
     }
@@ -359,19 +366,19 @@ export const GameUI: React.FC<GameUIProps> = ({
       setPlacementMode(placementSystem.isInPlacementMode());
     };
 
-    window.addEventListener("batteryRemoved", handleBatteryUpdate);
-    window.addEventListener("batteryUpgraded", handleBatteryUpdate);
+    window.addEventListener('batteryRemoved', handleBatteryUpdate);
+    window.addEventListener('batteryUpgraded', handleBatteryUpdate);
 
     // Attach listeners
-    gameState.on("creditsChanged", handleCreditsChanged);
-    gameState.on("interceptorsChanged", handleInterceptorsChanged);
-    gameState.on("scoreChanged", handleScoreChanged);
-    gameState.on("newGame", handleNewGame);
-    gameState.on("domeUnlocked", handleDomeUnlocked);
-    waveManager.on("waveStarted", handleWaveStarted);
-    waveManager.on("wavePreparation", handleWavePreparation);
-    waveManager.on("waveProgress", handleWaveProgress);
-    waveManager.on("waveCompleted", handleWaveCompleted);
+    gameState.on('creditsChanged', handleCreditsChanged);
+    gameState.on('interceptorsChanged', handleInterceptorsChanged);
+    gameState.on('scoreChanged', handleScoreChanged);
+    gameState.on('newGame', handleNewGame);
+    gameState.on('domeUnlocked', handleDomeUnlocked);
+    waveManager.on('waveStarted', handleWaveStarted);
+    waveManager.on('wavePreparation', handleWavePreparation);
+    waveManager.on('waveProgress', handleWaveProgress);
+    waveManager.on('waveCompleted', handleWaveCompleted);
 
     // Cleanup
     return () => {
@@ -386,28 +393,28 @@ export const GameUI: React.FC<GameUIProps> = ({
       clearInterval(gameOverCheckInterval);
 
       // Remove context menu handler
-      document.removeEventListener("contextmenu", handleContextMenu);
+      document.removeEventListener('contextmenu', handleContextMenu);
 
       // Remove touch handlers
       if (deviceInfo?.hasTouch) {
-        document.removeEventListener("touchstart", handleTouchStart);
-        document.removeEventListener("touchend", handleTouchEnd);
-        document.removeEventListener("touchmove", handleTouchMove);
+        document.removeEventListener('touchstart', handleTouchStart);
+        document.removeEventListener('touchend', handleTouchEnd);
+        document.removeEventListener('touchmove', handleTouchMove);
       }
 
       // Remove battery update handlers
-      window.removeEventListener("batteryRemoved", handleBatteryUpdate);
-      window.removeEventListener("batteryUpgraded", handleBatteryUpdate);
+      window.removeEventListener('batteryRemoved', handleBatteryUpdate);
+      window.removeEventListener('batteryUpgraded', handleBatteryUpdate);
 
-      gameState.off("creditsChanged", handleCreditsChanged);
-      gameState.off("interceptorsChanged", handleInterceptorsChanged);
-      gameState.off("scoreChanged", handleScoreChanged);
-      gameState.off("newGame", handleNewGame);
-      gameState.off("domeUnlocked", handleDomeUnlocked);
-      waveManager.off("waveStarted", handleWaveStarted);
-      waveManager.off("wavePreparation", handleWavePreparation);
-      waveManager.off("waveProgress", handleWaveProgress);
-      waveManager.off("waveCompleted", handleWaveCompleted);
+      gameState.off('creditsChanged', handleCreditsChanged);
+      gameState.off('interceptorsChanged', handleInterceptorsChanged);
+      gameState.off('scoreChanged', handleScoreChanged);
+      gameState.off('newGame', handleNewGame);
+      gameState.off('domeUnlocked', handleDomeUnlocked);
+      waveManager.off('waveStarted', handleWaveStarted);
+      waveManager.off('wavePreparation', handleWavePreparation);
+      waveManager.off('waveProgress', handleWaveProgress);
+      waveManager.off('waveCompleted', handleWaveCompleted);
     };
   }, [placementMode]);
 
@@ -437,7 +444,7 @@ export const GameUI: React.FC<GameUIProps> = ({
     };
 
     const handleKeyPress = (e: KeyboardEvent) => {
-      if (e.key === "Escape") {
+      if (e.key === 'Escape') {
         e.preventDefault();
 
         // Close modals first if any are open
@@ -460,20 +467,12 @@ export const GameUI: React.FC<GameUIProps> = ({
       }
     };
 
-    window.addEventListener("keydown", handleKeyPress);
+    window.addEventListener('keydown', handleKeyPress);
 
     return () => {
-      window.removeEventListener("keydown", handleKeyPress);
+      window.removeEventListener('keydown', handleKeyPress);
     };
-  }, [
-    isPaused,
-    isGameMode,
-    gameOver,
-    showShop,
-    showHelp,
-    contextMenu,
-    shopCollapsed,
-  ]);
+  }, [isPaused, isGameMode, gameOver, showShop, showHelp, contextMenu, shopCollapsed]);
 
   const updateResourceDisplay = () => {
     setCredits(gameState.getCredits());
@@ -503,8 +502,8 @@ export const GameUI: React.FC<GameUIProps> = ({
   };
 
   const showNotification = (message: string) => {
-    const notification = document.createElement("div");
-    notification.className = "game-notification";
+    const notification = document.createElement('div');
+    notification.className = 'game-notification';
     notification.textContent = message;
     document.body.appendChild(notification);
 
@@ -516,7 +515,7 @@ export const GameUI: React.FC<GameUIProps> = ({
   const startNewGame = () => {
     // Play UI sound
     SoundSystem.getInstance().playUI('click');
-    
+
     // Clear any existing countdown
     if (preparationIntervalRef.current) {
       clearInterval(preparationIntervalRef.current);
@@ -531,13 +530,13 @@ export const GameUI: React.FC<GameUIProps> = ({
     const allBatteries = placementSystem.getAllBatteries();
     const batteryIds: string[] = [];
 
-    allBatteries.forEach((battery) => {
+    allBatteries.forEach(battery => {
       const batteryId = placementSystem.getBatteryId(battery);
       if (batteryId) batteryIds.push(batteryId);
     });
 
     // Remove all batteries
-    batteryIds.forEach((id) => {
+    batteryIds.forEach(id => {
       placementSystem.removeBattery(id);
     });
 
@@ -545,7 +544,7 @@ export const GameUI: React.FC<GameUIProps> = ({
     gameState.startNewGame();
 
     // Create a fresh initial battery with consistent ID
-    const initialId = "battery_initial";
+    const initialId = 'battery_initial';
 
     // Place the battery first (this adds it to placedDomes and game state)
     placementSystem.placeBatteryAt(new THREE.Vector3(0, 0, 0), initialId, 1);
@@ -565,7 +564,7 @@ export const GameUI: React.FC<GameUIProps> = ({
 
     // Start fresh wave sequence
     waveManager.startGame();
-    showNotification("New game started!");
+    showNotification('New game started!');
     // Update display
     setScore(0);
     setCredits(gameState.getCredits());
@@ -575,7 +574,7 @@ export const GameUI: React.FC<GameUIProps> = ({
   };
 
   const vibrate = (pattern: number | number[]) => {
-    if ("vibrate" in navigator) {
+    if ('vibrate' in navigator) {
       navigator.vibrate(pattern);
     }
   };
@@ -596,7 +595,7 @@ export const GameUI: React.FC<GameUIProps> = ({
     if (resourceManager.purchaseInterceptorRestock()) {
       SoundSystem.getInstance().playUI('success');
       vibrate(30);
-      showNotification("Purchased 50 interceptors!");
+      showNotification('Purchased 50 interceptors!');
     } else {
       SoundSystem.getInstance().playUI('fail');
       vibrate([10, 10, 10]); // Error pattern
@@ -606,7 +605,7 @@ export const GameUI: React.FC<GameUIProps> = ({
   const handleEmergencySupply = () => {
     if (resourceManager.purchaseEmergencySupply()) {
       vibrate([50, 50, 50]); // Success pattern
-      showNotification("Emergency supply delivered!");
+      showNotification('Emergency supply delivered!');
     } else {
       vibrate([10, 10, 10]); // Error pattern
     }
@@ -1530,6 +1529,38 @@ export const GameUI: React.FC<GameUIProps> = ({
           text-align: center;
         }
         
+        .camera-mode-panel {
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          padding: 2px 8px;
+        }
+        
+        .camera-mode-select {
+          background: rgba(0, 56, 184, 0.3);
+          border: 2px solid #0038b8;
+          color: #0095ff;
+          font-size: 14px;
+          font-weight: bold;
+          cursor: pointer;
+          padding: 4px 8px;
+          outline: none;
+          border-radius: 5px;
+          transition: all 0.3s;
+          -webkit-tap-highlight-color: transparent;
+          min-width: 120px;
+        }
+        
+        .camera-mode-select:hover {
+          background: rgba(0, 56, 184, 0.5);
+        }
+        
+        .camera-mode-select option {
+          background: #000;
+          color: white;
+          padding: 5px;
+        }
+        
         .intercept-mode-button {
           background: rgba(0, 56, 184, 0.3);
           border: 2px solid #0038b8;
@@ -1666,21 +1697,17 @@ export const GameUI: React.FC<GameUIProps> = ({
       `}</style>
 
       {/* Time dilation visual effect */}
-      <div
-        className={`time-dilation-effect ${
-          showShop && !shopCollapsed ? "active" : ""
-        }`}
-      />
+      <div className={`time-dilation-effect ${showShop && !shopCollapsed ? 'active' : ''}`} />
 
       {!hasViewedHelp && <div className="help-arrow">→</div>}
 
       <button
-        className={`help-button ${!hasViewedHelp ? "pulse" : ""}`}
+        className={`help-button ${!hasViewedHelp ? 'pulse' : ''}`}
         onClick={() => {
           setShowHelp(true);
           // Mark help as viewed
           if (!hasViewedHelp) {
-            localStorage.setItem("helpViewed", "true");
+            localStorage.setItem('helpViewed', 'true');
             setHasViewedHelp(true);
           }
           // Disable OrbitControls
@@ -1708,11 +1735,7 @@ export const GameUI: React.FC<GameUIProps> = ({
                       <span className="resource-icon">🚀</span>
                       <span
                         className={`resource-value ${
-                          interceptors < 10
-                            ? "warning"
-                            : interceptors < 5
-                            ? "warning-low"
-                            : ""
+                          interceptors < 10 ? 'warning' : interceptors < 5 ? 'warning-low' : ''
                         }`}
                       >
                         {interceptors}
@@ -1721,20 +1744,15 @@ export const GameUI: React.FC<GameUIProps> = ({
                     <div className="resource-item">
                       <span className="resource-icon">🛡️</span>
                       <span className="resource-value">
-                        {placementInfo.placedDomes}/
-                        {placementInfo.unlockedDomes}
+                        {placementInfo.placedDomes}/{placementInfo.unlockedDomes}
                       </span>
                     </div>
                   </div>
                   <div className="ui-panel score-panel">
-                    <span style={{ fontSize: "20px" }}>🏆</span>
+                    <span style={{ fontSize: '20px' }}>🏆</span>
                     <div>
-                      <div className="score-value">
-                        {score.toLocaleString()}
-                      </div>
-                      <div className="high-score">
-                        High Score: {highScore.toLocaleString()}
-                      </div>
+                      <div className="score-value">{score.toLocaleString()}</div>
+                      <div className="high-score">High Score: {highScore.toLocaleString()}</div>
                     </div>
                   </div>
                 </div>
@@ -1749,10 +1767,7 @@ export const GameUI: React.FC<GameUIProps> = ({
                         <div
                           className="wave-progress-bar"
                           style={{
-                            width: `${
-                              (waveProgress.destroyed / waveProgress.total) *
-                              100
-                            }%`,
+                            width: `${(waveProgress.destroyed / waveProgress.total) * 100}%`,
                           }}
                         />
                       </div>
@@ -1761,20 +1776,194 @@ export const GameUI: React.FC<GameUIProps> = ({
                       </div>
                     </>
                   ) : preparationTime > 0 ? (
-                    <div className="preparation-timer">
-                      Next wave in {preparationTime}s
-                    </div>
+                    <div className="preparation-timer">Next wave in {preparationTime}s</div>
                   ) : null}
                 </div>
               </div>
 
               <div className="top-right">
-                <div className="ui-panel intercept-mode-panel">
-                  {currentWave >= 5 ? (
+                <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
+                  <div className="ui-panel camera-mode-panel">
+                    <select
+                      className="camera-mode-select"
+                      value={currentCameraMode}
+                      onChange={e => {
+                        const newMode = e.target.value;
+                        setCurrentCameraMode(newMode);
+                        const cameraController = (window as any).__cameraController;
+                        if (cameraController) {
+                          // For follow modes, set desired mode and try to find target
+                          if (newMode === 'follow_threat') {
+                            const threatManager = (window as any).__threatManager;
+                            if (threatManager) {
+                              const threats = threatManager.getActiveThreats();
+                              if (threats.length > 0) {
+                                cameraController.setMode(newMode, threats[0]);
+                              } else {
+                                // Set desired mode - will switch when threat appears
+                                cameraController.setDesiredMode(newMode);
+                                showNotification('Waiting for threats...');
+                              }
+                            }
+                          } else if (newMode === 'follow_interceptor') {
+                            const interceptionSystem = (window as any).__interceptionSystem;
+                            if (interceptionSystem) {
+                              const interceptors = interceptionSystem.getActiveInterceptors();
+                              if (interceptors.length > 0) {
+                                cameraController.setMode(newMode, interceptors[0]);
+                              } else {
+                                // Set desired mode - will switch when interceptor appears
+                                cameraController.setDesiredMode(newMode);
+                                showNotification('Waiting for interceptors...');
+                              }
+                            }
+                          } else {
+                            cameraController.setMode(newMode);
+                          }
+                        }
+                        showNotification(
+                          `Camera: ${cameraModesGame.find(m => m.value === newMode)?.label}`
+                        );
+                      }}
+                    >
+                      {cameraModesGame.map(mode => (
+                        <option key={mode.value} value={mode.value}>
+                          {mode.label}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                  <div className="ui-panel intercept-mode-panel">
+                    {currentWave >= 5 ? (
+                      <button
+                        className={`intercept-mode-button ${autoIntercept ? 'active' : ''}`}
+                        onClick={() => {
+                          vibrate(15);
+                          const controls = (window as any).__simulationControls;
+                          const newValue = !controls.autoIntercept;
+                          controls.autoIntercept = newValue;
+                          setAutoIntercept(newValue);
+                          // Save to localStorage
+                          localStorage.setItem('ironDome_interceptMode', newValue.toString());
+                          showNotification(
+                            newValue ? 'Auto-Intercept Enabled' : 'Manual Targeting Mode'
+                          );
+                        }}
+                        title={
+                          autoIntercept
+                            ? 'Automatic interception enabled'
+                            : 'Click on threats to intercept'
+                        }
+                      >
+                        {autoIntercept ? '🤖' : '🎯'}
+                      </button>
+                    ) : (
+                      <div
+                        className="auto-intercept-locked"
+                        title={`Auto-intercept unlocks at Wave 5 (${5 - currentWave} waves to go)`}
+                      >
+                        <div style={{ fontSize: '14px' }}>🔒</div>
+                        <div style={{ fontSize: '9px', color: '#ccc' }}>Wave 5</div>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              </div>
+            </>
+          ) : (
+            // Sandbox mode: Show sandbox info and intercept mode toggle
+            <>
+              <div className="top-left">{/* Empty left section for consistency */}</div>
+
+              <div className="top-center">
+                <div className="ui-panel wave-panel">
+                  <div className="wave-number">Sandbox Mode</div>
+                  <div style={{ fontSize: '14px', marginTop: '5px' }}>Free Play</div>
+                </div>
+              </div>
+
+              <div className="top-right">
+                <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
+                  <div className="ui-panel camera-mode-panel">
+                    <select
+                      className="camera-mode-select"
+                      value={currentCameraMode}
+                      onChange={e => {
+                        const newMode = e.target.value;
+                        setCurrentCameraMode(newMode);
+                        const cameraController = (window as any).__cameraController;
+                        if (cameraController) {
+                          // For follow modes, set desired mode and try to find target
+                          if (newMode === 'follow_threat') {
+                            const threatManager = (window as any).__threatManager;
+                            if (threatManager) {
+                              const threats = threatManager.getActiveThreats();
+                              if (threats.length > 0) {
+                                cameraController.setMode(newMode, threats[0]);
+                              } else {
+                                // Set desired mode - will switch when threat appears
+                                cameraController.setDesiredMode(newMode);
+                                showNotification('Waiting for threats...');
+                              }
+                            }
+                          } else if (newMode === 'follow_interceptor') {
+                            const interceptionSystem = (window as any).__interceptionSystem;
+                            if (interceptionSystem) {
+                              const interceptors = interceptionSystem.getActiveInterceptors();
+                              if (interceptors.length > 0) {
+                                cameraController.setMode(newMode, interceptors[0]);
+                              } else {
+                                // Set desired mode - will switch when interceptor appears
+                                cameraController.setDesiredMode(newMode);
+                                showNotification('Waiting for interceptors...');
+                              }
+                            }
+                          } else if (newMode === 'first_person') {
+                            // For first person, try interceptor first, then threat
+                            const interceptionSystem = (window as any).__interceptionSystem;
+                            const threatManager = (window as any).__threatManager;
+                            let target = null;
+
+                            if (interceptionSystem) {
+                              const interceptors = interceptionSystem.getActiveInterceptors();
+                              if (interceptors.length > 0) {
+                                target = interceptors[0];
+                              }
+                            }
+
+                            if (!target && threatManager) {
+                              const threats = threatManager.getActiveThreats();
+                              if (threats.length > 0) {
+                                target = threats[0];
+                              }
+                            }
+
+                            if (target) {
+                              cameraController.setMode(newMode, target);
+                            } else {
+                              // Set desired mode - will switch when target appears
+                              cameraController.setDesiredMode(newMode);
+                              showNotification('Waiting for projectiles...');
+                            }
+                          } else {
+                            cameraController.setMode(newMode);
+                          }
+                        }
+                        showNotification(
+                          `Camera: ${cameraModesSandbox.find(m => m.value === newMode)?.label}`
+                        );
+                      }}
+                    >
+                      {cameraModesSandbox.map(mode => (
+                        <option key={mode.value} value={mode.value}>
+                          {mode.label}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                  <div className="ui-panel intercept-mode-panel">
                     <button
-                      className={`intercept-mode-button ${
-                        autoIntercept ? "active" : ""
-                      }`}
+                      className={`intercept-mode-button ${autoIntercept ? 'active' : ''}`}
                       onClick={() => {
                         vibrate(15);
                         const controls = (window as any).__simulationControls;
@@ -1782,87 +1971,20 @@ export const GameUI: React.FC<GameUIProps> = ({
                         controls.autoIntercept = newValue;
                         setAutoIntercept(newValue);
                         // Save to localStorage
-                        localStorage.setItem(
-                          "ironDome_interceptMode",
-                          newValue.toString()
-                        );
+                        localStorage.setItem('ironDome_interceptMode', newValue.toString());
                         showNotification(
-                          newValue
-                            ? "Auto-Intercept Enabled"
-                            : "Manual Targeting Mode"
+                          newValue ? 'Auto-Intercept Enabled' : 'Manual Targeting Mode'
                         );
                       }}
                       title={
                         autoIntercept
-                          ? "Automatic interception enabled"
-                          : "Click on threats to intercept"
+                          ? 'Automatic interception enabled'
+                          : 'Click on threats to intercept'
                       }
                     >
-                      {autoIntercept ? "🤖" : "🎯"}
+                      {autoIntercept ? '🤖' : '🎯'}
                     </button>
-                  ) : (
-                    <div
-                      className="auto-intercept-locked"
-                      title={`Auto-intercept unlocks at Wave 5 (${
-                        5 - currentWave
-                      } waves to go)`}
-                    >
-                      <div style={{ fontSize: "14px" }}>🔒</div>
-                      <div style={{ fontSize: "9px", color: "#ccc" }}>
-                        Wave 5
-                      </div>
-                    </div>
-                  )}
-                </div>
-              </div>
-            </>
-          ) : (
-            // Sandbox mode: Show sandbox info and intercept mode toggle
-            <>
-              <div className="top-left">
-                {/* Empty left section for consistency */}
-              </div>
-
-              <div className="top-center">
-                <div className="ui-panel wave-panel">
-                  <div className="wave-number">Sandbox Mode</div>
-                  <div style={{ fontSize: "14px", marginTop: "5px" }}>
-                    Free Play
                   </div>
-                </div>
-              </div>
-
-              <div className="top-right">
-                <div className="ui-panel intercept-mode-panel">
-                  <button
-                    className={`intercept-mode-button ${
-                      autoIntercept ? "active" : ""
-                    }`}
-                    onClick={() => {
-                      vibrate(15);
-                      const controls = (window as any).__simulationControls;
-                      const newValue = !controls.autoIntercept;
-                      controls.autoIntercept = newValue;
-                      setAutoIntercept(newValue);
-                      // Save to localStorage
-                      localStorage.setItem(
-                        "ironDome_interceptMode",
-                        newValue.toString()
-                      );
-                      showNotification(
-                        newValue
-                          ? "Auto-Intercept Enabled"
-                          : "Manual Targeting Mode"
-                      );
-                    }}
-                    title={
-                      autoIntercept
-                        ? "Automatic interception enabled"
-                        : "Click on threats to intercept"
-                    }
-                  >
-                    {autoIntercept ? "🤖" : "🎯"}
-                  </button>
                 </div>
               </div>
             </>
@@ -1873,7 +1995,7 @@ export const GameUI: React.FC<GameUIProps> = ({
       <div className="bottom-controls">
         <div className="mode-switch">
           <button
-            className={`mode-button ${isGameMode ? "active" : ""}`}
+            className={`mode-button ${isGameMode ? 'active' : ''}`}
             onClick={() => {
               vibrate(15);
               onModeChange?.(true);
@@ -1882,7 +2004,7 @@ export const GameUI: React.FC<GameUIProps> = ({
             GAME
           </button>
           <button
-            className={`mode-button ${!isGameMode ? "active" : ""}`}
+            className={`mode-button ${!isGameMode ? 'active' : ''}`}
             onClick={() => {
               vibrate(15);
               onModeChange?.(false);
@@ -1895,7 +2017,7 @@ export const GameUI: React.FC<GameUIProps> = ({
         {isGameMode && (
           <>
             <button
-              className={`control-button ${confirmNewGame ? "warning" : ""}`}
+              className={`control-button ${confirmNewGame ? 'warning' : ''}`}
               onClick={() => {
                 vibrate(20);
                 if (!confirmNewGame) {
@@ -1916,7 +2038,7 @@ export const GameUI: React.FC<GameUIProps> = ({
                 }
               }}
             >
-              {confirmNewGame ? "Are you sure?" : "New Game"}
+              {confirmNewGame ? 'Are you sure?' : 'New Game'}
             </button>
 
             {!isWaveActive && preparationTime > 0 && (
@@ -1925,7 +2047,7 @@ export const GameUI: React.FC<GameUIProps> = ({
                 onClick={() => {
                   vibrate(15);
                   waveManager.skipPreparation();
-                  showNotification("Skipping to next wave!");
+                  showNotification('Skipping to next wave!');
                 }}
               >
                 Start Next Wave
@@ -1937,11 +2059,11 @@ export const GameUI: React.FC<GameUIProps> = ({
 
       <div className="action-buttons">
         <button
-          className={`game-button ${placementMode ? "active" : ""}`}
+          className={`game-button ${placementMode ? 'active' : ''}`}
           onClick={handlePlaceDome}
           disabled={!placementSystem.canPlaceNewDome()}
         >
-          {placementMode ? "Cancel Placement" : "Place Dome"}
+          {placementMode ? 'Cancel Placement' : 'Place Dome'}
           {!placementMode &&
             isGameMode &&
             placementInfo.placedDomes >= placementInfo.unlockedDomes && (
@@ -1968,17 +2090,13 @@ export const GameUI: React.FC<GameUIProps> = ({
 
       {/* Game Over Screen */}
       {gameOver && (
-        <div className="game-over-screen" onClick={(e) => e.stopPropagation()}>
+        <div className="game-over-screen" onClick={e => e.stopPropagation()}>
           <div className="game-over-title">GAME OVER</div>
-          {gameOver.isHighScore && (
-            <div className="game-over-subtitle">NEW HIGH SCORE!</div>
-          )}
+          {gameOver.isHighScore && <div className="game-over-subtitle">NEW HIGH SCORE!</div>}
           <div className="game-over-stats">
             <div className="game-over-stat">
               <span className="game-over-stat-label">Final Score</span>
-              <span className="game-over-stat-value">
-                {gameOver.score.toLocaleString()}
-              </span>
+              <span className="game-over-stat-value">{gameOver.score.toLocaleString()}</span>
             </div>
             <div className="game-over-stat">
               <span className="game-over-stat-label">Waves Survived</span>
@@ -2036,7 +2154,7 @@ export const GameUI: React.FC<GameUIProps> = ({
       {showShop && (
         <div className="shop-container">
           {/* Shop Panel (shows above button when expanded) */}
-          <div className={`shop-panel ${shopCollapsed ? "collapsed" : ""}`}>
+          <div className={`shop-panel ${shopCollapsed ? 'collapsed' : ''}`}>
             <div className="shop-header">
               <h2 className="shop-title">Supply Shop</h2>
               <button
@@ -2045,8 +2163,7 @@ export const GameUI: React.FC<GameUIProps> = ({
                   vibrate(10);
                   setShopCollapsed(true);
                   // Reset time scale
-                  const simulationControls = (window as any)
-                    .__simulationControls;
+                  const simulationControls = (window as any).__simulationControls;
                   if (simulationControls) {
                     simulationControls.timeScale = 1.0;
                   }
@@ -2086,7 +2203,7 @@ export const GameUI: React.FC<GameUIProps> = ({
                     onClick={() => {
                       if (resourceManager.purchaseNewDome()) {
                         vibrate(30);
-                        showNotification("New dome slot unlocked!");
+                        showNotification('New dome slot unlocked!');
                         updateResourceDisplay();
                       } else {
                         vibrate([10, 10, 10]); // Error pattern
@@ -2105,7 +2222,7 @@ export const GameUI: React.FC<GameUIProps> = ({
                   <div className="shop-item-name">Auto-Repair</div>
                   <div className="shop-item-description">
                     {gameState.getAutoRepairLevel() === 0
-                      ? "Auto fix"
+                      ? 'Auto fix'
                       : `Lvl ${gameState.getAutoRepairLevel()}/3`}
                   </div>
                 </div>
@@ -2115,14 +2232,10 @@ export const GameUI: React.FC<GameUIProps> = ({
                     onClick={() => {
                       const currentLevel = gameState.getAutoRepairLevel();
                       if (currentLevel >= 3) {
-                        showNotification(
-                          "Auto-repair is already at maximum level!"
-                        );
+                        showNotification('Auto-repair is already at maximum level!');
                         return;
                       }
-                      const cost = resourceManager
-                        .getCosts()
-                        .autoRepair(currentLevel + 1);
+                      const cost = resourceManager.getCosts().autoRepair(currentLevel + 1);
                       if (gameState.spendCredits(cost)) {
                         gameState.upgradeAutoRepair();
                         vibrate(30);
@@ -2132,14 +2245,13 @@ export const GameUI: React.FC<GameUIProps> = ({
                         updateResourceDisplay();
                         // Apply auto-repair rate to all batteries
                         const repairRates = [0, 0.5, 1.0, 2.0];
-                        const newRate =
-                          repairRates[gameState.getAutoRepairLevel()];
-                        placementSystem.getAllBatteries().forEach((battery) => {
+                        const newRate = repairRates[gameState.getAutoRepairLevel()];
+                        placementSystem.getAllBatteries().forEach(battery => {
                           battery.setAutoRepairRate(newRate);
                         });
                       } else {
                         vibrate([10, 10, 10]); // Error pattern
-                        showNotification("Insufficient credits!");
+                        showNotification('Insufficient credits!');
                       }
                     }}
                     disabled={
@@ -2151,12 +2263,10 @@ export const GameUI: React.FC<GameUIProps> = ({
                     }
                   >
                     {gameState.getAutoRepairLevel() >= 3
-                      ? "MAX"
+                      ? 'MAX'
                       : `$${resourceManager
                           .getCosts()
-                          .autoRepair(
-                            (gameState.getAutoRepairLevel() || 0) + 1
-                          )}`}
+                          .autoRepair((gameState.getAutoRepairLevel() || 0) + 1)}`}
                   </button>
                 </div>
               </div>
@@ -2218,10 +2328,7 @@ export const GameUI: React.FC<GameUIProps> = ({
               >
                 Resume Game
               </button>
-              <button
-                className="pause-button"
-                onClick={() => setShowHelp(true)}
-              >
+              <button className="pause-button" onClick={() => setShowHelp(true)}>
                 Help
               </button>
               <button

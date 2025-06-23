@@ -1,14 +1,14 @@
-import React, { useState, useEffect } from 'react'
-import { IronDomeBattery } from '../entities/IronDomeBattery'
-import { DomePlacementSystem } from '../game/DomePlacementSystem'
+import React, { useState, useEffect } from 'react';
+import { IronDomeBattery } from '../entities/IronDomeBattery';
+import { DomePlacementSystem } from '../game/DomePlacementSystem';
 
 interface DomeContextMenuProps {
-  battery: IronDomeBattery | null
-  batteryId: string | null
-  position: { x: number; y: number }
-  onClose: () => void
-  placementSystem: DomePlacementSystem
-  isGameMode: boolean
+  battery: IronDomeBattery | null;
+  batteryId: string | null;
+  position: { x: number; y: number };
+  onClose: () => void;
+  placementSystem: DomePlacementSystem;
+  isGameMode: boolean;
 }
 
 export const DomeContextMenu: React.FC<DomeContextMenuProps> = ({
@@ -17,107 +17,109 @@ export const DomeContextMenu: React.FC<DomeContextMenuProps> = ({
   position,
   onClose,
   placementSystem,
-  isGameMode
+  isGameMode,
 }) => {
-  const [batteryConfig, setBatteryConfig] = useState<any>(null)
-  const [batteryStats, setBatteryStats] = useState<any>(null)
-  const [refreshKey, setRefreshKey] = useState(0)
-  
+  const [batteryConfig, setBatteryConfig] = useState<any>(null);
+  const [batteryStats, setBatteryStats] = useState<any>(null);
+  const [refreshKey, setRefreshKey] = useState(0);
+
   // Update placement info in real-time - MUST be before any conditional returns
   const [placementInfo, setPlacementInfo] = useState<any>(() => {
-    const placements = placementSystem.getPlacementInfo()
-    const domePlacement = placementSystem.getDomePlacements().find(p => p.id === batteryId)
-    return { ...placements, level: domePlacement?.level || 1 }
-  })
-  
+    const placements = placementSystem.getPlacementInfo();
+    const domePlacement = placementSystem.getDomePlacements().find(p => p.id === batteryId);
+    return { ...placements, level: domePlacement?.level || 1 };
+  });
+
   useEffect(() => {
     if (battery) {
       // Initial update
-      setBatteryConfig(battery.getConfig())
-      setBatteryStats(battery.getStats())
-      
+      setBatteryConfig(battery.getConfig());
+      setBatteryStats(battery.getStats());
+
       // Set up interval for real-time updates
       const interval = setInterval(() => {
-        setBatteryStats(battery.getStats())
+        setBatteryStats(battery.getStats());
         // Also update config in case it changed (e.g., from damage)
-        setBatteryConfig(battery.getConfig())
-      }, 100) // Update every 100ms for smooth real-time updates
-      
-      return () => clearInterval(interval)
+        setBatteryConfig(battery.getConfig());
+      }, 100); // Update every 100ms for smooth real-time updates
+
+      return () => clearInterval(interval);
     }
-  }, [battery, refreshKey])
-  
+  }, [battery, refreshKey]);
+
   useEffect(() => {
     const updatePlacementInfo = () => {
-      const placements = placementSystem.getPlacementInfo()
-      const domePlacement = placementSystem.getDomePlacements().find(p => p.id === batteryId)
-      setPlacementInfo({ ...placements, level: domePlacement?.level || 1 })
-    }
-    
+      const placements = placementSystem.getPlacementInfo();
+      const domePlacement = placementSystem.getDomePlacements().find(p => p.id === batteryId);
+      setPlacementInfo({ ...placements, level: domePlacement?.level || 1 });
+    };
+
     // Update placement info with battery stats
-    const interval = setInterval(updatePlacementInfo, 100)
-    
+    const interval = setInterval(updatePlacementInfo, 100);
+
     // Also update on battery upgrade event
     const handleBatteryUpgraded = () => {
-      updatePlacementInfo()
-      setRefreshKey(prev => prev + 1)
-    }
-    window.addEventListener('batteryUpgraded', handleBatteryUpgraded)
-    
+      updatePlacementInfo();
+      setRefreshKey(prev => prev + 1);
+    };
+    window.addEventListener('batteryUpgraded', handleBatteryUpgraded);
+
     return () => {
-      clearInterval(interval)
-      window.removeEventListener('batteryUpgraded', handleBatteryUpgraded)
-    }
-  }, [batteryId, placementSystem])
-  
-  if (!battery || !batteryId || !batteryConfig || !batteryStats) return null
-  
+      clearInterval(interval);
+      window.removeEventListener('batteryUpgraded', handleBatteryUpgraded);
+    };
+  }, [batteryId, placementSystem]);
+
+  if (!battery || !batteryId || !batteryConfig || !batteryStats) return null;
+
   const handleSell = () => {
     if (!isLastBattery) {
-      const sellValue = getSellValue()
-      const message = isGameMode 
+      const sellValue = getSellValue();
+      const message = isGameMode
         ? `Sell this Level ${placementInfo.level} battery for ${sellValue} credits?`
-        : `Remove this Level ${placementInfo.level} battery?`
-      
+        : `Remove this Level ${placementInfo.level} battery?`;
+
       if (window.confirm(message)) {
-        const success = placementSystem.sellBattery(batteryId)
+        const success = placementSystem.sellBattery(batteryId);
         if (success) {
-          onClose()
+          onClose();
           // Force UI update by dispatching event
-          window.dispatchEvent(new Event('batteryRemoved'))
+          window.dispatchEvent(new Event('batteryRemoved'));
         }
       }
     }
-  }
-  
+  };
+
   const getSellValue = () => {
     // Return 60% of total investment
-    let totalCost = 0
+    let totalCost = 0;
     for (let i = 1; i < placementInfo.level; i++) {
-      totalCost += (500 * i) // Cost formula from getDomeUpgradeCost
+      totalCost += 500 * i; // Cost formula from getDomeUpgradeCost
     }
-    return Math.floor(totalCost * 0.6)
-  }
-  
+    return Math.floor(totalCost * 0.6);
+  };
+
   const handleUpgrade = () => {
-    const success = placementSystem.upgradeBattery(batteryId)
+    const success = placementSystem.upgradeBattery(batteryId);
     if (success) {
       // Don't close the menu - just update the battery config
-      const updatedBattery = placementSystem.getBattery(batteryId)
+      const updatedBattery = placementSystem.getBattery(batteryId);
       if (updatedBattery) {
-        setBatteryConfig(updatedBattery.getConfig())
+        setBatteryConfig(updatedBattery.getConfig());
       }
       // Force re-render to update stats and level
-      setRefreshKey(prev => prev + 1)
+      setRefreshKey(prev => prev + 1);
       // Force UI update by dispatching event
-      window.dispatchEvent(new Event('batteryUpgraded'))
+      window.dispatchEvent(new Event('batteryUpgraded'));
     }
-  }
-  
-  const isLastBattery = placementInfo.placedDomes <= 1
-  
+  };
+
+  const isLastBattery = placementInfo.placedDomes <= 1;
+
   return (
-    <div style={{ position: 'fixed', top: 0, left: 0, width: '100%', height: '100%', zIndex: 9999 }}>
+    <div
+      style={{ position: 'fixed', top: 0, left: 0, width: '100%', height: '100%', zIndex: 9999 }}
+    >
       <style>{`
         .context-menu-backdrop {
           position: fixed;
@@ -298,39 +300,44 @@ export const DomeContextMenu: React.FC<DomeContextMenuProps> = ({
           background: #ff0000;
         }
       `}</style>
-      
-      <div 
+
+      <div
         className="context-menu-backdrop"
-        onClick={(e) => {
-          e.stopPropagation()
-          onClose()
+        onClick={e => {
+          e.stopPropagation();
+          onClose();
         }}
-        onContextMenu={(e) => {
-          e.preventDefault()
-          onClose()
+        onContextMenu={e => {
+          e.preventDefault();
+          onClose();
         }}
       />
-      
-      <div 
+
+      <div
         className="dome-context-menu"
         style={{
           left: `${position.x}px`,
           top: `${position.y}px`,
-          transform: position.x > window.innerWidth - 300 ? 'translateX(-100%)' : 'none'
+          transform: position.x > window.innerWidth - 300 ? 'translateX(-100%)' : 'none',
         }}
-        onClick={(e) => e.stopPropagation()}
-        onContextMenu={(e) => e.preventDefault()}
+        onClick={e => e.stopPropagation()}
+        onContextMenu={e => e.preventDefault()}
       >
-        <button className="close-button" onClick={(e) => {
-          e.stopPropagation()
-          onClose()
-        }}>✕</button>
-        
+        <button
+          className="close-button"
+          onClick={e => {
+            e.stopPropagation();
+            onClose();
+          }}
+        >
+          ✕
+        </button>
+
         <div className="context-menu-title">
           Iron Dome Battery
           <span className="battery-level">Level {placementInfo.level}</span>
         </div>
-        
+
         <div className="battery-stats">
           <div className="stat-row">
             <span className="stat-label">Position</span>
@@ -338,58 +345,67 @@ export const DomeContextMenu: React.FC<DomeContextMenuProps> = ({
               {Math.round(batteryConfig.position.x)}, {Math.round(batteryConfig.position.z)}
             </span>
           </div>
-          
+
           <div className="stat-row">
             <span className="stat-label">Range</span>
             <span className="stat-value">{batteryConfig.maxRange}m</span>
           </div>
-          
+
           <div className="stat-row">
             <span className="stat-label">Loaded Tubes</span>
-            <span className="stat-value">{batteryStats.loadedTubes}/{batteryStats.totalTubes}</span>
+            <span className="stat-value">
+              {batteryStats.loadedTubes}/{batteryStats.totalTubes}
+            </span>
           </div>
-          
+
           <div className="stat-row">
             <span className="stat-label">Success Rate</span>
             <span className="stat-value">{(batteryConfig.successRate * 100).toFixed(0)}%</span>
           </div>
-          
+
           {isGameMode && (
             <div className="stat-row">
               <span className="stat-label">Health</span>
-              <span className="stat-value">{batteryStats.health.current}/{batteryStats.health.max}</span>
+              <span className="stat-value">
+                {batteryStats.health.current}/{batteryStats.health.max}
+              </span>
             </div>
           )}
-          
+
           {isGameMode && (
             <div className="battery-health">
-              <div 
+              <div
                 className={`battery-health-fill ${
-                  batteryStats.health.percent < 0.3 ? 'health-critical' :
-                  batteryStats.health.percent < 0.6 ? 'health-warning' : ''
+                  batteryStats.health.percent < 0.3
+                    ? 'health-critical'
+                    : batteryStats.health.percent < 0.6
+                      ? 'health-warning'
+                      : ''
                 }`}
                 style={{ width: `${batteryStats.health.percent * 100}%` }}
               />
             </div>
           )}
         </div>
-        
+
         <div className="context-menu-actions">
           {isGameMode && batteryStats.health.percent < 1 && (
-            <button 
+            <button
               className="context-menu-button repair"
-              onClick={(e) => {
-                e.stopPropagation()
-                const repairCost = Math.ceil((batteryStats.health.max - batteryStats.health.current) * 2)
-                const success = placementSystem.repairBattery(batteryId, repairCost)
+              onClick={e => {
+                e.stopPropagation();
+                const repairCost = Math.ceil(
+                  (batteryStats.health.max - batteryStats.health.current) * 2
+                );
+                const success = placementSystem.repairBattery(batteryId, repairCost);
                 if (success) {
                   // Force re-render to update stats
-                  setRefreshKey(prev => prev + 1)
-                  window.dispatchEvent(new Event('batteryRepaired'))
+                  setRefreshKey(prev => prev + 1);
+                  window.dispatchEvent(new Event('batteryRepaired'));
                 }
               }}
               disabled={!placementSystem.canAffordRepair(batteryId)}
-              title={batteryStats.health.percent === 1 ? "Battery at full health" : ""}
+              title={batteryStats.health.percent === 1 ? 'Battery at full health' : ''}
             >
               Repair Battery
               <span className="upgrade-cost">
@@ -397,15 +413,15 @@ export const DomeContextMenu: React.FC<DomeContextMenuProps> = ({
               </span>
             </button>
           )}
-          
-          <button 
+
+          <button
             className="context-menu-button"
-            onClick={(e) => {
-              e.stopPropagation()
-              handleUpgrade()
+            onClick={e => {
+              e.stopPropagation();
+              handleUpgrade();
             }}
             disabled={placementInfo.level >= 5 || !placementSystem.canUpgradeBattery(batteryId)}
-            title={placementInfo.level >= 5 ? "Maximum level reached" : ""}
+            title={placementInfo.level >= 5 ? 'Maximum level reached' : ''}
           >
             Upgrade Battery
             {placementInfo.level >= 5 ? (
@@ -416,24 +432,24 @@ export const DomeContextMenu: React.FC<DomeContextMenuProps> = ({
               </span>
             ) : null}
           </button>
-          
-          <button 
+
+          <button
             className="context-menu-button danger"
-            onClick={(e) => {
-              e.stopPropagation()
+            onClick={e => {
+              e.stopPropagation();
               if (isLastBattery) {
-                alert('Cannot sell the last battery!')
+                alert('Cannot sell the last battery!');
               } else {
-                handleSell()
+                handleSell();
               }
             }}
             disabled={isLastBattery}
-            title={isLastBattery ? "Cannot sell the last battery" : ""}
+            title={isLastBattery ? 'Cannot sell the last battery' : ''}
           >
             {isGameMode ? `Sell Battery (${getSellValue()} credits)` : 'Remove Battery'}
           </button>
         </div>
       </div>
     </div>
-  )
-}
+  );
+};

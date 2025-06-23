@@ -1,27 +1,27 @@
 // Performance optimization configuration
 export interface PerformanceConfig {
   particles: {
-    enableLOD: boolean
-    maxParticlesPerSystem: number
-    maxActiveSystems: number
+    enableLOD: boolean;
+    maxParticlesPerSystem: number;
+    maxActiveSystems: number;
     lodDistances: {
-      near: number   // Full quality
-      medium: number // Reduced quality
-      far: number    // No particles
-    }
-  }
+      near: number; // Full quality
+      medium: number; // Reduced quality
+      far: number; // No particles
+    };
+  };
   rendering: {
-    maxDrawCalls: number
-    enableFrustumCulling: boolean
-    shadowMapSize: number
-    antialias: boolean
-  }
+    maxDrawCalls: number;
+    enableFrustumCulling: boolean;
+    shadowMapSize: number;
+    antialias: boolean;
+  };
   effects: {
-    enableSmokeTrails: boolean
-    enableGroundEffects: boolean
-    enableDebris: boolean
-    effectPoolSize: number
-  }
+    enableSmokeTrails: boolean;
+    enableGroundEffects: boolean;
+    enableDebris: boolean;
+    effectPoolSize: number;
+  };
 }
 
 export const performanceConfig: PerformanceConfig = {
@@ -32,22 +32,22 @@ export const performanceConfig: PerformanceConfig = {
     lodDistances: {
       near: 50,
       medium: 100,
-      far: 200
-    }
+      far: 200,
+    },
   },
   rendering: {
     maxDrawCalls: 150,
     enableFrustumCulling: true,
     shadowMapSize: 1024, // Reduced from 2048
-    antialias: true
+    antialias: true,
   },
   effects: {
     enableSmokeTrails: true,
     enableGroundEffects: true,
     enableDebris: true,
-    effectPoolSize: 50
-  }
-}
+    effectPoolSize: 50,
+  },
+};
 
 // Dynamic quality settings based on performance
 export function getQualitySettings(fps: number): Partial<PerformanceConfig> {
@@ -61,16 +61,16 @@ export function getQualitySettings(fps: number): Partial<PerformanceConfig> {
         lodDistances: {
           near: 30,
           medium: 60,
-          far: 100
-        }
+          far: 100,
+        },
       },
       effects: {
         enableSmokeTrails: false,
         enableGroundEffects: false,
         enableDebris: false,
-        effectPoolSize: 20
-      }
-    }
+        effectPoolSize: 20,
+      },
+    };
   } else if (fps < 45) {
     // Medium quality
     return {
@@ -81,18 +81,18 @@ export function getQualitySettings(fps: number): Partial<PerformanceConfig> {
         lodDistances: {
           near: 40,
           medium: 80,
-          far: 150
-        }
+          far: 150,
+        },
       },
       effects: {
         enableSmokeTrails: true,
         enableGroundEffects: false,
         enableDebris: true,
-        effectPoolSize: 30
-      }
-    }
+        effectPoolSize: 30,
+      },
+    };
   }
-  
+
   // High quality (default)
-  return performanceConfig
+  return performanceConfig;
 }

@@ -1,13 +1,13 @@
-import React from 'react'
+import React from 'react';
 
 interface HelpModalProps {
-  isOpen: boolean
-  onClose: () => void
-  isGameMode: boolean
+  isOpen: boolean;
+  onClose: () => void;
+  isGameMode: boolean;
 }
 
 export const HelpModal: React.FC<HelpModalProps> = ({ isOpen, onClose, isGameMode }) => {
-  if (!isOpen) return null
+  if (!isOpen) return null;
 
   return (
     <>
@@ -141,42 +141,45 @@ export const HelpModal: React.FC<HelpModalProps> = ({ isOpen, onClose, isGameMod
           }
         }
       `}</style>
-      
+
       <div className="help-modal-backdrop" onClick={onClose}>
-        <div className="help-modal" onClick={(e) => e.stopPropagation()}>
-          <button className="help-close" onClick={onClose}>✕</button>
-          
+        <div className="help-modal" onClick={e => e.stopPropagation()}>
+          <button className="help-close" onClick={onClose}>
+            ✕
+          </button>
+
           <h2 className="help-title">Iron Dome Defense System</h2>
-          
+
           <div className="help-section">
             <h3 className="help-section-title">Overview</h3>
             <p className="help-text">
-              Command Israel's Iron Dome missile defense system. Protect cities by intercepting 
-              incoming threats including rockets, missiles, and drones. Place defense batteries 
+              Command Israel's Iron Dome missile defense system. Protect cities by intercepting
+              incoming threats including rockets, missiles, and drones. Place defense batteries
               strategically and manage your resources wisely.
             </p>
           </div>
-          
+
           <div className="help-section">
             <h3 className="help-section-title">Game Modes</h3>
             <p className="help-text">
-              <strong>Game Mode:</strong> Progress through increasingly difficult waves. 
-              Every 10th wave is a boss wave with double difficulty. Manage limited resources, 
-              earn credits for successful defenses, and unlock upgrades. Batteries can be 
-              damaged and destroyed by nearby impacts.
+              <strong>Game Mode:</strong> Progress through increasingly difficult waves. Every 10th
+              wave is a boss wave with double difficulty. Manage limited resources, earn credits for
+              successful defenses, and unlock upgrades. Batteries can be damaged and destroyed by
+              nearby impacts.
             </p>
             <p className="help-text">
-              <strong>Sandbox Mode:</strong> Free play with unlimited resources. Place 
-              batteries freely, infinite interceptors, and no damage system. Perfect for 
-              practicing and experimenting.
+              <strong>Sandbox Mode:</strong> Free play with unlimited resources. Place batteries
+              freely, infinite interceptors, and no damage system. Perfect for practicing and
+              experimenting.
             </p>
           </div>
-          
+
           <div className="help-section">
             <h3 className="help-section-title">Controls</h3>
             <div className="help-controls">
               <p className="help-text">
-                <span className="help-key">Left Click</span> Fire interceptor at threat / Rotate camera
+                <span className="help-key">Left Click</span> Fire interceptor at threat / Rotate
+                camera
               </p>
               <p className="help-text">
                 <span className="help-key">Shift + Click</span> Mark threat as priority
@@ -198,66 +201,82 @@ export const HelpModal: React.FC<HelpModalProps> = ({ isOpen, onClose, isGameMod
               </p>
             </div>
           </div>
-          
+
           <div className="help-section">
             <h3 className="help-section-title">Threat Types</h3>
             <p className="help-text">
-              <strong>🚀 Rockets:</strong> Fast, low-altitude threats. Common but dangerous in large numbers.
+              <strong>🚀 Rockets:</strong> Fast, low-altitude threats. Common but dangerous in large
+              numbers.
             </p>
             <p className="help-text">
-              <strong>🎯 Missiles:</strong> High-altitude ballistic threats. Slower but harder to intercept.
+              <strong>🎯 Missiles:</strong> High-altitude ballistic threats. Slower but harder to
+              intercept.
             </p>
             <p className="help-text">
-              <strong>✈️ Drones:</strong> Slow-moving aerial threats. Can change direction and are persistent.
+              <strong>✈️ Drones:</strong> Slow-moving aerial threats. Can change direction and are
+              persistent.
             </p>
           </div>
-          
+
           <div className="help-section">
             <h3 className="help-section-title">Battery Management</h3>
             <p className="help-text">
               {isGameMode ? (
                 <>
-                  • Each battery has limited interceptors that reload over time<br/>
-                  • Upgrade batteries to improve range, accuracy, and reload speed<br/>
-                  • Protect your batteries - they can be damaged by impacts<br/>
-                  • Place new batteries strategically to cover blind spots<br/>
-                  • Each interceptor costs resources - use them wisely
+                  • Each battery has limited interceptors that reload over time
+                  <br />
+                  • Upgrade batteries to improve range, accuracy, and reload speed
+                  <br />
+                  • Protect your batteries - they can be damaged by impacts
+                  <br />
+                  • Place new batteries strategically to cover blind spots
+                  <br />• Each interceptor costs resources - use them wisely
                 </>
               ) : (
                 <>
-                  • Unlimited interceptors with instant reload<br/>
-                  • Free upgrades to experiment with different configurations<br/>
-                  • No damage - batteries cannot be destroyed<br/>
-                  • Place as many batteries as you want<br/>
-                  • Perfect for learning threat patterns and practicing
+                  • Unlimited interceptors with instant reload
+                  <br />
+                  • Free upgrades to experiment with different configurations
+                  <br />
+                  • No damage - batteries cannot be destroyed
+                  <br />
+                  • Place as many batteries as you want
+                  <br />• Perfect for learning threat patterns and practicing
                 </>
               )}
             </p>
           </div>
-          
+
           <div className="help-section">
             <h3 className="help-section-title">Interception Mechanics</h3>
             <p className="help-text">
-              • Interceptors use proximity fuses - they detonate within 5m of threats<br/>
-              • Blast damage is physics-based with lethal range of 3m<br/>
-              • Manual targeting (clicking threats) bypasses automatic systems<br/>
-              • Failed intercepts allow other interceptors to try<br/>
-              • Interceptors have limited fuel and guidance time
+              • Interceptors use proximity fuses - they detonate within 5m of threats
+              <br />
+              • Blast damage is physics-based with lethal range of 3m
+              <br />
+              • Manual targeting (clicking threats) bypasses automatic systems
+              <br />
+              • Failed intercepts allow other interceptors to try
+              <br />• Interceptors have limited fuel and guidance time
             </p>
           </div>
-          
+
           <div className="help-section">
             <h3 className="help-section-title">Tips & Strategy</h3>
             <p className="help-text">
-              • Watch for red impact prediction circles on the ground<br/>
-              • Prioritize threats heading toward your batteries<br/>
-              • Multiple interceptors improve success rate against difficult targets<br/>
-              • Place batteries to cover different approach angles<br/>
-              • Save credits for upgrades rather than many basic batteries<br/>
-              • Boss waves (every 10th) require maximum defense readiness
+              • Watch for red impact prediction circles on the ground
+              <br />
+              • Prioritize threats heading toward your batteries
+              <br />
+              • Multiple interceptors improve success rate against difficult targets
+              <br />
+              • Place batteries to cover different approach angles
+              <br />
+              • Save credits for upgrades rather than many basic batteries
+              <br />• Boss waves (every 10th) require maximum defense readiness
             </p>
           </div>
-          
+
           <div className="help-footer">
             <div className="star-of-david">✡️</div>
             <div className="hebrew-text">עם ישראל חי</div>
@@ -265,5 +284,5 @@ export const HelpModal: React.FC<HelpModalProps> = ({ isOpen, onClose, isGameMod
         </div>
       </div>
     </>
-  )
-}
+  );
+};
