@@ -254,6 +254,11 @@ batteries.forEach(battery => {
   battery.setRadarNetwork(radarNetwork)
   interceptionSystem.addBattery(battery)
   threatManager.registerBattery(battery)
+  
+  // Apply auto-repair rate based on saved upgrade level
+  const autoRepairLevel = gameState.getAutoRepairLevel()
+  const repairRates = [0, 0.5, 1.0, 2.0] // Health per second for each level
+  battery.setAutoRepairRate(repairRates[autoRepairLevel])
 })
 
 // Wave Manager
@@ -916,15 +921,33 @@ const sandboxControls = {
   
   // Battery controls
   addRandomBattery: () => {
-    const angle = Math.random() * Math.PI * 2
-    const distance = 50 + Math.random() * 100
-    const position = new THREE.Vector3(
-      Math.cos(angle) * distance,
-      0,
-      Math.sin(angle) * distance
-    )
-    domePlacementSystem.placeBatteryAt(position, `battery_${Date.now()}`, 1)
-    showNotification('Added random battery')
+    // Try to find a valid position for the battery
+    let attempts = 0
+    const maxAttempts = 50
+    let validPosition: THREE.Vector3 | null = null
+    
+    while (attempts < maxAttempts && !validPosition) {
+      const angle = Math.random() * Math.PI * 2
+      const distance = 50 + Math.random() * 100
+      const position = new THREE.Vector3(
+        Math.cos(angle) * distance,
+        0,
+        Math.sin(angle) * distance
+      )
+      
+      // Check if this position is valid
+      if (domePlacementSystem.isPositionValid(position)) {
+        validPosition = position
+      }
+      attempts++
+    }
+    
+    if (validPosition) {
+      domePlacementSystem.placeBatteryAt(validPosition, `battery_${Date.now()}`, 1)
+      showNotification('Added random battery')
+    } else {
+      showNotification('No valid position found for battery', 'error')
+    }
   },
   upgradeAllBatteries: () => {
     let upgraded = 0
@@ -1237,92 +1260,114 @@ function animate() {
     }
   }
 
-  // Update physics with time scale and pause
+  // Get active threats (needed for rendering even when paused)
+  const activeThreats = threatManager.getActiveThreats()
+  
+  // Update game systems only when not paused
   if (!simulationControls.pause) {
+    // Update physics with time scale
     profiler.startSection('Physics')
     const scaledDelta = deltaTime * simulationControls.timeScale
     world.step(1 / 60, scaledDelta, 3)
     profiler.endSection('Physics')
-  }
 
-  // Update threat manager
-  profiler.startSection('Threat Manager')
-  threatManager.update()
-  profiler.endSection('Threat Manager')
-  
-  // Cache active threats to avoid multiple calls
-  const activeThreats = threatManager.getActiveThreats()
-  
-  // Update all batteries (includes health bar orientation and reloading)
-  profiler.startSection('Batteries Update')
-  const allBatteries = domePlacementSystem.getAllBatteries()
-  allBatteries.forEach(battery => {
-    battery.update(deltaTime, activeThreats)
-  })
-  profiler.endSection('Batteries Update')
-  
-  // Update radar network - pass threats directly instead of mapping
-  if (activeThreats.length > 0) {
-    profiler.startSection('Radar Network')
-    radarNetwork.update(activeThreats)
-    profiler.endSection('Radar Network')
-  }
+    // Update threat manager
+    profiler.startSection('Threat Manager')
+    threatManager.update()
+    profiler.endSection('Threat Manager')
+    
+    // Update all batteries (includes health bar orientation and reloading)
+    profiler.startSection('Batteries Update')
+    const allBatteries = domePlacementSystem.getAllBatteries()
+    
+    // Apply auto-repair based on upgrade level
+    const autoRepairLevel = gameState.getAutoRepairLevel()
+    const repairRates = [0, 0.5, 1.0, 2.0] // Health per second for each level
+    
+    allBatteries.forEach(battery => {
+      battery.setAutoRepairRate(repairRates[autoRepairLevel])
+      battery.update(deltaTime, activeThreats)
+    })
+    profiler.endSection('Batteries Update')
+    
+    // Update radar network - pass threats directly instead of mapping
+    if (activeThreats.length > 0) {
+      profiler.startSection('Radar Network')
+      radarNetwork.update(activeThreats)
+      profiler.endSection('Radar Network')
+    }
 
-  // Update projectiles
-  profiler.startSection('Projectiles')
-  const projectileCount = projectiles.length
-  if (projectileCount > 0) {
-    profiler.startSection(`Update ${projectileCount} projectiles`)
-    for (let i = projectiles.length - 1; i >= 0; i--) {
-      const projectile = projectiles[i]
-      projectile.update()
+    // Update projectiles
+    profiler.startSection('Projectiles')
+    const projectileCount = projectiles.length
+    if (projectileCount > 0) {
+      profiler.startSection(`Update ${projectileCount} projectiles`)
+      for (let i = projectiles.length - 1; i >= 0; i--) {
+        const projectile = projectiles[i]
+        projectile.update()
 
-      // Remove projectiles that fall below ground
-      if (projectile.body.position.y < -10) {
-        projectile.destroy(scene, world)
-        projectiles.splice(i, 1)
+        // Remove projectiles that fall below ground
+        if (projectile.body.position.y < -10) {
+          projectile.destroy(scene, world)
+          projectiles.splice(i, 1)
+        }
       }
+      profiler.endSection(`Update ${projectileCount} projectiles`)
     }
-    profiler.endSection(`Update ${projectileCount} projectiles`)
+    profiler.endSection('Projectiles')
   }
-  profiler.endSection('Projectiles')
 
-  // Update interception system
+  // Update interception system and other systems
   let systemInterceptors: Projectile[] = []
-  if (simulationControls.autoIntercept) {
-    profiler.startSection('Interception System')
-    interceptionSystem.setProfiler(profiler) // Pass profiler for detailed tracking
-    systemInterceptors = interceptionSystem.update(activeThreats)
-    profiler.endSection('Interception System')
-  }
   
-  // Update dome placement system (for instanced rendering)
-  profiler.startSection('Dome Placement Update')
-  domePlacementSystem.update()
-  profiler.endSection('Dome Placement Update')
-  
-  // Update instanced renderers
-  if (useInstancedRendering) {
-    profiler.startSection('Instanced Rendering Update')
-    
-    // Update threats
-    if (useLODRendering) {
-      lodInstancedThreatRenderer.updateThreats(activeThreats, currentTime * 1000)
-    } else {
-      instancedThreatRenderer.updateThreats(activeThreats)
+  if (!simulationControls.pause) {
+    if (simulationControls.autoIntercept) {
+      profiler.startSection('Interception System')
+      interceptionSystem.setProfiler(profiler) // Pass profiler for detailed tracking
+      systemInterceptors = interceptionSystem.update(activeThreats)
+      profiler.endSection('Interception System')
     }
     
-    // Update interceptors (combine all projectiles)
-    const allInterceptors = [...projectiles, ...systemInterceptors]
-    instancedProjectileRenderer.updateProjectiles(allInterceptors)
+    // Update dome placement system (for instanced rendering)
+    profiler.startSection('Dome Placement Update')
+    domePlacementSystem.update()
+    profiler.endSection('Dome Placement Update')
     
-    // Update debris
-    instancedDebrisRenderer.update(deltaTime)
-    
-    // Update explosions
-    instancedExplosionRenderer.update()
-    
-    profiler.endSection('Instanced Rendering Update')
+    // Update instanced renderers (visual updates should continue when paused for smooth rendering)
+    if (useInstancedRendering) {
+      profiler.startSection('Instanced Rendering Update')
+      
+      // Update threats
+      if (useLODRendering) {
+        lodInstancedThreatRenderer.updateThreats(activeThreats, currentTime * 1000)
+      } else {
+        instancedThreatRenderer.updateThreats(activeThreats)
+      }
+      
+      // Update interceptors (combine all projectiles)
+      const allInterceptors = [...projectiles, ...systemInterceptors]
+      instancedProjectileRenderer.updateProjectiles(allInterceptors)
+      
+      // Update debris
+      instancedDebrisRenderer.update(deltaTime)
+      
+      // Update explosions
+      instancedExplosionRenderer.update()
+      
+      profiler.endSection('Instanced Rendering Update')
+    }
+  } else {
+    // When paused, still update visual positions for rendering
+    if (useInstancedRendering) {
+      if (useLODRendering) {
+        lodInstancedThreatRenderer.updateThreats(activeThreats, currentTime * 1000)
+      } else {
+        instancedThreatRenderer.updateThreats(activeThreats)
+      }
+      
+      const allInterceptors = [...projectiles, ...systemInterceptors]
+      instancedProjectileRenderer.updateProjectiles(allInterceptors)
+    }
   }
   
 

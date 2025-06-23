@@ -59,6 +59,8 @@ export class IronDomeBattery extends EventEmitter {
   private healthBar?: THREE.Group
   private isDestroyed: boolean = false
   private useInstancedRendering: boolean = false
+  private autoRepairRate: number = 0 // Health per second
+  private lastRepairTime: number = 0
 
   constructor(scene: THREE.Scene, world: CANNON.World, config: Partial<BatteryConfig> = {}) {
     super()
@@ -1003,6 +1005,15 @@ export class IronDomeBattery extends EventEmitter {
     return !this.isDestroyed && this.currentHealth > 0
   }
   
+  setAutoRepairRate(healthPerSecond: number): void {
+    this.autoRepairRate = healthPerSecond
+    this.lastRepairTime = Date.now()
+  }
+  
+  getAutoRepairRate(): number {
+    return this.autoRepairRate
+  }
+  
   setLaunchOffset(offset: THREE.Vector3): void {
     this.launchOffset = offset.clone()
   }
@@ -1194,6 +1205,18 @@ export class IronDomeBattery extends EventEmitter {
   }
   
   update(deltaTime: number = 0, threats: Threat[] = []): void {
+    // Apply auto-repair if enabled and battery is damaged but not destroyed
+    if (this.autoRepairRate > 0 && this.currentHealth < this.maxHealth && !this.isDestroyed) {
+      const currentTime = Date.now()
+      const repairDelta = (currentTime - this.lastRepairTime) / 1000 // Convert to seconds
+      
+      if (repairDelta > 0) {
+        const repairAmount = this.autoRepairRate * repairDelta
+        this.repair(repairAmount)
+        this.lastRepairTime = currentTime
+      }
+    }
+    
     // Update health bar to face camera and follow battery position
     if (this.healthBar && !this.isDestroyed) {
       const camera = (this.scene as any).__camera

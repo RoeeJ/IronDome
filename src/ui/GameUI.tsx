@@ -50,6 +50,8 @@ export const GameUI: React.FC<GameUIProps> = ({ waveManager, placementSystem, on
   const [showHelp, setShowHelp] = useState(false)
   const [confirmNewGame, setConfirmNewGame] = useState(false)
   const [autoIntercept, setAutoIntercept] = useState(false) // Default to manual for game mode
+  const [isPaused, setIsPaused] = useState(false)
+  const [shopCollapsed, setShopCollapsed] = useState(true) // Shop starts collapsed
   const confirmTimeoutRef = React.useRef<NodeJS.Timeout | null>(null)
   
   // Store interval reference to clear it when needed
@@ -222,6 +224,14 @@ export const GameUI: React.FC<GameUIProps> = ({ waveManager, placementSystem, on
             const hitBattery = hitObject.userData.battery
             const batteryId = placementSystem.getBatteryId(hitBattery)
             if (batteryId) {
+              // Ensure battery is in game state before showing context menu
+              const placement = gameState.getDomePlacements().find(p => p.id === batteryId)
+              if (!placement) {
+                console.warn('[GameUI] Battery (hitbox) found but not in game state, adding it now')
+                const pos = hitBattery.getPosition()
+                gameState.addDomePlacement(batteryId, { x: pos.x, z: pos.z })
+              }
+              
               setContextMenu({
                 battery: hitBattery,
                 batteryId,
@@ -236,6 +246,14 @@ export const GameUI: React.FC<GameUIProps> = ({ waveManager, placementSystem, on
             // Normal battery mesh hit
             const batteryId = placementSystem.getBatteryId(battery)
             if (batteryId) {
+              // Ensure battery is in game state before showing context menu
+              const placement = gameState.getDomePlacements().find(p => p.id === batteryId)
+              if (!placement) {
+                console.warn('[GameUI] Battery found but not in game state, adding it now')
+                const pos = battery.getPosition()
+                gameState.addDomePlacement(batteryId, { x: pos.x, z: pos.z })
+              }
+              
               setContextMenu({
                 battery,
                 batteryId,
@@ -364,6 +382,65 @@ export const GameUI: React.FC<GameUIProps> = ({ waveManager, placementSystem, on
     }
   }, [placementMode])
   
+  // Show/hide shop panel based on game mode
+  useEffect(() => {
+    setShowShop(isGameMode)
+    setShopCollapsed(true) // Always start collapsed
+  }, [isGameMode])
+  
+  // Handle pause functionality
+  useEffect(() => {
+    const togglePause = () => {
+      if (isGameMode && !gameOver) {
+        const controls = (window as any).__simulationControls
+        if (controls) {
+          const newPauseState = !isPaused
+          setIsPaused(newPauseState)
+          controls.pause = newPauseState
+          
+          if (newPauseState) {
+            waveManager.pauseWave()
+          } else {
+            waveManager.resumeWave()
+          }
+        }
+      }
+    }
+    
+    const handleKeyPress = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        e.preventDefault()
+        
+        // Close modals first if any are open
+        if (showShop && !shopCollapsed) {
+          // Collapse shop instead of closing
+          setShopCollapsed(true)
+          // Reset time scale
+          const simulationControls = (window as any).__simulationControls
+          if (simulationControls) {
+            simulationControls.timeScale = 1.0
+          }
+        } else if (showHelp) {
+          setShowHelp(false)
+        } else if (contextMenu) {
+          setContextMenu(null)
+        } else {
+          // Otherwise toggle pause
+          togglePause()
+        }
+      } else if (e.key === 'p' || e.key === 'P') {
+        e.preventDefault()
+        togglePause()
+      }
+    }
+    
+    window.addEventListener('keydown', handleKeyPress)
+    
+    return () => {
+      window.removeEventListener('keydown', handleKeyPress)
+    }
+  }, [isPaused, isGameMode, gameOver, showShop, showHelp, contextMenu, shopCollapsed])
+  
   const updateResourceDisplay = () => {
     setCredits(gameState.getCredits())
     setInterceptors(gameState.getInterceptorStock())
@@ -410,10 +487,10 @@ export const GameUI: React.FC<GameUIProps> = ({ waveManager, placementSystem, on
     }
     setPreparationTime(0)
     
-    // Clear current game state
-    gameState.startNewGame()
+    // Disable automatic initial battery creation during new game setup
+    placementSystem.setSkipInitialBatteryCheck(true)
     
-    // Reset domes - remove all existing ones except the last
+    // First, remove all batteries
     const allBatteries = placementSystem.getAllBatteries()
     const batteryIds: string[] = []
     
@@ -422,24 +499,32 @@ export const GameUI: React.FC<GameUIProps> = ({ waveManager, placementSystem, on
       if (batteryId) batteryIds.push(batteryId)
     })
     
-    // Remove all batteries except the last one
-    if (batteryIds.length > 1) {
-      batteryIds.slice(1).forEach(id => {
-        placementSystem.removeBattery(id)
-      })
+    // Remove all batteries
+    batteryIds.forEach(id => {
+      placementSystem.removeBattery(id)
+    })
+    
+    // Clear game state (this clears domePlacements)
+    gameState.startNewGame()
+    
+    // Create a fresh initial battery with consistent ID
+    const initialId = 'battery_initial'
+    
+    // Place the battery first (this adds it to placedDomes and game state)
+    placementSystem.placeBatteryAt(new THREE.Vector3(0, 0, 0), initialId, 1)
+    
+    // Apply auto-repair rate to the new battery
+    const autoRepairLevel = gameState.getAutoRepairLevel()
+    const repairRates = [0, 0.5, 1.0, 2.0]
+    const battery = placementSystem.getBattery(initialId)
+    if (battery) {
+      battery.setAutoRepairRate(repairRates[autoRepairLevel])
     }
     
-    // Reset the remaining battery to center position if needed
-    const remainingBattery = placementSystem.getAllBatteries()[0]
-    if (remainingBattery) {
-      const health = remainingBattery.getHealth()
-      remainingBattery.repair(health.max - health.current)
-    } else {
-      // No batteries left, create initial one
-      const initialId = 'battery_initial'
-      placementSystem.placeBatteryAt(new THREE.Vector3(0, 0, 0), initialId, 1)
-      gameState.addDomePlacement(initialId, { x: 0, z: 0 })
-    }
+    // Re-enable automatic initial battery check after setup
+    setTimeout(() => {
+      placementSystem.setSkipInitialBatteryCheck(false)
+    }, 200)
     
     // Start fresh wave sequence
     waveManager.startGame()
@@ -563,7 +648,7 @@ export const GameUI: React.FC<GameUIProps> = ({ waveManager, placementSystem, on
         .resource-value {
           font-size: 16px;
           font-weight: bold;
-          color: #0038b8;
+          color: #ffffff;
         }
         
         .wave-panel {
@@ -578,7 +663,7 @@ export const GameUI: React.FC<GameUIProps> = ({ waveManager, placementSystem, on
         .wave-number {
           font-size: 20px;
           font-weight: bold;
-          color: #0038b8;
+          color: #ffffff;
           margin-bottom: 5px;
         }
         
@@ -598,6 +683,18 @@ export const GameUI: React.FC<GameUIProps> = ({ waveManager, placementSystem, on
           transition: width 0.3s;
         }
         
+        .wave-text {
+          font-size: 14px;
+          color: #ffffff;
+          margin-top: 5px;
+        }
+        
+        .preparation-timer {
+          font-size: 14px;
+          color: #ffffff;
+          margin-top: 5px;
+        }
+        
         .left-panels {
           display: flex;
           flex-direction: column;
@@ -609,22 +706,28 @@ export const GameUI: React.FC<GameUIProps> = ({ waveManager, placementSystem, on
           display: flex;
           gap: 12px;
           align-items: center;
+          background: rgba(0, 0, 0, 0.85) !important;
+          padding: 12px 16px !important;
+          box-shadow: 0 2px 8px rgba(0, 0, 0, 0.5);
         }
         
         .score-value {
-          font-size: 18px;
+          font-size: 24px;
           font-weight: bold;
-          color: #0038b8;
+          color: #ffffff;
+          text-shadow: 0 0 8px rgba(255, 255, 255, 0.5);
+          line-height: 1.2;
         }
         
         .high-score {
-          font-size: 12px;
-          color: #aaa;
+          font-size: 14px;
+          color: #cccccc;
+          text-shadow: 0 0 4px rgba(255, 255, 255, 0.3);
         }
         
         .action-buttons {
           position: fixed;
-          bottom: 20px;
+          bottom: 90px;
           right: 20px;
           display: flex;
           flex-direction: column;
@@ -866,10 +969,17 @@ export const GameUI: React.FC<GameUIProps> = ({ waveManager, placementSystem, on
             order: 3;
             justify-self: center;
             text-align: center;
+            background: rgba(0, 0, 0, 0.9) !important;
+            padding: 10px 14px !important;
           }
           
           .score-value {
-            font-size: 20px;
+            font-size: 22px;
+            color: #ffffff;
+          }
+          
+          .high-score {
+            font-size: 13px;
           }
           
           /* Touch-friendly modal */
@@ -964,47 +1074,212 @@ export const GameUI: React.FC<GameUIProps> = ({ waveManager, placementSystem, on
           100% { opacity: 1; }
         }
         
-        .shop-modal {
+        .shop-container {
           position: fixed;
-          top: 50%;
-          left: 50%;
-          transform: translate(-50%, -50%);
+          bottom: 20px;
+          right: 20px;
+          display: flex;
+          flex-direction: column;
+          align-items: flex-end;
+          gap: 10px;
+          z-index: 100;
+          pointer-events: auto;
+        }
+        
+        .shop-panel {
+          width: 450px;
+          max-width: calc(100vw - 40px);
           background: rgba(0, 0, 0, 0.95);
           border: 3px solid #0038b8;
           border-radius: 15px;
-          padding: 30px;
-          min-width: 400px;
-          pointer-events: auto;
-          z-index: 10000;
+          transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+          box-shadow: 0 0 30px rgba(0, 56, 184, 0.3);
+          transform-origin: bottom right;
+          overflow: hidden;
         }
         
-        .shop-title {
-          font-size: 24px;
-          color: #0038b8;
-          margin-bottom: 20px;
-          text-align: center;
+        .shop-panel.collapsed {
+          transform: scale(0);
+          opacity: 0;
+          pointer-events: none;
         }
         
-        .shop-item {
-          background: rgba(0, 56, 184, 0.5);
-          border: 1px solid #0038b8;
+        .shop-toggle {
+          background: #0038b8;
+          border: 2px solid #0038b8;
           border-radius: 5px;
-          padding: 15px;
-          margin-bottom: 10px;
+          padding: 12px 20px;
+          cursor: pointer;
+          color: white;
+          font-weight: bold;
+          font-size: 16px;
+          transition: all 0.3s;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          gap: 10px;
+          min-width: 200px;
+          -webkit-tap-highlight-color: transparent;
+          touch-action: manipulation;
+        }
+        
+        .shop-toggle:hover {
+          background: #0056d6;
+          border-color: #0056d6;
+          box-shadow: 0 0 15px rgba(0, 56, 184, 0.5);
+        }
+        
+        .shop-toggle:active {
+          transform: scale(0.98);
+          background: #0045b0;
+        }
+        
+        .shop-toggle-icon {
+          font-size: 18px;
+        }
+        
+        .shop-header {
           display: flex;
           justify-content: space-between;
           align-items: center;
+          padding: 10px 15px;
+          border-bottom: 1px solid #0038b8;
+        }
+        
+        .shop-title {
+          font-size: 16px;
+          color: #0038b8;
+          margin: 0;
         }
         
         .shop-close {
-          position: absolute;
-          top: 10px;
-          right: 10px;
           background: none;
           border: none;
           color: #ff0000;
-          font-size: 24px;
+          font-size: 20px;
           cursor: pointer;
+          padding: 5px 10px;
+          transition: all 0.2s;
+        }
+        
+        .shop-close:hover {
+          color: #ff6600;
+          transform: scale(1.1);
+        }
+        
+        .shop-content {
+          padding: 10px;
+          display: grid;
+          grid-template-columns: repeat(3, 1fr);
+          gap: 10px;
+          max-height: 250px;
+          overflow-y: auto;
+        }
+        
+        .shop-item {
+          background: rgba(0, 56, 184, 0.2);
+          border: 2px solid #0038b8;
+          border-radius: 8px;
+          padding: 10px;
+          display: flex;
+          flex-direction: column;
+          gap: 6px;
+          transition: all 0.2s;
+          aspect-ratio: 1;
+          justify-content: space-between;
+        }
+        
+        .shop-item:hover {
+          background: rgba(0, 56, 184, 0.3);
+          transform: translateY(-2px);
+          box-shadow: 0 5px 15px rgba(0, 56, 184, 0.3);
+        }
+        
+        .shop-item-header {
+          flex: 1;
+        }
+        
+        .shop-item-icon {
+          font-size: 24px;
+          text-align: center;
+          margin-bottom: 4px;
+        }
+        
+        .shop-item-name {
+          font-size: 11px;
+          font-weight: bold;
+          color: white;
+          text-align: center;
+          line-height: 1.2;
+          margin-bottom: 2px;
+        }
+        
+        .shop-item-description {
+          font-size: 10px;
+          color: #aaa;
+          line-height: 1.2;
+          text-align: center;
+        }
+        
+        .shop-item-buy {
+          margin-top: auto;
+        }
+        
+        .shop-item-button {
+          width: 100%;
+          background: #0038b8;
+          border: 1px solid #0038b8;
+          color: white;
+          padding: 6px 8px;
+          border-radius: 4px;
+          font-size: 11px;
+          font-weight: bold;
+          cursor: pointer;
+          transition: all 0.3s;
+        }
+        
+        .shop-item-button:hover:not(:disabled) {
+          background: #0056d6;
+          border-color: #0056d6;
+        }
+        
+        .shop-item-button:disabled {
+          background: rgba(50, 50, 50, 0.8);
+          border-color: #666;
+          color: #666;
+          cursor: not-allowed;
+        }
+        
+        .shop-dimmer {
+          display: none; /* Remove dimmer for less intrusive design */
+        }
+        
+        @media (max-width: 768px) {
+          .shop-container {
+            bottom: 15px;
+            right: 15px;
+          }
+          
+          .shop-panel {
+            width: 100%;
+            max-width: 400px;
+          }
+          
+          .shop-content {
+            grid-template-columns: repeat(2, 1fr);
+            max-height: 200px;
+          }
+          
+          .shop-toggle {
+            padding: 14px 24px;
+            font-size: 16px;
+            min-height: 48px;
+            min-width: 160px;
+          }
+          
+          .action-buttons {
+            bottom: 80px !important; /* Move up to avoid shop button */
+          }
         }
         
         .warning {
@@ -1261,7 +1536,97 @@ export const GameUI: React.FC<GameUIProps> = ({ waveManager, placementSystem, on
           box-shadow: 0 0 10px rgba(0, 149, 255, 0.5);
         }
         
+        .pause-overlay {
+          position: fixed;
+          top: 0;
+          left: 0;
+          right: 0;
+          bottom: 0;
+          background: rgba(0, 0, 0, 0.8);
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          z-index: 999;
+          pointer-events: auto;
+        }
+        
+        .pause-modal {
+          background: rgba(0, 0, 0, 0.95);
+          border: 2px solid #0038b8;
+          border-radius: 10px;
+          padding: 40px;
+          text-align: center;
+          max-width: 400px;
+          box-shadow: 0 0 30px rgba(0, 56, 184, 0.8);
+        }
+        
+        .pause-title {
+          font-size: 48px;
+          color: #0095ff;
+          margin-bottom: 20px;
+          text-shadow: 0 0 20px rgba(0, 149, 255, 0.8);
+          letter-spacing: 8px;
+        }
+        
+        .pause-subtitle {
+          font-size: 16px;
+          color: #cccccc;
+          margin-bottom: 40px;
+        }
+        
+        .pause-buttons {
+          display: flex;
+          flex-direction: column;
+          gap: 15px;
+          align-items: center;
+        }
+        
+        .pause-button {
+          background: rgba(0, 56, 184, 0.3);
+          border: 2px solid #0038b8;
+          color: #ffffff;
+          padding: 12px 30px;
+          border-radius: 5px;
+          font-size: 18px;
+          font-weight: bold;
+          cursor: pointer;
+          transition: all 0.3s;
+          min-width: 200px;
+        }
+        
+        .pause-button:hover {
+          background: #0038b8;
+          transform: scale(1.05);
+          box-shadow: 0 0 20px rgba(0, 149, 255, 0.8);
+        }
+        
+        .pause-hint {
+          margin-top: 30px;
+          font-size: 14px;
+          color: #888;
+        }
+        
+        .time-dilation-effect {
+          position: fixed;
+          top: 0;
+          left: 0;
+          right: 0;
+          bottom: 0;
+          pointer-events: none;
+          background: radial-gradient(circle at center, transparent 30%, rgba(0, 56, 184, 0.1) 100%);
+          z-index: 998;
+          opacity: 0;
+          transition: opacity 0.5s ease-in-out;
+        }
+        
+        .time-dilation-effect.active {
+          opacity: 1;
+        }
+        
       `}</style>
+      
+      {/* Time dilation visual effect */}
+      <div className={`time-dilation-effect ${showShop && !shopCollapsed ? 'active' : ''}`} />
       
       {!hasViewedHelp && (
         <div className="help-arrow">→</div>
@@ -1363,7 +1728,7 @@ export const GameUI: React.FC<GameUIProps> = ({ waveManager, placementSystem, on
                   ) : (
                     <div className="auto-intercept-locked" title={`Auto-intercept unlocks at Wave 5 (${5 - currentWave} waves to go)`}>
                       <div style={{ fontSize: '14px' }}>🔒</div>
-                      <div style={{ fontSize: '9px', color: '#666' }}>Wave 5</div>
+                      <div style={{ fontSize: '9px', color: '#ccc' }}>Wave 5</div>
                     </div>
                   )}
                 </div>
@@ -1485,19 +1850,6 @@ export const GameUI: React.FC<GameUIProps> = ({ waveManager, placementSystem, on
           )}
         </button>
         
-        {isGameMode && (
-          <button 
-            className="game-button"
-            onClick={() => {
-              setShowShop(!showShop)
-              // Toggle OrbitControls based on shop state
-              const controls = (window as any).__controls
-              if (controls) controls.enabled = showShop
-            }}
-          >
-            Shop
-          </button>
-        )}
         
         {interceptors < 20 && isWaveActive && (
           <button 
@@ -1580,52 +1932,132 @@ export const GameUI: React.FC<GameUIProps> = ({ waveManager, placementSystem, on
         </div>
       )}
       
+      {/* Shop Container */}
       {showShop && (
-        <div className="shop-modal">
-          <button className="shop-close" onClick={() => {
-            vibrate(10)
-            setShowShop(false)
-            // Re-enable OrbitControls
-            const controls = (window as any).__controls
-            if (controls) controls.enabled = true
-          }}>✕</button>
-          <h2 className="shop-title">Supply Shop</h2>
-          
-          <div className="shop-item">
-            <div>
-              <div>Interceptor Restock</div>
-              <div style={{ fontSize: '14px', color: '#6B7280' }}>+50 Interceptors</div>
+        <div className="shop-container">
+          {/* Shop Panel (shows above button when expanded) */}
+          <div className={`shop-panel ${shopCollapsed ? 'collapsed' : ''}`}>
+              <div className="shop-header">
+                <h2 className="shop-title">Supply Shop</h2>
+                <button className="shop-close" onClick={() => {
+                  vibrate(10)
+                  setShopCollapsed(true)
+                  // Reset time scale
+                  const simulationControls = (window as any).__simulationControls
+                  if (simulationControls) {
+                    simulationControls.timeScale = 1.0
+                  }
+                }}>✕</button>
+              </div>
+              
+              <div className="shop-content">
+            <div className="shop-item">
+              <div className="shop-item-header">
+                <div className="shop-item-icon">🚀</div>
+                <div className="shop-item-name">Interceptors</div>
+                <div className="shop-item-description">+50 units</div>
+              </div>
+              <div className="shop-item-buy">
+                <button 
+                  className="shop-item-button"
+                  onClick={handlePurchaseInterceptors}
+                  disabled={credits < costs.interceptorRestock}
+                >
+                  ${costs.interceptorRestock}
+                </button>
+              </div>
             </div>
-            <button 
-              className="game-button"
-              onClick={handlePurchaseInterceptors}
-              disabled={credits < costs.interceptorRestock}
-            >
-              Buy ({costs.interceptorRestock})
-            </button>
+            
+            <div className="shop-item">
+              <div className="shop-item-header">
+                <div className="shop-item-icon">🛡️</div>
+                <div className="shop-item-name">Dome Slot</div>
+                <div className="shop-item-description">+1 battery</div>
+              </div>
+              <div className="shop-item-buy">
+                <button 
+                  className="shop-item-button"
+                  onClick={() => {
+                    if (resourceManager.purchaseNewDome()) {
+                      vibrate(30)
+                      showNotification('New dome slot unlocked!')
+                      updateResourceDisplay()
+                    } else {
+                      vibrate([10, 10, 10]) // Error pattern
+                    }
+                  }}
+                  disabled={credits < costs.domeUnlock}
+                >
+                  ${costs.domeUnlock}
+                </button>
+              </div>
+            </div>
+            
+            <div className="shop-item">
+              <div className="shop-item-header">
+                <div className="shop-item-icon">🔧</div>
+                <div className="shop-item-name">Auto-Repair</div>
+                <div className="shop-item-description">
+                  {gameState.getAutoRepairLevel() === 0 
+                    ? 'Auto fix'
+                    : `Lvl ${gameState.getAutoRepairLevel()}/3`
+                  }
+                </div>
+              </div>
+              <div className="shop-item-buy">
+                <button 
+                  className="shop-item-button"
+                  onClick={() => {
+                    const currentLevel = gameState.getAutoRepairLevel()
+                    if (currentLevel >= 3) {
+                      showNotification('Auto-repair is already at maximum level!')
+                      return
+                    }
+                    const cost = resourceManager.getCosts().autoRepair(currentLevel + 1)
+                    if (gameState.spendCredits(cost)) {
+                      gameState.upgradeAutoRepair()
+                      vibrate(30)
+                      showNotification(`Auto-repair upgraded to level ${gameState.getAutoRepairLevel()}!`)
+                      updateResourceDisplay()
+                      // Apply auto-repair rate to all batteries
+                      const repairRates = [0, 0.5, 1.0, 2.0]
+                      const newRate = repairRates[gameState.getAutoRepairLevel()]
+                      placementSystem.getAllBatteries().forEach(battery => {
+                        battery.setAutoRepairRate(newRate)
+                      })
+                    } else {
+                      vibrate([10, 10, 10]) // Error pattern
+                      showNotification('Insufficient credits!')
+                    }
+                  }}
+                  disabled={gameState.getAutoRepairLevel() >= 3 || credits < resourceManager.getCosts().autoRepair((gameState.getAutoRepairLevel() || 0) + 1)}
+                >
+                  {gameState.getAutoRepairLevel() >= 3 
+                    ? 'MAX' 
+                    : `$${resourceManager.getCosts().autoRepair((gameState.getAutoRepairLevel() || 0) + 1)}`
+                  }
+                </button>
+              </div>
+            </div>
+          </div>
           </div>
           
-          <div className="shop-item">
-            <div>
-              <div>Unlock New Dome Slot</div>
-              <div style={{ fontSize: '14px', color: '#6B7280' }}>+1 Dome placement</div>
-            </div>
-            <button 
-              className="game-button"
-              onClick={() => {
-                if (resourceManager.purchaseNewDome()) {
-                  vibrate(30)
-                  showNotification('New dome slot unlocked!')
-                  updateResourceDisplay()
-                } else {
-                  vibrate([10, 10, 10]) // Error pattern
-                }
-              }}
-              disabled={credits < costs.domeUnlock}
-            >
-              Buy ({costs.domeUnlock})
-            </button>
-          </div>
+          {/* Toggle Button (always visible) */}
+          <button
+            className="shop-toggle"
+            onClick={() => {
+              vibrate(10)
+              setShopCollapsed(!shopCollapsed)
+              // Toggle time dilation
+              const simulationControls = (window as any).__simulationControls
+              if (simulationControls) {
+                simulationControls.timeScale = shopCollapsed ? 0.1 : 1.0
+              }
+            }}
+          >
+            <span className="shop-toggle-icon">🛒</span>
+            <span>Shop</span>
+          </button>
         </div>
       )}
       
@@ -1643,6 +2075,47 @@ export const GameUI: React.FC<GameUIProps> = ({ waveManager, placementSystem, on
           placementSystem={placementSystem}
           isGameMode={isGameMode}
         />
+      )}
+      
+      {/* Pause Overlay */}
+      {isPaused && isGameMode && !gameOver && (
+        <div className="pause-overlay">
+          <div className="pause-modal">
+            <div className="pause-title">PAUSED</div>
+            <div className="pause-subtitle">Game is paused</div>
+            <div className="pause-buttons">
+              <button 
+                className="pause-button"
+                onClick={() => {
+                  const controls = (window as any).__simulationControls
+                  if (controls) {
+                    setIsPaused(false)
+                    controls.pause = false
+                    waveManager.resumeWave()
+                  }
+                }}
+              >
+                Resume Game
+              </button>
+              <button 
+                className="pause-button"
+                onClick={() => setShowHelp(true)}
+              >
+                Help
+              </button>
+              <button 
+                className="pause-button"
+                onClick={() => {
+                  setIsPaused(false)
+                  handleNewGame()
+                }}
+              >
+                New Game
+              </button>
+            </div>
+            <div className="pause-hint">Press ESC or P to resume</div>
+          </div>
+        </div>
       )}
       
       <HelpModal 

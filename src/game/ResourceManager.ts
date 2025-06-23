@@ -7,6 +7,7 @@ export interface ResourceCosts {
   domeUpgrade: (level: number) => number
   interceptorRestock: number
   emergencySupply: number
+  autoRepair: (level: number) => number
 }
 
 export class ResourceManager extends EventEmitter {
@@ -18,7 +19,8 @@ export class ResourceManager extends EventEmitter {
     domeUnlock: 1000, // Base cost, increases exponentially
     domeUpgrade: (level: number) => 500 * level,
     interceptorRestock: 500, // For 50 interceptors
-    emergencySupply: 200 // For 10 interceptors during wave
+    emergencySupply: 200, // For 10 interceptors during wave
+    autoRepair: (level: number) => 400 * (level + 1) // 400, 800, 1200 for levels 1, 2, 3
   }
   
   private constructor() {
@@ -201,7 +203,8 @@ export class ResourceManager extends EventEmitter {
       interceptorRestock: this.costs.interceptorRestock,
       emergencySupply: this.costs.emergencySupply,
       domeUnlock: this.gameState.getDomeUnlockCost(),
-      domeUpgrade: this.costs.domeUpgrade
+      domeUpgrade: this.costs.domeUpgrade,
+      autoRepair: this.costs.autoRepair
     }
   }
   

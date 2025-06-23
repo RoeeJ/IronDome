@@ -18,6 +18,7 @@ export interface GameData {
     position: { x: number; z: number }
     level: number
   }>
+  autoRepairLevel: number // 0 = off, 1 = slow, 2 = medium, 3 = fast
   
   // Statistics
   totalInterceptions: number
@@ -43,6 +44,7 @@ export class GameState extends EventEmitter {
     interceptorStock: 100,
     unlockedDomes: 1,
     domePlacements: [],
+    autoRepairLevel: 0,
     totalInterceptions: 0,
     totalMisses: 0,
     totalThreatsDestroyed: 0,
@@ -201,6 +203,12 @@ export class GameState extends EventEmitter {
   }
   
   addDomePlacement(id: string, position: { x: number; z: number }): void {
+    // Check if already exists
+    const existing = this.data.domePlacements.find(d => d.id === id)
+    if (existing) {
+      return
+    }
+    
     this.data.domePlacements.push({ id, position, level: 1 })
     this.saveState()
     this.emit('domePlaced', { id, position })
@@ -289,7 +297,29 @@ export class GameState extends EventEmitter {
     this.data.interceptorStock = 100
     this.data.domePlacements = []
     this.data.unlockedDomes = 1  // Reset to 1 dome
+    this.data.autoRepairLevel = 0  // Reset auto-repair
     this.saveState()
     this.emit('newGame')
+  }
+  
+  // Auto-repair methods
+  getAutoRepairLevel(): number {
+    return this.data.autoRepairLevel
+  }
+  
+  setAutoRepairLevel(level: number): void {
+    this.data.autoRepairLevel = Math.max(0, Math.min(3, level))
+    this.saveState()
+    this.emit('autoRepairChanged', this.data.autoRepairLevel)
+  }
+  
+  upgradeAutoRepair(): boolean {
+    if (this.data.autoRepairLevel < 3) {
+      this.data.autoRepairLevel++
+      this.saveState()
+      this.emit('autoRepairChanged', this.data.autoRepairLevel)
+      return true
+    }
+    return false
   }
 }

@@ -43,16 +43,15 @@ export class TacticalDisplay {
     this.canvas.width = baseSize * scale
     this.canvas.height = baseSize * scale
     
-    // Add modern styling
-    this.canvas.style.border = '1px solid rgba(0, 255, 255, 0.5)'
-    this.canvas.style.borderRadius = '5px'
-    this.canvas.style.boxShadow = '0 0 20px rgba(0, 255, 255, 0.3), inset 0 0 20px rgba(0, 255, 255, 0.1)'
-    this.canvas.style.backdropFilter = 'blur(2px)'
+    // Add modern styling with circular shape
+    this.canvas.style.background = 'transparent'
+    this.canvas.style.borderRadius = '50%'
+    this.canvas.style.overflow = 'hidden'
+    this.canvas.style.boxShadow = '0 0 20px rgba(0, 255, 255, 0.3)'
     
     // Mobile-specific adjustments
     if (deviceInfo.isMobile) {
       this.canvas.style.opacity = '0.9'
-      this.canvas.style.borderRadius = '10px'
     }
     
     document.body.appendChild(this.canvas)
@@ -90,18 +89,27 @@ export class TacticalDisplay {
       }
     }
     
-    // Clear canvas with subtle gradient
-    const gradient = this.ctx.createLinearGradient(0, 0, 0, this.canvas.height)
-    gradient.addColorStop(0, 'rgba(0, 10, 20, 0.95)')
-    gradient.addColorStop(1, 'rgba(0, 5, 15, 0.95)')
+    // Clear canvas completely for transparency
+    this.ctx.clearRect(0, 0, this.canvas.width, this.canvas.height)
+    
+    // Create circular clipping mask
+    this.ctx.save()
+    this.ctx.beginPath()
+    this.ctx.arc(this.radarCenter.x, this.radarCenter.y, this.radarRadius + 10, 0, Math.PI * 2)
+    this.ctx.clip()
+    
+    // Fill with subtle gradient background within the circle
+    const gradient = this.ctx.createRadialGradient(
+      this.radarCenter.x, this.radarCenter.y, 0,
+      this.radarCenter.x, this.radarCenter.y, this.radarRadius
+    )
+    gradient.addColorStop(0, 'rgba(0, 10, 20, 0.9)')
+    gradient.addColorStop(0.7, 'rgba(0, 15, 30, 0.95)')
+    gradient.addColorStop(1, 'rgba(0, 5, 15, 0.98)')
     this.ctx.fillStyle = gradient
     this.ctx.fillRect(0, 0, this.canvas.width, this.canvas.height)
     
-    // Add scan lines effect
-    this.drawScanlines()
-    
-    // Draw grid background
-    this.drawHexGrid()
+    // Removed scanlines and hex grid for cleaner look
     
     // Draw radar circles
     this.drawRadarGrid()
@@ -115,16 +123,21 @@ export class TacticalDisplay {
     // Draw radar pings
     this.drawRadarPings()
     
-    // Draw info panel
-    this.drawInfoPanel(threats.length, interceptorCount, successRate, totalCapacity)
+    // Removed info panel for cleaner display
     
-    // Draw corner decorations
-    this.drawCornerDecorations()
+    // Removed corner decorations for circular display
     
-    // Add occasional glitch effect
-    if (Math.random() < 0.01) {
-      this.drawGlitchEffect()
-    }
+    // Removed glitch effect for cleaner display
+    
+    // Restore canvas state (remove clipping)
+    this.ctx.restore()
+    
+    // Draw circular border
+    this.ctx.strokeStyle = 'rgba(0, 255, 255, 0.5)'
+    this.ctx.lineWidth = 2
+    this.ctx.beginPath()
+    this.ctx.arc(this.radarCenter.x, this.radarCenter.y, this.radarRadius + 10, 0, Math.PI * 2)
+    this.ctx.stroke()
   }
   
   private drawHexGrid(): void {
@@ -203,21 +216,9 @@ export class TacticalDisplay {
   private drawRadarSweep(): void {
     const ctx = this.ctx
     
-    // Create sweep gradient
-    const sweepGradient = ctx.createLinearGradient(
-      this.radarCenter.x, this.radarCenter.y,
-      this.radarCenter.x + Math.cos(this.lastSweepAngle) * this.radarRadius,
-      this.radarCenter.y + Math.sin(this.lastSweepAngle) * this.radarRadius
-    )
-    sweepGradient.addColorStop(0, 'rgba(0, 255, 255, 0)')
-    sweepGradient.addColorStop(0.5, 'rgba(0, 255, 255, 0.4)')
-    sweepGradient.addColorStop(1, 'rgba(0, 255, 255, 0.8)')
-    
-    // Draw main sweep
-    ctx.strokeStyle = sweepGradient
+    // Simple sweep line
+    ctx.strokeStyle = 'rgba(0, 255, 255, 0.5)'
     ctx.lineWidth = 2
-    ctx.shadowBlur = 10
-    ctx.shadowColor = 'rgba(0, 255, 255, 0.8)'
     ctx.beginPath()
     ctx.moveTo(this.radarCenter.x, this.radarCenter.y)
     ctx.lineTo(
@@ -226,13 +227,12 @@ export class TacticalDisplay {
     )
     ctx.stroke()
     
-    // Draw sweep trail
-    ctx.shadowBlur = 0
-    for (let i = 1; i <= 5; i++) {
-      const trailAngle = this.lastSweepAngle - (i * Math.PI / 20)
-      const opacity = 0.3 - i * 0.05
+    // Simple fade trail
+    for (let i = 1; i <= 3; i++) {
+      const trailAngle = this.lastSweepAngle - (i * Math.PI / 30)
+      const opacity = 0.3 - i * 0.1
       ctx.strokeStyle = `rgba(0, 255, 255, ${opacity})`
-      ctx.lineWidth = 2 - i * 0.3
+      ctx.lineWidth = 2
       ctx.beginPath()
       ctx.moveTo(this.radarCenter.x, this.radarCenter.y)
       ctx.lineTo(
@@ -241,19 +241,6 @@ export class TacticalDisplay {
       )
       ctx.stroke()
     }
-    
-    // Add sweep glow at edge
-    const edgeX = this.radarCenter.x + Math.cos(this.lastSweepAngle) * this.radarRadius
-    const edgeY = this.radarCenter.y + Math.sin(this.lastSweepAngle) * this.radarRadius
-    
-    const glowGradient = ctx.createRadialGradient(edgeX, edgeY, 0, edgeX, edgeY, 10)
-    glowGradient.addColorStop(0, 'rgba(0, 255, 255, 0.8)')
-    glowGradient.addColorStop(1, 'rgba(0, 255, 255, 0)')
-    
-    ctx.fillStyle = glowGradient
-    ctx.beginPath()
-    ctx.arc(edgeX, edgeY, 10, 0, Math.PI * 2)
-    ctx.fill()
   }
   
   private drawBattery(): void {
@@ -329,17 +316,10 @@ export class TacticalDisplay {
         track.positions.shift()
       }
       
-      // Draw threat trail with gradient
+      // Draw simple threat trail
       if (track.positions.length > 1) {
-        const gradient = ctx.createLinearGradient(
-          track.positions[0].x, track.positions[0].y,
-          track.positions[track.positions.length - 1].x, track.positions[track.positions.length - 1].y
-        )
-        gradient.addColorStop(0, 'rgba(255, 0, 0, 0.1)')
-        gradient.addColorStop(1, 'rgba(255, 0, 0, 0.5)')
-        
-        ctx.strokeStyle = gradient
-        ctx.lineWidth = 2
+        ctx.strokeStyle = 'rgba(255, 0, 0, 0.3)'
+        ctx.lineWidth = 1
         ctx.beginPath()
         track.positions.forEach((pos, i) => {
           if (i === 0) ctx.moveTo(pos.x, pos.y)
@@ -352,12 +332,10 @@ export class TacticalDisplay {
       const relativePos = threat.getPosition().clone().sub(batteryPosition)
       const isInRange = relativePos.length() < this.radarRadius / this.scale
       if (isInRange) {
-        // Threat with glow effect
-        ctx.shadowBlur = 10
-        ctx.shadowColor = 'rgba(255, 0, 0, 0.8)'
+        // Threat shape based on type
         ctx.fillStyle = '#ff0000'
         ctx.strokeStyle = '#ff0000'
-        ctx.lineWidth = 2
+        ctx.lineWidth = 1.5
         
         ctx.save()
         ctx.translate(screenPos.x, screenPos.y)
@@ -367,21 +345,39 @@ export class TacticalDisplay {
         const angle = Math.atan2(-vel.z, vel.x)
         ctx.rotate(angle)
         
-        // Draw diamond shape
+        // Different shapes for different threat types
+        const speed = vel.length()
         ctx.beginPath()
-        ctx.moveTo(6, 0)
-        ctx.lineTo(0, -4)
-        ctx.lineTo(-6, 0)
-        ctx.lineTo(0, 4)
-        ctx.closePath()
+        
+        if (speed < 50) {
+          // Mortar - circle
+          ctx.arc(0, 0, 4, 0, Math.PI * 2)
+          ctx.fillStyle = '#ff9900'
+        } else if (speed < 100) {
+          // Rocket - triangle
+          ctx.moveTo(6, 0)
+          ctx.lineTo(-4, -3)
+          ctx.lineTo(-4, 3)
+          ctx.closePath()
+          ctx.fillStyle = '#ff6600'
+        } else {
+          // Missile - diamond
+          ctx.moveTo(6, 0)
+          ctx.lineTo(0, -4)
+          ctx.lineTo(-6, 0)
+          ctx.lineTo(0, 4)
+          ctx.closePath()
+          ctx.fillStyle = '#ff0000'
+        }
+        
         ctx.fill()
         ctx.stroke()
         ctx.restore()
         
-        ctx.shadowBlur = 0
-        
-        // Draw threat info panel
-        this.drawThreatInfo(ctx, screenPos, track, threat)
+        // Show minimal threat info - just ID
+        ctx.fillStyle = '#ff6666'
+        ctx.font = '8px "Courier New", monospace'
+        ctx.fillText(track.id, screenPos.x + 8, screenPos.y - 8)
       }
     })
   }
@@ -593,33 +589,17 @@ export class TacticalDisplay {
     // Update and draw pings
     this.radarPings = this.radarPings.filter(ping => {
       const age = currentTime - ping.time
-      if (age > 2000) return false // Remove old pings
+      if (age > 1000) return false // Remove old pings
       
-      const opacity = 1 - (age / 2000)
-      const radius = 5 + (age / 100) // Expanding ring
+      const opacity = 1 - (age / 1000)
+      const radius = 10 + (age / 50) // Expanding ring
       
-      // Multiple rings for better effect
-      for (let i = 0; i < 3; i++) {
-        const ringRadius = radius + i * 5
-        const ringOpacity = opacity * (1 - i * 0.3)
-        
-        ctx.strokeStyle = `rgba(255, 255, 0, ${ringOpacity})`
-        ctx.lineWidth = 2 - i * 0.5
-        ctx.beginPath()
-        ctx.arc(ping.position.x, ping.position.y, ringRadius, 0, Math.PI * 2)
-        ctx.stroke()
-      }
-      
-      // Inner bright dot with glow
-      if (age < 500) {
-        ctx.shadowBlur = 10
-        ctx.shadowColor = 'rgba(255, 255, 0, 0.8)'
-        ctx.fillStyle = `rgba(255, 255, 0, ${opacity * 2})`
-        ctx.beginPath()
-        ctx.arc(ping.position.x, ping.position.y, 3, 0, Math.PI * 2)
-        ctx.fill()
-        ctx.shadowBlur = 0
-      }
+      // Single simple ring
+      ctx.strokeStyle = `rgba(255, 255, 0, ${opacity})`
+      ctx.lineWidth = 2
+      ctx.beginPath()
+      ctx.arc(ping.position.x, ping.position.y, radius, 0, Math.PI * 2)
+      ctx.stroke()
       
       return true
     })

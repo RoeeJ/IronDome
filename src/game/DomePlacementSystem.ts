@@ -33,6 +33,7 @@ export class DomePlacementSystem {
   private isSandboxMode: boolean = false
   private instancedRenderer?: InstancedOBJDomeRenderer
   private useInstancedRendering: boolean = true
+  private skipInitialBatteryCheck: boolean = false
   
   constructor(scene: THREE.Scene, world: CANNON.World) {
     this.scene = scene
@@ -66,8 +67,10 @@ export class DomePlacementSystem {
     
     this.restoreSavedPlacements()
     
-    // Ensure at least one battery exists
-    setTimeout(() => this.ensureInitialBattery(), 100)
+    // Ensure at least one battery exists (only if not restoring saved placements)
+    if (this.placedDomes.size === 0) {
+      setTimeout(() => this.ensureInitialBattery(), 100)
+    }
   }
   
   setSandboxMode(isSandbox: boolean): void {
@@ -131,6 +134,11 @@ export class DomePlacementSystem {
     }
     
     return true
+  }
+  
+  // Public method for external validation checks
+  isPositionValid(position: THREE.Vector3): boolean {
+    return this.isValidPlacement(position)
   }
   
   private restoreSavedPlacements(): void {
@@ -323,6 +331,11 @@ export class DomePlacementSystem {
     battery.setLaunchOffset(new THREE.Vector3(-2, 14.5, -0.1))
     battery.setLaunchDirection(new THREE.Vector3(0.6, 1, 0.15).normalize())
     
+    // Apply auto-repair rate based on current upgrade level
+    const autoRepairLevel = this.gameState.getAutoRepairLevel()
+    const repairRates = [0, 0.5, 1.0, 2.0] // Health per second for each level
+    battery.setAutoRepairRate(repairRates[autoRepairLevel])
+    
     // Listen for battery destruction in game mode
     if (!this.isSandboxMode) {
       battery.on('destroyed', () => {
@@ -350,7 +363,14 @@ export class DomePlacementSystem {
       level
     })
     
-    console.log(`Battery placed: ${batteryId}, level: ${level}, placedDomes size: ${this.placedDomes.size}`)
+    // Register in game state FIRST before other operations
+    const existingPlacement = this.gameState.getDomePlacements().find(p => p.id === batteryId)
+    if (!existingPlacement) {
+      this.gameState.addDomePlacement(batteryId, {
+        x: position.x,
+        z: position.z
+      })
+    }
     
     // Register with threat manager
     if (this.threatManager) {
@@ -372,15 +392,6 @@ export class DomePlacementSystem {
     
     // Update instanced renderer
     this.updateInstancedRenderer()
-    
-    // Register in game state if not already registered
-    const existingPlacement = this.gameState.getDomePlacements().find(p => p.id === batteryId)
-    if (!existingPlacement) {
-      this.gameState.addDomePlacement(batteryId, {
-        x: position.x,
-        z: position.z
-      })
-    }
   }
   
   private addLevelIndicator(battery: IronDomeBattery, level: number): void {
@@ -500,19 +511,15 @@ export class DomePlacementSystem {
   }
   
   upgradeBattery(batteryId: string): boolean {
-    console.log('[DomePlacement] Attempting to upgrade battery:', batteryId)
-    
     const dome = this.placedDomes.get(batteryId)
     if (!dome) {
-      console.log('[DomePlacement] Battery not found in placedDomes:', batteryId)
-      console.log('[DomePlacement] Available batteries:', Array.from(this.placedDomes.keys()))
+      console.warn('[DomePlacement] Battery not found in placedDomes:', batteryId)
       return false
     }
     
     // In sandbox mode, upgrades are free
     if (this.isSandboxMode) {
       const placement = this.gameState.getDomePlacements().find(p => p.id === batteryId)
-      console.log('[DomePlacement] Found placement:', placement)
       if (placement && placement.level < 5) {
         // Update the level in game state using free upgrade
         this.gameState.upgradeDomeFree(batteryId)
@@ -524,7 +531,6 @@ export class DomePlacementSystem {
           this.removeBattery(batteryId, false)
           // Recreate battery with upgraded stats
           this.placeBatteryAt(position, batteryId, updatedPlacement.level)
-          console.log(`Battery ${batteryId} upgraded to level ${updatedPlacement.level}`)
           return true
         }
       }
@@ -532,11 +538,8 @@ export class DomePlacementSystem {
     }
     
     // Game mode - use resources
-    console.log('[DomePlacement] Game mode upgrade for battery:', batteryId)
     if (this.resourceManager.purchaseDomeUpgrade(batteryId)) {
-      console.log('[DomePlacement] Resources purchased successfully')
       const placement = this.gameState.getDomePlacements().find(p => p.id === batteryId)
-      console.log('[DomePlacement] Found placement for upgrade:', placement)
       if (placement) {
         // Remove old battery and indicators (but keep in game state)
         const position = dome.position.clone()
@@ -588,24 +591,20 @@ export class DomePlacementSystem {
     
     const dome = this.placedDomes.get(batteryId)
     if (!dome) {
-      console.log(`canUpgradeBattery: No dome found for ${batteryId}`)
       return false
     }
     
     const placement = this.gameState.getDomePlacements().find(p => p.id === batteryId)
     if (!placement) {
-      console.log(`canUpgradeBattery: No placement found for ${batteryId}`)
       return false
     }
     if (placement.level >= 5) {
-      console.log(`canUpgradeBattery: Max level reached for ${batteryId}`)
       return false
     }
     
     const upgradeCost = this.gameState.getDomeUpgradeCost(placement.level)
     const credits = this.gameState.getCredits()
     const canAfford = credits >= upgradeCost
-    console.log(`canUpgradeBattery: Battery ${batteryId}, level ${placement.level}, cost ${upgradeCost}, credits ${credits}, can afford: ${canAfford}`)
     return canAfford
   }
   
@@ -613,9 +612,10 @@ export class DomePlacementSystem {
     if (level !== undefined) {
       return this.gameState.getDomeUpgradeCost(level)
     }
-    const placement = this.gameState.getDomePlacements().find(p => p.id === batteryId)
+    const placements = this.gameState.getDomePlacements()
+    const placement = placements.find(p => p.id === batteryId)
     if (!placement) {
-      console.warn(`No placement found for battery ${batteryId}. All placements:`, this.gameState.getDomePlacements())
+      console.warn(`No placement found for battery ${batteryId}. All placements:`, placements.map(p => p.id))
       // Default to level 1 upgrade cost if no placement found
       return this.gameState.getDomeUpgradeCost(1)
     }
@@ -625,11 +625,9 @@ export class DomePlacementSystem {
   getBatteryId(battery: IronDomeBattery): string | null {
     for (const [id, dome] of this.placedDomes) {
       if (dome.battery === battery) {
-        console.log(`Found battery ID: ${id}`)
         return id
       }
     }
-    console.log(`Battery not found! Total batteries: ${this.placedDomes.size}`)
     return null
   }
   
@@ -670,16 +668,18 @@ export class DomePlacementSystem {
   }
   
   private ensureInitialBattery(): void {
+    // Skip if we're in the middle of a new game setup
+    if (this.skipInitialBatteryCheck) {
+      return
+    }
+    
     // Check if we have any batteries
     if (this.placedDomes.size === 0) {
       // Create initial battery at center
       const initialId = 'battery_initial'
       const initialPosition = new THREE.Vector3(0, 0, 0)
       this.placeBatteryAt(initialPosition, initialId, 1)
-      this.gameState.addDomePlacement(initialId, {
-        x: initialPosition.x,
-        z: initialPosition.z
-      })
+      // placeBatteryAt already adds to game state
     }
   }
   
@@ -756,5 +756,9 @@ export class DomePlacementSystem {
     dome.battery.repair(health.max - health.current)
     
     return true
+  }
+  
+  setSkipInitialBatteryCheck(skip: boolean): void {
+    this.skipInitialBatteryCheck = skip
   }
 }

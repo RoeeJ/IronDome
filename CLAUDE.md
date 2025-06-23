@@ -92,6 +92,8 @@ The simulator now has:
 - ✅ Battery coordination system
 - ✅ Performance optimizations for large salvos
 - ✅ Material caching to prevent shader compilation freezes
+- ✅ Geometry deduplication system (GeometryFactory)
+- ✅ Complete resource management for all renderers
 - ✅ Improved tracking/interception algorithms (Kalman filtering, predictive targeting)
 - ✅ Stats.js integration for performance monitoring (Ctrl+H to toggle)
 
@@ -104,17 +106,29 @@ To maintain 60 FPS during intense scenarios:
 - Maximum 20 active explosion effects
 - Maximum 10-15 point lights active
 
-### Material Caching
+### Resource Management Systems
+
+#### Material Caching (MaterialCache)
 The project uses a MaterialCache system to prevent shader compilation freezes:
 - All batteries share common materials to avoid recompilation
 - Shaders are precompiled during initialization
 - This prevents 1000+ ms freezes when spawning multiple batteries
+- Materials from MaterialCache should NEVER be disposed by individual objects
+
+#### Geometry Deduplication (GeometryFactory)
+The project uses a GeometryFactory system to eliminate duplicate geometries:
+- Caches and reuses all common geometries (spheres, cones, cylinders, etc.)
+- Supports CircleGeometry for crater decals
+- Reduces memory usage by 10-20% in combat scenarios
+- Geometries that need transformation should be cloned before modification
 
 ### Optimization Strategies
 1. **Salvo Spawning**: Uses single RAF loop instead of multiple setTimeout calls
 2. **Explosion Effects**: Limited particle counts and active effects
 3. **Interception Evaluation**: Early exit for large threat counts
 4. **Battery Coordination**: Simplified scoring calculations
+5. **Resource Deduplication**: All renderers use shared geometries and materials
+6. **Proper Disposal**: Only locally-created resources are disposed, never shared ones
 
 ## Next Steps
 1. Add sound effects for launches and explosions
