@@ -15,6 +15,7 @@ import { MaterialCache } from '../utils/MaterialCache'
 import { GeometryFactory } from '../utils/GeometryFactory'
 import { EventEmitter } from 'events'
 import { ExplosionManager, ExplosionType } from '../systems/ExplosionManager'
+import { SoundSystem } from '../systems/SoundSystem'
 
 export interface BatteryConfig {
   position: THREE.Vector3
@@ -614,6 +615,9 @@ export class IronDomeBattery extends EventEmitter {
     
     // Create launch effects
     this.launchEffects.createLaunchEffect(tubeWorldPos, this.launchDirection)
+    
+    // Play launch sound
+    SoundSystem.getInstance().playLaunch(tubeWorldPos)
     
     this.emit('interceptorLaunched', { interceptor, threat })
     return interceptor

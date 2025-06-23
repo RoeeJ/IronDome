@@ -35,6 +35,7 @@ import { ExplosionManager, ExplosionType } from './systems/ExplosionManager'
 import { UnifiedTrailSystem } from './systems/UnifiedTrailSystem'
 import { GeometryFactory } from './utils/GeometryFactory'
 import { MaterialCache } from './utils/MaterialCache'
+import { SoundSystem } from './systems/SoundSystem'
 
 // Initialize device capabilities
 const deviceCaps = DeviceCapabilities.getInstance()
@@ -463,17 +464,33 @@ const manualTargetingSystem = {
     // Update visual indicator
     threatManager.getActiveThreats().forEach(t => {
       if (t.mesh) {
-        const material = t.mesh.material as THREE.MeshStandardMaterial
-        if (t === threat) {
-          material.emissive = new THREE.Color(0xffff00) // Yellow highlight
-          material.emissiveIntensity = 0.5
-        } else if (this.priorityTargets.has(t.id)) {
-          material.emissive = new THREE.Color(0xff00ff) // Purple for priority
-          material.emissiveIntensity = 0.3
-        } else {
-          material.emissive = material.color
-          material.emissiveIntensity = 0.2
+        // Handle both Mesh and Group objects
+        const meshes: THREE.Mesh[] = []
+        if (t.mesh instanceof THREE.Mesh) {
+          meshes.push(t.mesh)
+        } else if (t.mesh instanceof THREE.Group) {
+          t.mesh.traverse((child) => {
+            if (child instanceof THREE.Mesh) {
+              meshes.push(child)
+            }
+          })
         }
+        
+        meshes.forEach(mesh => {
+          const material = mesh.material as THREE.MeshStandardMaterial
+          if (material && material.emissive !== undefined) {
+            if (t === threat) {
+              material.emissive = new THREE.Color(0xffff00) // Yellow highlight
+              material.emissiveIntensity = 0.5
+            } else if (this.priorityTargets.has(t.id)) {
+              material.emissive = new THREE.Color(0xff00ff) // Purple for priority
+              material.emissiveIntensity = 0.3
+            } else {
+              material.emissive = material.color || new THREE.Color(0x000000)
+              material.emissiveIntensity = 0.2
+            }
+          }
+        })
       }
     })
   },
@@ -1065,6 +1082,42 @@ defenseGroup.add(sandboxControls, 'autoIntercept').name('Auto Intercept').onChan
 const testingGroup = sandboxFolder.addFolder('Performance Testing')
 testingGroup.add(sandboxControls, 'testExplosions').name('💥 Test 25 Explosions')
 
+// Sound controls
+const soundFolder = gui.addFolder('Sound Settings')
+const soundSystem = SoundSystem.getInstance()
+const soundControls = {
+  enabled: soundSystem.isEnabled(),
+  masterVolume: soundSystem.getMasterVolume(),
+  launchVolume: soundSystem.getCategoryVolume('launch'),
+  explosionVolume: soundSystem.getCategoryVolume('explosion'),
+  alertVolume: soundSystem.getCategoryVolume('alert'),
+  uiVolume: soundSystem.getCategoryVolume('ui')
+}
+
+soundFolder.add(soundControls, 'enabled').name('Sound Enabled').onChange((value: boolean) => {
+  soundSystem.setEnabled(value)
+})
+
+soundFolder.add(soundControls, 'masterVolume', 0, 1, 0.1).name('Master Volume').onChange((value: number) => {
+  soundSystem.setMasterVolume(value)
+})
+
+soundFolder.add(soundControls, 'launchVolume', 0, 1, 0.1).name('Launch Volume').onChange((value: number) => {
+  soundSystem.setCategoryVolume('launch', value)
+})
+
+soundFolder.add(soundControls, 'explosionVolume', 0, 1, 0.1).name('Explosion Volume').onChange((value: number) => {
+  soundSystem.setCategoryVolume('explosion', value)
+})
+
+soundFolder.add(soundControls, 'alertVolume', 0, 1, 0.1).name('Alert Volume').onChange((value: number) => {
+  soundSystem.setCategoryVolume('alert', value)
+})
+
+soundFolder.add(soundControls, 'uiVolume', 0, 1, 0.1).name('UI Volume').onChange((value: number) => {
+  soundSystem.setCategoryVolume('ui', value)
+})
+
 // Apply initial settings to all batteries
 domePlacementSystem.getAllBatteries().forEach(battery => {
   battery.setLaunchOffset(new THREE.Vector3(-2, 14.5, -0.1))
@@ -1428,6 +1481,22 @@ function animate() {
   profiler.startSection('Controls')
   controls.update()
   profiler.endSection('Controls')
+  
+  // Update sound system listener position
+  const soundSystem = SoundSystem.getInstance()
+  soundSystem.updateListenerPosition({
+    x: camera.position.x,
+    y: camera.position.y,
+    z: camera.position.z
+  })
+  
+  // Update listener orientation based on camera
+  const cameraDirection = new THREE.Vector3()
+  camera.getWorldDirection(cameraDirection)
+  soundSystem.updateListenerOrientation(
+    { x: cameraDirection.x, y: cameraDirection.y, z: cameraDirection.z },
+    { x: camera.up.x, y: camera.up.y, z: camera.up.z }
+  )
   
   // Update centralized systems
   profiler.startSection('Centralized Systems')

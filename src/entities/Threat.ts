@@ -3,6 +3,7 @@ import * as CANNON from 'cannon-es'
 import { Projectile, ProjectileOptions } from './Projectile'
 import { GeometryFactory } from '../utils/GeometryFactory'
 import { MaterialCache } from '../utils/MaterialCache'
+import { MissileModelFactory } from '../utils/MissileModelFactory'
 
 export enum ThreatType {
   // Rockets
@@ -199,6 +200,9 @@ export class Threat extends Projectile {
     // Calculate impact prediction
     this.calculateImpactPrediction()
     
+    // Replace default sphere mesh with proper missile model
+    this.replaceMeshWithModel(scene, options.type)
+    
     // Set up special physics for drones
     if (config.isDrone) {
       this.body.linearDamping = 0.5 // Moderate air resistance
@@ -208,12 +212,22 @@ export class Threat extends Projectile {
       this.body.mass = config.warheadSize * 0.5 // Lighter than regular projectiles
       // Lock rotation for drones
       this.body.fixedRotation = true
-      this.createDroneMesh(scene, config)
-    } else if (config.isMortar) {
-      this.createMortarMesh(scene, config)
-    } else if (options.type === ThreatType.CRUISE_MISSILE) {
-      this.createCruiseMissileMesh(scene, config)
     }
+  }
+
+  private replaceMeshWithModel(scene: THREE.Scene, type: ThreatType): void {
+    // Remove default sphere mesh
+    if (this.mesh) {
+      scene.remove(this.mesh)
+      // Don't dispose geometry/material - they're from caches
+    }
+    
+    // Create new model using factory
+    const modelFactory = MissileModelFactory.getInstance()
+    this.mesh = modelFactory.createThreatModel(type, this.config)
+    this.mesh.castShadow = true
+    this.mesh.receiveShadow = true
+    scene.add(this.mesh)
   }
 
   private calculateImpactPrediction(): void {
@@ -396,113 +410,6 @@ export class Threat extends Projectile {
     }
   }
   
-  private createDroneMesh(scene: THREE.Scene, config: ThreatConfig): void {
-    // Replace default sphere with drone shape
-    scene.remove(this.mesh)
-    // Don't dispose geometry from GeometryFactory - it's shared
-    // Don't dispose material from MaterialCache - it's shared
-    
-    // Create drone body (flattened box)
-    const bodyGeometry = GeometryFactory.getInstance().getBox(config.radius * 2, config.radius * 0.5, config.radius * 1.5)
-    const bodyMaterial = MaterialCache.getInstance().getMeshStandardMaterial({
-      color: config.color,
-      roughness: 0.8,
-      metalness: 0.2
-    })
-    this.mesh = new THREE.Mesh(bodyGeometry, bodyMaterial)
-    
-    // Add propellers
-    const propellerGroup = new THREE.Group()
-    const propGeometry = GeometryFactory.getInstance().getCylinder(config.radius * 0.8, config.radius * 0.8, 0.05, 8)
-    const propMaterial = MaterialCache.getInstance().getMeshBasicMaterial({ color: 0x333333 })
-    
-    for (let i = 0; i < 4; i++) {
-      const prop = new THREE.Mesh(propGeometry, propMaterial)
-      const angle = (i / 4) * Math.PI * 2
-      prop.position.x = Math.cos(angle) * config.radius
-      prop.position.z = Math.sin(angle) * config.radius
-      prop.position.y = config.radius * 0.3
-      propellerGroup.add(prop)
-    }
-    
-    this.mesh.add(propellerGroup)
-    this.mesh.castShadow = true
-    scene.add(this.mesh)
-    
-    // Store propeller group for animation
-    this.mesh.userData.propellers = propellerGroup
-  }
-  
-  private createMortarMesh(scene: THREE.Scene, config: ThreatConfig): void {
-    // Replace default sphere with mortar shell shape
-    scene.remove(this.mesh)
-    // Don't dispose geometry from GeometryFactory - it's shared
-    // Don't dispose material from MaterialCache - it's shared
-    
-    // Create elongated cylinder for mortar
-    const geometry = GeometryFactory.getInstance().getCylinder(
-      config.radius * 0.6,  // Top radius
-      config.radius * 0.8,  // Bottom radius
-      config.radius * 3,    // Height
-      8                     // Segments
-    )
-    const material = MaterialCache.getInstance().getMeshStandardMaterial({
-      color: config.color,
-      roughness: 0.6,
-      metalness: 0.4
-    })
-    this.mesh = new THREE.Mesh(geometry, material)
-    this.mesh.castShadow = true
-    scene.add(this.mesh)
-  }
-  
-  private createCruiseMissileMesh(scene: THREE.Scene, config: ThreatConfig): void {
-    // Replace default sphere with cruise missile shape
-    scene.remove(this.mesh)
-    // Don't dispose geometry from GeometryFactory - it's shared
-    // Don't dispose material from MaterialCache - it's shared
-    
-    // Create missile body
-    const bodyGroup = new THREE.Group()
-    
-    // Main body - cylinder
-    const bodyGeometry = GeometryFactory.getInstance().getCylinder(
-      config.radius * 0.8,
-      config.radius * 0.8,
-      config.radius * 4,
-      8
-    )
-    const bodyMaterial = MaterialCache.getInstance().getMeshStandardMaterial({
-      color: config.color,
-      roughness: 0.3,
-      metalness: 0.7
-    })
-    const body = new THREE.Mesh(bodyGeometry, bodyMaterial)
-    body.rotation.z = Math.PI / 2 // Horizontal
-    bodyGroup.add(body)
-    
-    // Nose cone
-    const noseGeometry = GeometryFactory.getInstance().getCone(config.radius * 0.8, config.radius * 1.5, 8)
-    const nose = new THREE.Mesh(noseGeometry, bodyMaterial)
-    nose.position.x = config.radius * 2.75
-    nose.rotation.z = -Math.PI / 2
-    bodyGroup.add(nose)
-    
-    // Wings
-    const wingGeometry = GeometryFactory.getInstance().getBox(config.radius * 2, 0.1, config.radius)
-    const wing1 = new THREE.Mesh(wingGeometry, bodyMaterial)
-    wing1.position.y = config.radius * 0.6
-    bodyGroup.add(wing1)
-    
-    const wing2 = new THREE.Mesh(wingGeometry, bodyMaterial)
-    wing2.rotation.x = Math.PI / 2
-    wing2.position.z = config.radius * 0.6
-    bodyGroup.add(wing2)
-    
-    this.mesh = bodyGroup
-    this.mesh.castShadow = true
-    scene.add(this.mesh)
-  }
   
   update(): void {
     super.update()
@@ -521,25 +428,43 @@ export class Threat extends Projectile {
         this.mesh.rotation.y = Math.atan2(velocity.x, velocity.z)
       }
       
-      // Animate propellers
-      if (this.mesh.userData.propellers) {
-        this.mesh.userData.propellers.rotation.y += 0.5
+      // Animate rotors
+      if (this.mesh.userData.rotors) {
+        this.mesh.userData.rotors.children.forEach((armGroup, i) => {
+          const rotor = armGroup.children[1] // Second child is the rotor
+          if (rotor) {
+            rotor.rotation.y += 0.8 + i * 0.1 // Slightly different speeds
+          }
+        })
       }
     } else if (this.config.cruiseAltitude && !this.config.isDrone) {
       this.updateCruiseMissileBehavior()
     }
     
-    // Orient mortar shells along velocity
-    if (this.config.isMortar) {
+    // Orient all non-drone threats along velocity
+    if (!this.config.isDrone) {
       const velocity = this.getVelocity()
       if (velocity.length() > 0.1) {
         const direction = velocity.normalize()
-        this.mesh.lookAt(
-          this.mesh.position.x + direction.x,
-          this.mesh.position.y + direction.y,
-          this.mesh.position.z + direction.z
-        )
-        this.mesh.rotateX(Math.PI / 2) // Adjust for cylinder orientation
+        
+        // Different orientation for different model types
+        if (this.mesh instanceof THREE.Group) {
+          // For group models, we need to handle orientation properly
+          // Rocket models are built pointing along -Z axis (rotated cylinders)
+          const defaultForward = new THREE.Vector3(0, 0, -1)
+          const quaternion = new THREE.Quaternion().setFromUnitVectors(defaultForward, direction)
+          this.mesh.quaternion.copy(quaternion)
+        } else {
+          // For simple mesh models
+          this.mesh.lookAt(
+            this.mesh.position.x + direction.x,
+            this.mesh.position.y + direction.y,
+            this.mesh.position.z + direction.z
+          )
+          if (this.config.isMortar) {
+            this.mesh.rotateX(Math.PI / 2) // Adjust for cylinder orientation
+          }
+        }
       }
     }
   }

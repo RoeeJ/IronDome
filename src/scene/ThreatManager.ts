@@ -8,6 +8,7 @@ import { IronDomeBattery } from '../entities/IronDomeBattery'
 import { ExplosionManager, ExplosionType } from '../systems/ExplosionManager'
 import { GeometryFactory } from '../utils/GeometryFactory'
 import { MaterialCache } from '../utils/MaterialCache'
+import { SoundSystem } from '../systems/SoundSystem'
 
 export interface ThreatSpawnConfig {
   type: ThreatType
@@ -284,6 +285,9 @@ export class ThreatManager extends EventEmitter {
             position: impactPosition,
             radius: 15
           })
+          
+          // Play ground impact sound
+          SoundSystem.getInstance().playExplosion('ground', impactPosition)
           this.removeThreat(i, false) // Missed - hit ground
         } else if (threat.body.position.y < -5) {
           // Remove if somehow went too far below ground
@@ -446,6 +450,11 @@ export class ThreatManager extends EventEmitter {
     
     this.threats.push(threat)
     this.addImpactMarker(threat)
+    
+    // Play threat incoming sound
+    if (config.type === ThreatType.BALLISTIC_MISSILE) {
+      SoundSystem.getInstance().playAlert('critical')
+    }
     
     // Create launch effects for the threat
     const launchDirection = velocity.clone().normalize()

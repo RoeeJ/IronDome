@@ -17,6 +17,7 @@ import { InterceptorAllocation } from '../systems/InterceptorAllocation'
 import { InterceptionOptimizer } from '../systems/InterceptionOptimizer'
 import { BlastPhysics } from '../systems/BlastPhysics'
 import { ExplosionManager, ExplosionType } from '../systems/ExplosionManager'
+import { SoundSystem } from '../systems/SoundSystem'
 
 interface Interception {
   interceptor: Projectile
@@ -432,6 +433,9 @@ export class InterceptionSystem {
     
     // Create explosion visual
     this.createExplosion(position, Math.max(0.8, quality))
+    
+    // Play explosion sound
+    SoundSystem.getInstance().playExplosion('intercept', position)
     
     // Check if threat is still active before counting hits/misses
     if (!threat.isActive) {

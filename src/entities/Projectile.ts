@@ -8,6 +8,7 @@ import { ThrustVectorControl } from "../systems/ThrustVectorControl";
 import { UnifiedTrailSystem, TrailType } from "../systems/UnifiedTrailSystem";
 import { GeometryFactory } from "../utils/GeometryFactory";
 import { MaterialCache } from "../utils/MaterialCache";
+import { MissileModelFactory } from "../utils/MissileModelFactory";
 
 export interface ProjectileOptions {
   position: THREE.Vector3;
@@ -27,7 +28,7 @@ export interface ProjectileOptions {
 
 export class Projectile {
   id: string;
-  mesh: THREE.Mesh;
+  mesh: THREE.Mesh | THREE.Group;
   body: CANNON.Body;
   trail: THREE.Line; // Legacy trail for compatibility
   trailPositions: THREE.Vector3[]; // Legacy trail positions
@@ -54,8 +55,8 @@ export class Projectile {
   private static readonly WORLD_SCALE = 0.3; // 30% of real-world values
 
   // Model orientation debugging
-  private static modelForwardVector = new THREE.Vector3(0, 1, 0); // Default: +Y
-  private static modelRotationAdjustment = new THREE.Euler(0, 0, 0); // No rotation needed for Y+
+  private static modelForwardVector = new THREE.Vector3(0, 1, 0); // Default: +Y for interceptor model
+  private static modelRotationAdjustment = new THREE.Euler(0, 0, 0); // No rotation needed
 
   // Proximity fuse settings - CRITICAL: These values are finely tuned and SHOULD NOT be changed!
   // These settings ensure reliable interception at realistic engagement ranges
@@ -108,25 +109,20 @@ export class Projectile {
     this.maxLifetime = maxLifetime;
     this.batteryPosition = batteryPosition;
 
-    // Create mesh - use model for interceptor, simple geometry for threats
+    // Create mesh using missile model factory
+    const modelFactory = MissileModelFactory.getInstance();
     if (isInterceptor) {
-      // Create temporary cone while model loads
-      const geometry = GeometryFactory.getInstance().getCone(radius * 0.8, radius * 5, 6); // Reduced from 8 segments
-      const material = MaterialCache.getInstance().getMeshStandardMaterial({
-        color,
-        roughness: 0.3,
-        metalness: 0.8,
-      });
-      this.mesh = new THREE.Mesh(geometry, material);
-      // Rotation will be handled by orientMissile()
-
+      // Create interceptor model
+      this.mesh = modelFactory.createInterceptorModel(color);
+      
       // Load optimized Tamir model using shared cache (if enabled)
       const modelQuality = (window as any).__interceptorModelQuality || "ultra";
       if (modelQuality !== "none") {
         this.loadTamirModelOptimized(scene, radius, modelQuality);
       }
     } else {
-      // Threat missile - simple sphere
+      // Threat missile - simple sphere for compatibility
+      // (Threats should use their own models via Threat class)
       const geometry = GeometryFactory.getInstance().getSphere(radius, 12, 6); // Reduced segments
       const material = MaterialCache.getInstance().getMeshStandardMaterial({
         color,

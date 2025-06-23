@@ -1,580 +1,620 @@
-import React, { useState, useEffect } from 'react'
-import { GameState } from '../game/GameState'
-import { WaveManager } from '../game/WaveManager'
-import { ResourceManager } from '../game/ResourceManager'
-import { DomePlacementSystem } from '../game/DomePlacementSystem'
-import { DeviceCapabilities } from '../utils/DeviceCapabilities'
-import { DomeContextMenu } from './DomeContextMenu'
-import { HelpModal } from './HelpModal'
-import * as THREE from 'three'
+import React, { useState, useEffect } from "react";
+import { GameState } from "../game/GameState";
+import { WaveManager } from "../game/WaveManager";
+import { ResourceManager } from "../game/ResourceManager";
+import { DomePlacementSystem } from "../game/DomePlacementSystem";
+import { DeviceCapabilities } from "../utils/DeviceCapabilities";
+import { DomeContextMenu } from "./DomeContextMenu";
+import { HelpModal } from "./HelpModal";
+import { SoundSystem } from "../systems/SoundSystem";
+import * as THREE from "three";
 
 interface GameUIProps {
-  waveManager: WaveManager
-  placementSystem: DomePlacementSystem
+  waveManager: WaveManager;
+  placementSystem: DomePlacementSystem;
 }
 
 interface GameUIProps {
-  waveManager: WaveManager
-  placementSystem: DomePlacementSystem
-  onModeChange?: (gameMode: boolean) => void
-  isGameMode: boolean
+  waveManager: WaveManager;
+  placementSystem: DomePlacementSystem;
+  onModeChange?: (gameMode: boolean) => void;
+  isGameMode: boolean;
 }
 
 interface GameOverData {
-  score: number
-  wave: number
-  isHighScore: boolean
-  previousHighScore: number
+  score: number;
+  wave: number;
+  isHighScore: boolean;
+  previousHighScore: number;
 }
 
-export const GameUI: React.FC<GameUIProps> = ({ waveManager, placementSystem, onModeChange, isGameMode }) => {
+export const GameUI: React.FC<GameUIProps> = ({
+  waveManager,
+  placementSystem,
+  onModeChange,
+  isGameMode,
+}) => {
   const [hasViewedHelp, setHasViewedHelp] = useState(() => {
-    return localStorage.getItem('helpViewed') === 'true'
-  })
-  const [credits, setCredits] = useState(0)
-  const [interceptors, setInterceptors] = useState(0)
-  const [currentWave, setCurrentWave] = useState(1)
-  const [waveProgress, setWaveProgress] = useState({ spawned: 0, destroyed: 0, total: 0 })
-  const [isWaveActive, setIsWaveActive] = useState(false)
-  const [preparationTime, setPreparationTime] = useState(0)
-  const [score, setScore] = useState(0)
-  const [highScore, setHighScore] = useState(0)
-  const [showShop, setShowShop] = useState(false)
-  const [placementMode, setPlacementMode] = useState(false)
-  const [gameOver, setGameOver] = useState<GameOverData | null>(null)
+    return localStorage.getItem("helpViewed") === "true";
+  });
+  const [credits, setCredits] = useState(0);
+  const [interceptors, setInterceptors] = useState(0);
+  const [currentWave, setCurrentWave] = useState(1);
+  const [waveProgress, setWaveProgress] = useState({
+    spawned: 0,
+    destroyed: 0,
+    total: 0,
+  });
+  const [isWaveActive, setIsWaveActive] = useState(false);
+  const [preparationTime, setPreparationTime] = useState(0);
+  const [score, setScore] = useState(0);
+  const [highScore, setHighScore] = useState(0);
+  const [showShop, setShowShop] = useState(false);
+  const [placementMode, setPlacementMode] = useState(false);
+  const [gameOver, setGameOver] = useState<GameOverData | null>(null);
   const [contextMenu, setContextMenu] = useState<{
-    battery: any
-    batteryId: string
-    position: { x: number; y: number }
-  } | null>(null)
-  const [showHelp, setShowHelp] = useState(false)
-  const [confirmNewGame, setConfirmNewGame] = useState(false)
-  const [autoIntercept, setAutoIntercept] = useState(false) // Default to manual for game mode
-  const [isPaused, setIsPaused] = useState(false)
-  const [shopCollapsed, setShopCollapsed] = useState(true) // Shop starts collapsed
-  const confirmTimeoutRef = React.useRef<NodeJS.Timeout | null>(null)
-  
+    battery: any;
+    batteryId: string;
+    position: { x: number; y: number };
+  } | null>(null);
+  const [showHelp, setShowHelp] = useState(false);
+  const [confirmNewGame, setConfirmNewGame] = useState(false);
+  const [autoIntercept, setAutoIntercept] = useState(false); // Default to manual for game mode
+  const [isPaused, setIsPaused] = useState(false);
+  const [shopCollapsed, setShopCollapsed] = useState(true); // Shop starts collapsed
+  const confirmTimeoutRef = React.useRef<NodeJS.Timeout | null>(null);
+
   // Store interval reference to clear it when needed
-  const preparationIntervalRef = React.useRef<NodeJS.Timeout | null>(null)
-  
-  const gameState = GameState.getInstance()
-  const resourceManager = ResourceManager.getInstance()
-  const deviceInfo = DeviceCapabilities.getInstance().getDeviceInfo()
-  
+  const preparationIntervalRef = React.useRef<NodeJS.Timeout | null>(null);
+
+  const gameState = GameState.getInstance();
+  const resourceManager = ResourceManager.getInstance();
+  const deviceInfo = DeviceCapabilities.getInstance().getDeviceInfo();
+
   useEffect(() => {
     // Initial state
-    updateResourceDisplay()
-    setPlacementMode(placementSystem.isInPlacementMode())
-    
+    updateResourceDisplay();
+    setPlacementMode(placementSystem.isInPlacementMode());
+
     // Sync initial auto intercept state
-    const controls = (window as any).__simulationControls
+    const controls = (window as any).__simulationControls;
     if (controls) {
-      setAutoIntercept(controls.autoIntercept)
+      setAutoIntercept(controls.autoIntercept);
     }
-    
+
     // Check placement mode periodically to stay in sync
     const placementCheckInterval = setInterval(() => {
-      const currentMode = placementSystem.isInPlacementMode()
+      const currentMode = placementSystem.isInPlacementMode();
       if (currentMode !== placementMode) {
-        setPlacementMode(currentMode)
+        setPlacementMode(currentMode);
       }
-    }, 100)
-    
+    }, 100);
+
     // Check for game over periodically
     const gameOverCheckInterval = setInterval(() => {
-      checkGameOver()
-    }, 500)
-    
+      checkGameOver();
+    }, 500);
+
     // Subscribe to game events
-    const handleCreditsChanged = () => setCredits(gameState.getCredits())
-    const handleInterceptorsChanged = () => setInterceptors(gameState.getInterceptorStock())
+    const handleCreditsChanged = () => setCredits(gameState.getCredits());
+    const handleInterceptorsChanged = () =>
+      setInterceptors(gameState.getInterceptorStock());
     const handleScoreChanged = () => {
-      setScore(gameState.getScore())
-      setHighScore(gameState.getHighScore())
-    }
-    
+      setScore(gameState.getScore());
+      setHighScore(gameState.getHighScore());
+    };
+
     const handleWaveStarted = (data: any) => {
-      setCurrentWave(data.waveNumber)
-      setIsWaveActive(true)
-      setPreparationTime(0)
+      setCurrentWave(data.waveNumber);
+      setIsWaveActive(true);
+      setPreparationTime(0);
       // Initialize wave progress immediately
       setWaveProgress({
         spawned: 0,
         destroyed: 0,
-        total: data.totalThreats || 0
-      })
-    }
-    
+        total: data.totalThreats || 0,
+      });
+    };
+
     const handleWavePreparation = (data: any) => {
-      setCurrentWave(data.waveNumber)
-      setIsWaveActive(false)
-      setPreparationTime(data.preparationTime)
-      startPreparationCountdown(data.preparationTime)
-    }
-    
+      setCurrentWave(data.waveNumber);
+      setIsWaveActive(false);
+      setPreparationTime(data.preparationTime);
+      startPreparationCountdown(data.preparationTime);
+    };
+
     const handleWaveProgress = (data: any) => {
       setWaveProgress({
         spawned: data.spawned,
         destroyed: data.destroyed,
-        total: data.total
-      })
-    }
-    
+        total: data.total,
+      });
+    };
+
     const handleWaveCompleted = (data: any) => {
       // Show wave complete notification
-      showNotification(`Wave ${data.waveNumber} Complete! +${data.creditsEarned} credits`)
-      
+      showNotification(
+        `Wave ${data.waveNumber} Complete! +${data.creditsEarned} credits`
+      );
+
       // Check if auto-intercept was just unlocked
       if (data.waveNumber === 4 && isGameMode) {
         setTimeout(() => {
-          showNotification('🎆 AUTO-INTERCEPT UNLOCKED! Toggle between manual and auto modes.')
+          showNotification(
+            "🎆 AUTO-INTERCEPT UNLOCKED! Toggle between manual and auto modes."
+          );
           // Enable auto-intercept by default when unlocked
-          const controls = (window as any).__simulationControls
-          controls.autoIntercept = true
-          setAutoIntercept(true)
-        }, 2000)
+          const controls = (window as any).__simulationControls;
+          controls.autoIntercept = true;
+          setAutoIntercept(true);
+        }, 2000);
       }
-    }
-    
+    };
+
     const handleNewGame = () => {
       // Update all displays when new game starts
-      updateResourceDisplay()
-      setGameOver(null)
+      updateResourceDisplay();
+      setGameOver(null);
       // Reset to manual mode for new game
-      const controls = (window as any).__simulationControls
+      const controls = (window as any).__simulationControls;
       if (controls) {
-        controls.autoIntercept = false
-        setAutoIntercept(false)
-        localStorage.setItem('ironDome_interceptMode', 'false')
+        controls.autoIntercept = false;
+        setAutoIntercept(false);
+        localStorage.setItem("ironDome_interceptMode", "false");
       }
-    }
-    
+    };
+
     const handleDomeUnlocked = () => {
       // Force update when dome count changes
-      updateResourceDisplay()
-    }
-    
+      updateResourceDisplay();
+    };
+
     // Check for game over
     const checkGameOver = () => {
-      if (!isGameMode) return
-      
-      const allBatteries = placementSystem.getAllBatteries()
-      const operationalBatteries = allBatteries.filter(battery => battery.isOperational())
-      
+      if (!isGameMode) return;
+
+      const allBatteries = placementSystem.getAllBatteries();
+      const operationalBatteries = allBatteries.filter((battery) =>
+        battery.isOperational()
+      );
+
       if (operationalBatteries.length === 0 && allBatteries.length > 0) {
         // All batteries destroyed - game over!
-        const currentScore = gameState.getScore()
-        const previousHigh = gameState.getHighScore()
-        const isNewHighScore = currentScore > previousHigh
-        
+        const currentScore = gameState.getScore();
+        const previousHigh = gameState.getHighScore();
+        const isNewHighScore = currentScore > previousHigh;
+
         setGameOver({
           score: currentScore,
           wave: gameState.getCurrentWave(),
           isHighScore: isNewHighScore,
-          previousHighScore: previousHigh
-        })
-        
+          previousHighScore: previousHigh,
+        });
+
         // Stop the game
-        waveManager.pauseWave()
-        
+        waveManager.pauseWave();
+
         // Pause the entire simulation
-        const simulationControls = (window as any).__simulationControls
+        const simulationControls = (window as any).__simulationControls;
         if (simulationControls) {
-          simulationControls.pause = true
+          simulationControls.pause = true;
         }
-        
+
         // Disable OrbitControls
-        const controls = (window as any).__controls
-        if (controls) controls.enabled = false
+        const controls = (window as any).__controls;
+        if (controls) controls.enabled = false;
       }
-    }
-    
+    };
+
     // Handle right-click on batteries
     const handleContextMenu = (event: MouseEvent) => {
-      event.preventDefault()
-      
+      event.preventDefault();
+
       // Cast ray to find clicked battery
-      const canvas = document.querySelector('canvas')
-      if (!canvas) return
-      
-      const rect = canvas.getBoundingClientRect()
-      const x = ((event.clientX - rect.left) / rect.width) * 2 - 1
-      const y = -((event.clientY - rect.top) / rect.height) * 2 + 1
-      
+      const canvas = document.querySelector("canvas");
+      if (!canvas) return;
+
+      const rect = canvas.getBoundingClientRect();
+      const x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
+      const y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
+
       // Get camera and scene from Three.js
-      const camera = (window as any).__camera
-      const scene = (window as any).__scene
-      if (!camera || !scene) return
-      
-      const raycaster = new THREE.Raycaster()
-      raycaster.setFromCamera(new THREE.Vector2(x, y), camera)
-      
+      const camera = (window as any).__camera;
+      const scene = (window as any).__scene;
+      if (!camera || !scene) return;
+
+      const raycaster = new THREE.Raycaster();
+      raycaster.setFromCamera(new THREE.Vector2(x, y), camera);
+
       // Check all batteries
-      const batteries = placementSystem.getAllBatteries()
+      const batteries = placementSystem.getAllBatteries();
       for (const battery of batteries) {
-        const batteryMesh = battery.getGroup()
-        if (!batteryMesh) continue
-        
-        const intersects = raycaster.intersectObject(batteryMesh, true)
+        const batteryMesh = battery.getGroup();
+        if (!batteryMesh) continue;
+
+        const intersects = raycaster.intersectObject(batteryMesh, true);
         if (intersects.length > 0) {
           // Check if we hit a hitbox with battery reference
-          const hitObject = intersects[0].object
+          const hitObject = intersects[0].object;
           if (hitObject.userData.isHitbox && hitObject.userData.battery) {
             // Use the battery from the hitbox userData
-            const hitBattery = hitObject.userData.battery
-            const batteryId = placementSystem.getBatteryId(hitBattery)
+            const hitBattery = hitObject.userData.battery;
+            const batteryId = placementSystem.getBatteryId(hitBattery);
             if (batteryId) {
               // Ensure battery is in game state before showing context menu
-              const placement = gameState.getDomePlacements().find(p => p.id === batteryId)
+              const placement = gameState
+                .getDomePlacements()
+                .find((p) => p.id === batteryId);
               if (!placement) {
-                console.warn('[GameUI] Battery (hitbox) found but not in game state, adding it now')
-                const pos = hitBattery.getPosition()
-                gameState.addDomePlacement(batteryId, { x: pos.x, z: pos.z })
+                console.warn(
+                  "[GameUI] Battery (hitbox) found but not in game state, adding it now"
+                );
+                const pos = hitBattery.getPosition();
+                gameState.addDomePlacement(batteryId, { x: pos.x, z: pos.z });
               }
-              
+
               setContextMenu({
                 battery: hitBattery,
                 batteryId,
-                position: { x: event.clientX, y: event.clientY }
-              })
+                position: { x: event.clientX, y: event.clientY },
+              });
               // Disable OrbitControls while context menu is open
-              const controls = (window as any).__controls
-              if (controls) controls.enabled = false
-              break
+              const controls = (window as any).__controls;
+              if (controls) controls.enabled = false;
+              break;
             }
           } else {
             // Normal battery mesh hit
-            const batteryId = placementSystem.getBatteryId(battery)
+            const batteryId = placementSystem.getBatteryId(battery);
             if (batteryId) {
               // Ensure battery is in game state before showing context menu
-              const placement = gameState.getDomePlacements().find(p => p.id === batteryId)
+              const placement = gameState
+                .getDomePlacements()
+                .find((p) => p.id === batteryId);
               if (!placement) {
-                console.warn('[GameUI] Battery found but not in game state, adding it now')
-                const pos = battery.getPosition()
-                gameState.addDomePlacement(batteryId, { x: pos.x, z: pos.z })
+                console.warn(
+                  "[GameUI] Battery found but not in game state, adding it now"
+                );
+                const pos = battery.getPosition();
+                gameState.addDomePlacement(batteryId, { x: pos.x, z: pos.z });
               }
-              
+
               setContextMenu({
                 battery,
                 batteryId,
-                position: { x: event.clientX, y: event.clientY }
-              })
+                position: { x: event.clientX, y: event.clientY },
+              });
               // Disable OrbitControls while context menu is open
-              const controls = (window as any).__controls
-              if (controls) controls.enabled = false
-              break
+              const controls = (window as any).__controls;
+              if (controls) controls.enabled = false;
+              break;
             }
           }
         }
       }
-    }
-    
-    document.addEventListener('contextmenu', handleContextMenu)
-    
+    };
+
+    document.addEventListener("contextmenu", handleContextMenu);
+
     // Handle long press for mobile
-    let longPressTimer: NodeJS.Timeout | null = null
-    let touchStartPos = { x: 0, y: 0 }
-    
+    let longPressTimer: NodeJS.Timeout | null = null;
+    let touchStartPos = { x: 0, y: 0 };
+
     const handleTouchStart = (event: TouchEvent) => {
-      if (event.touches.length !== 1) return
-      
-      const touch = event.touches[0]
-      touchStartPos = { x: touch.clientX, y: touch.clientY }
-      
+      if (event.touches.length !== 1) return;
+
+      const touch = event.touches[0];
+      touchStartPos = { x: touch.clientX, y: touch.clientY };
+
       longPressTimer = setTimeout(() => {
         // Simulate right-click
-        const mouseEvent = new MouseEvent('contextmenu', {
+        const mouseEvent = new MouseEvent("contextmenu", {
           clientX: touch.clientX,
           clientY: touch.clientY,
           bubbles: true,
-          cancelable: true
-        })
-        handleContextMenu(mouseEvent)
-        vibrate(20)
-      }, 500) // 500ms for long press
-    }
-    
+          cancelable: true,
+        });
+        handleContextMenu(mouseEvent);
+        vibrate(20);
+      }, 500); // 500ms for long press
+    };
+
     const handleTouchEnd = () => {
       if (longPressTimer) {
-        clearTimeout(longPressTimer)
-        longPressTimer = null
+        clearTimeout(longPressTimer);
+        longPressTimer = null;
       }
-    }
-    
+    };
+
     const handleTouchMove = (event: TouchEvent) => {
-      if (!longPressTimer || event.touches.length !== 1) return
-      
-      const touch = event.touches[0]
+      if (!longPressTimer || event.touches.length !== 1) return;
+
+      const touch = event.touches[0];
       const distance = Math.sqrt(
         Math.pow(touch.clientX - touchStartPos.x, 2) +
-        Math.pow(touch.clientY - touchStartPos.y, 2)
-      )
-      
+          Math.pow(touch.clientY - touchStartPos.y, 2)
+      );
+
       // Cancel long press if moved too far
       if (distance > 10) {
-        clearTimeout(longPressTimer)
-        longPressTimer = null
+        clearTimeout(longPressTimer);
+        longPressTimer = null;
       }
-    }
-    
+    };
+
     if (deviceInfo?.hasTouch) {
-      document.addEventListener('touchstart', handleTouchStart, { passive: true })
-      document.addEventListener('touchend', handleTouchEnd)
-      document.addEventListener('touchmove', handleTouchMove, { passive: true })
+      document.addEventListener("touchstart", handleTouchStart, {
+        passive: true,
+      });
+      document.addEventListener("touchend", handleTouchEnd);
+      document.addEventListener("touchmove", handleTouchMove, {
+        passive: true,
+      });
     }
-    
+
     // Listen for battery updates
     const handleBatteryUpdate = () => {
-      updateResourceDisplay()
+      updateResourceDisplay();
       // Force re-render to update placement info
-      setPlacementMode(placementSystem.isInPlacementMode())
-    }
-    
-    window.addEventListener('batteryRemoved', handleBatteryUpdate)
-    window.addEventListener('batteryUpgraded', handleBatteryUpdate)
-    
+      setPlacementMode(placementSystem.isInPlacementMode());
+    };
+
+    window.addEventListener("batteryRemoved", handleBatteryUpdate);
+    window.addEventListener("batteryUpgraded", handleBatteryUpdate);
+
     // Attach listeners
-    gameState.on('creditsChanged', handleCreditsChanged)
-    gameState.on('interceptorsChanged', handleInterceptorsChanged)
-    gameState.on('scoreChanged', handleScoreChanged)
-    gameState.on('newGame', handleNewGame)
-    gameState.on('domeUnlocked', handleDomeUnlocked)
-    waveManager.on('waveStarted', handleWaveStarted)
-    waveManager.on('wavePreparation', handleWavePreparation)
-    waveManager.on('waveProgress', handleWaveProgress)
-    waveManager.on('waveCompleted', handleWaveCompleted)
-    
+    gameState.on("creditsChanged", handleCreditsChanged);
+    gameState.on("interceptorsChanged", handleInterceptorsChanged);
+    gameState.on("scoreChanged", handleScoreChanged);
+    gameState.on("newGame", handleNewGame);
+    gameState.on("domeUnlocked", handleDomeUnlocked);
+    waveManager.on("waveStarted", handleWaveStarted);
+    waveManager.on("wavePreparation", handleWavePreparation);
+    waveManager.on("waveProgress", handleWaveProgress);
+    waveManager.on("waveCompleted", handleWaveCompleted);
+
     // Cleanup
     return () => {
       // Clear preparation countdown if active
       if (preparationIntervalRef.current) {
-        clearInterval(preparationIntervalRef.current)
-        preparationIntervalRef.current = null
+        clearInterval(preparationIntervalRef.current);
+        preparationIntervalRef.current = null;
       }
-      
+
       // Clear intervals
-      clearInterval(placementCheckInterval)
-      clearInterval(gameOverCheckInterval)
-      
+      clearInterval(placementCheckInterval);
+      clearInterval(gameOverCheckInterval);
+
       // Remove context menu handler
-      document.removeEventListener('contextmenu', handleContextMenu)
-      
+      document.removeEventListener("contextmenu", handleContextMenu);
+
       // Remove touch handlers
       if (deviceInfo?.hasTouch) {
-        document.removeEventListener('touchstart', handleTouchStart)
-        document.removeEventListener('touchend', handleTouchEnd)
-        document.removeEventListener('touchmove', handleTouchMove)
+        document.removeEventListener("touchstart", handleTouchStart);
+        document.removeEventListener("touchend", handleTouchEnd);
+        document.removeEventListener("touchmove", handleTouchMove);
       }
-      
+
       // Remove battery update handlers
-      window.removeEventListener('batteryRemoved', handleBatteryUpdate)
-      window.removeEventListener('batteryUpgraded', handleBatteryUpdate)
-      
-      gameState.off('creditsChanged', handleCreditsChanged)
-      gameState.off('interceptorsChanged', handleInterceptorsChanged)
-      gameState.off('scoreChanged', handleScoreChanged)
-      gameState.off('newGame', handleNewGame)
-      gameState.off('domeUnlocked', handleDomeUnlocked)
-      waveManager.off('waveStarted', handleWaveStarted)
-      waveManager.off('wavePreparation', handleWavePreparation)
-      waveManager.off('waveProgress', handleWaveProgress)
-      waveManager.off('waveCompleted', handleWaveCompleted)
-    }
-  }, [placementMode])
-  
+      window.removeEventListener("batteryRemoved", handleBatteryUpdate);
+      window.removeEventListener("batteryUpgraded", handleBatteryUpdate);
+
+      gameState.off("creditsChanged", handleCreditsChanged);
+      gameState.off("interceptorsChanged", handleInterceptorsChanged);
+      gameState.off("scoreChanged", handleScoreChanged);
+      gameState.off("newGame", handleNewGame);
+      gameState.off("domeUnlocked", handleDomeUnlocked);
+      waveManager.off("waveStarted", handleWaveStarted);
+      waveManager.off("wavePreparation", handleWavePreparation);
+      waveManager.off("waveProgress", handleWaveProgress);
+      waveManager.off("waveCompleted", handleWaveCompleted);
+    };
+  }, [placementMode]);
+
   // Show/hide shop panel based on game mode
   useEffect(() => {
-    setShowShop(isGameMode)
-    setShopCollapsed(true) // Always start collapsed
-  }, [isGameMode])
-  
+    setShowShop(isGameMode);
+    setShopCollapsed(true); // Always start collapsed
+  }, [isGameMode]);
+
   // Handle pause functionality
   useEffect(() => {
     const togglePause = () => {
       if (isGameMode && !gameOver) {
-        const controls = (window as any).__simulationControls
+        const controls = (window as any).__simulationControls;
         if (controls) {
-          const newPauseState = !isPaused
-          setIsPaused(newPauseState)
-          controls.pause = newPauseState
-          
+          const newPauseState = !isPaused;
+          setIsPaused(newPauseState);
+          controls.pause = newPauseState;
+
           if (newPauseState) {
-            waveManager.pauseWave()
+            waveManager.pauseWave();
           } else {
-            waveManager.resumeWave()
+            waveManager.resumeWave();
           }
         }
       }
-    }
-    
+    };
+
     const handleKeyPress = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') {
-        e.preventDefault()
-        
+      if (e.key === "Escape") {
+        e.preventDefault();
+
         // Close modals first if any are open
         if (showShop && !shopCollapsed) {
           // Collapse shop instead of closing
-          setShopCollapsed(true)
+          setShopCollapsed(true);
           // Reset time scale
-          const simulationControls = (window as any).__simulationControls
+          const simulationControls = (window as any).__simulationControls;
           if (simulationControls) {
-            simulationControls.timeScale = 1.0
+            simulationControls.timeScale = 1.0;
           }
         } else if (showHelp) {
-          setShowHelp(false)
+          setShowHelp(false);
         } else if (contextMenu) {
-          setContextMenu(null)
+          setContextMenu(null);
         } else {
           // Otherwise toggle pause
-          togglePause()
+          togglePause();
         }
-      } else if (e.key === 'p' || e.key === 'P') {
-        e.preventDefault()
-        togglePause()
       }
-    }
-    
-    window.addEventListener('keydown', handleKeyPress)
-    
+    };
+
+    window.addEventListener("keydown", handleKeyPress);
+
     return () => {
-      window.removeEventListener('keydown', handleKeyPress)
-    }
-  }, [isPaused, isGameMode, gameOver, showShop, showHelp, contextMenu, shopCollapsed])
-  
+      window.removeEventListener("keydown", handleKeyPress);
+    };
+  }, [
+    isPaused,
+    isGameMode,
+    gameOver,
+    showShop,
+    showHelp,
+    contextMenu,
+    shopCollapsed,
+  ]);
+
   const updateResourceDisplay = () => {
-    setCredits(gameState.getCredits())
-    setInterceptors(gameState.getInterceptorStock())
-    setScore(gameState.getScore())
-    setHighScore(gameState.getHighScore())
-  }
-  
+    setCredits(gameState.getCredits());
+    setInterceptors(gameState.getInterceptorStock());
+    setScore(gameState.getScore());
+    setHighScore(gameState.getHighScore());
+  };
+
   const startPreparationCountdown = (seconds: number) => {
     // Clear any existing countdown
     if (preparationIntervalRef.current) {
-      clearInterval(preparationIntervalRef.current)
-      preparationIntervalRef.current = null
+      clearInterval(preparationIntervalRef.current);
+      preparationIntervalRef.current = null;
     }
-    
-    let remaining = seconds
+
+    let remaining = seconds;
     preparationIntervalRef.current = setInterval(() => {
-      remaining--
-      setPreparationTime(remaining)
+      remaining--;
+      setPreparationTime(remaining);
       if (remaining <= 0) {
         if (preparationIntervalRef.current) {
-          clearInterval(preparationIntervalRef.current)
-          preparationIntervalRef.current = null
+          clearInterval(preparationIntervalRef.current);
+          preparationIntervalRef.current = null;
         }
       }
-    }, 1000)
-  }
-  
+    }, 1000);
+  };
+
   const showNotification = (message: string) => {
-    const notification = document.createElement('div')
-    notification.className = 'game-notification'
-    notification.textContent = message
-    document.body.appendChild(notification)
-    
+    const notification = document.createElement("div");
+    notification.className = "game-notification";
+    notification.textContent = message;
+    document.body.appendChild(notification);
+
     setTimeout(() => {
-      notification.remove()
-    }, 3000)
-  }
-  
+      notification.remove();
+    }, 3000);
+  };
+
   const startNewGame = () => {
+    // Play UI sound
+    SoundSystem.getInstance().playUI('click');
+    
     // Clear any existing countdown
     if (preparationIntervalRef.current) {
-      clearInterval(preparationIntervalRef.current)
-      preparationIntervalRef.current = null
+      clearInterval(preparationIntervalRef.current);
+      preparationIntervalRef.current = null;
     }
-    setPreparationTime(0)
-    
+    setPreparationTime(0);
+
     // Disable automatic initial battery creation during new game setup
-    placementSystem.setSkipInitialBatteryCheck(true)
-    
+    placementSystem.setSkipInitialBatteryCheck(true);
+
     // First, remove all batteries
-    const allBatteries = placementSystem.getAllBatteries()
-    const batteryIds: string[] = []
-    
-    allBatteries.forEach(battery => {
-      const batteryId = placementSystem.getBatteryId(battery)
-      if (batteryId) batteryIds.push(batteryId)
-    })
-    
+    const allBatteries = placementSystem.getAllBatteries();
+    const batteryIds: string[] = [];
+
+    allBatteries.forEach((battery) => {
+      const batteryId = placementSystem.getBatteryId(battery);
+      if (batteryId) batteryIds.push(batteryId);
+    });
+
     // Remove all batteries
-    batteryIds.forEach(id => {
-      placementSystem.removeBattery(id)
-    })
-    
+    batteryIds.forEach((id) => {
+      placementSystem.removeBattery(id);
+    });
+
     // Clear game state (this clears domePlacements)
-    gameState.startNewGame()
-    
+    gameState.startNewGame();
+
     // Create a fresh initial battery with consistent ID
-    const initialId = 'battery_initial'
-    
+    const initialId = "battery_initial";
+
     // Place the battery first (this adds it to placedDomes and game state)
-    placementSystem.placeBatteryAt(new THREE.Vector3(0, 0, 0), initialId, 1)
-    
+    placementSystem.placeBatteryAt(new THREE.Vector3(0, 0, 0), initialId, 1);
+
     // Apply auto-repair rate to the new battery
-    const autoRepairLevel = gameState.getAutoRepairLevel()
-    const repairRates = [0, 0.5, 1.0, 2.0]
-    const battery = placementSystem.getBattery(initialId)
+    const autoRepairLevel = gameState.getAutoRepairLevel();
+    const repairRates = [0, 0.5, 1.0, 2.0];
+    const battery = placementSystem.getBattery(initialId);
     if (battery) {
-      battery.setAutoRepairRate(repairRates[autoRepairLevel])
+      battery.setAutoRepairRate(repairRates[autoRepairLevel]);
     }
-    
+
     // Re-enable automatic initial battery check after setup
     setTimeout(() => {
-      placementSystem.setSkipInitialBatteryCheck(false)
-    }, 200)
-    
+      placementSystem.setSkipInitialBatteryCheck(false);
+    }, 200);
+
     // Start fresh wave sequence
-    waveManager.startGame()
-    showNotification('New game started!')
+    waveManager.startGame();
+    showNotification("New game started!");
     // Update display
-    setScore(0)
-    setCredits(gameState.getCredits())
-    setInterceptors(gameState.getInterceptorStock())
+    setScore(0);
+    setCredits(gameState.getCredits());
+    setInterceptors(gameState.getInterceptorStock());
     // Force update placement info
-    updateResourceDisplay()
-  }
-  
+    updateResourceDisplay();
+  };
+
   const vibrate = (pattern: number | number[]) => {
-    if ('vibrate' in navigator) {
-      navigator.vibrate(pattern)
+    if ("vibrate" in navigator) {
+      navigator.vibrate(pattern);
     }
-  }
-  
+  };
+
   const handlePlaceDome = () => {
-    vibrate(20)
+    SoundSystem.getInstance().playUI('click');
+    vibrate(20);
     if (placementSystem.isInPlacementMode()) {
-      placementSystem.exitPlacementMode()
-      setPlacementMode(false)
+      placementSystem.exitPlacementMode();
+      setPlacementMode(false);
     } else {
-      placementSystem.enterPlacementMode()
-      setPlacementMode(true)
+      placementSystem.enterPlacementMode();
+      setPlacementMode(true);
     }
-  }
-  
+  };
+
   const handlePurchaseInterceptors = () => {
     if (resourceManager.purchaseInterceptorRestock()) {
-      vibrate(30)
-      showNotification('Purchased 50 interceptors!')
+      SoundSystem.getInstance().playUI('success');
+      vibrate(30);
+      showNotification("Purchased 50 interceptors!");
     } else {
-      vibrate([10, 10, 10]) // Error pattern
+      SoundSystem.getInstance().playUI('fail');
+      vibrate([10, 10, 10]); // Error pattern
     }
-  }
-  
+  };
+
   const handleEmergencySupply = () => {
     if (resourceManager.purchaseEmergencySupply()) {
-      vibrate([50, 50, 50]) // Success pattern
-      showNotification('Emergency supply delivered!')
+      vibrate([50, 50, 50]); // Success pattern
+      showNotification("Emergency supply delivered!");
     } else {
-      vibrate([10, 10, 10]) // Error pattern
+      vibrate([10, 10, 10]); // Error pattern
     }
-  }
-  
-  const costs = resourceManager.getCosts()
-  const placementInfo = placementSystem.getPlacementInfo()
-  
+  };
+
+  const costs = resourceManager.getCosts();
+  const placementInfo = placementSystem.getPlacementInfo();
+
   return (
     <>
       <style>{`
@@ -1624,32 +1664,34 @@ export const GameUI: React.FC<GameUIProps> = ({ waveManager, placementSystem, on
         }
         
       `}</style>
-      
+
       {/* Time dilation visual effect */}
-      <div className={`time-dilation-effect ${showShop && !shopCollapsed ? 'active' : ''}`} />
-      
-      {!hasViewedHelp && (
-        <div className="help-arrow">→</div>
-      )}
-      
-      <button 
-        className={`help-button ${!hasViewedHelp ? 'pulse' : ''}`}
+      <div
+        className={`time-dilation-effect ${
+          showShop && !shopCollapsed ? "active" : ""
+        }`}
+      />
+
+      {!hasViewedHelp && <div className="help-arrow">→</div>}
+
+      <button
+        className={`help-button ${!hasViewedHelp ? "pulse" : ""}`}
         onClick={() => {
-          setShowHelp(true)
+          setShowHelp(true);
           // Mark help as viewed
           if (!hasViewedHelp) {
-            localStorage.setItem('helpViewed', 'true')
-            setHasViewedHelp(true)
+            localStorage.setItem("helpViewed", "true");
+            setHasViewedHelp(true);
           }
           // Disable OrbitControls
-          const controls = (window as any).__controls
-          if (controls) controls.enabled = false
+          const controls = (window as any).__controls;
+          if (controls) controls.enabled = false;
         }}
         title="Help & Tutorial"
       >
         ?
       </button>
-      
+
       <div className="game-ui">
         <div className="top-bar">
           {isGameMode ? (
@@ -1664,39 +1706,59 @@ export const GameUI: React.FC<GameUIProps> = ({ waveManager, placementSystem, on
                     </div>
                     <div className="resource-item">
                       <span className="resource-icon">🚀</span>
-                      <span className={`resource-value ${interceptors < 10 ? 'warning' : interceptors < 5 ? 'warning-low' : ''}`}>
+                      <span
+                        className={`resource-value ${
+                          interceptors < 10
+                            ? "warning"
+                            : interceptors < 5
+                            ? "warning-low"
+                            : ""
+                        }`}
+                      >
                         {interceptors}
                       </span>
                     </div>
                     <div className="resource-item">
                       <span className="resource-icon">🛡️</span>
                       <span className="resource-value">
-                        {placementInfo.placedDomes}/{placementInfo.unlockedDomes}
+                        {placementInfo.placedDomes}/
+                        {placementInfo.unlockedDomes}
                       </span>
                     </div>
                   </div>
                   <div className="ui-panel score-panel">
-                    <span style={{ fontSize: '20px' }}>🏆</span>
+                    <span style={{ fontSize: "20px" }}>🏆</span>
                     <div>
-                      <div className="score-value">{score.toLocaleString()}</div>
-                      <div className="high-score">High: {highScore.toLocaleString()}</div>
+                      <div className="score-value">
+                        {score.toLocaleString()}
+                      </div>
+                      <div className="high-score">
+                        High Score: {highScore.toLocaleString()}
+                      </div>
                     </div>
                   </div>
                 </div>
               </div>
-              
+
               <div className="top-center">
                 <div className="ui-panel wave-panel">
                   <div className="wave-number">Wave {currentWave}</div>
                   {isWaveActive ? (
                     <>
                       <div className="wave-progress">
-                        <div 
-                          className="wave-progress-bar" 
-                          style={{ width: `${(waveProgress.destroyed / waveProgress.total) * 100}%` }}
+                        <div
+                          className="wave-progress-bar"
+                          style={{
+                            width: `${
+                              (waveProgress.destroyed / waveProgress.total) *
+                              100
+                            }%`,
+                          }}
                         />
                       </div>
-                      <div className="wave-text">{waveProgress.destroyed}/{waveProgress.total} Threats</div>
+                      <div className="wave-text">
+                        {waveProgress.destroyed}/{waveProgress.total} Threats
+                      </div>
                     </>
                   ) : preparationTime > 0 ? (
                     <div className="preparation-timer">
@@ -1705,30 +1767,50 @@ export const GameUI: React.FC<GameUIProps> = ({ waveManager, placementSystem, on
                   ) : null}
                 </div>
               </div>
-              
+
               <div className="top-right">
                 <div className="ui-panel intercept-mode-panel">
                   {currentWave >= 5 ? (
-                    <button 
-                      className={`intercept-mode-button ${autoIntercept ? 'active' : ''}`}
+                    <button
+                      className={`intercept-mode-button ${
+                        autoIntercept ? "active" : ""
+                      }`}
                       onClick={() => {
-                        vibrate(15)
-                        const controls = (window as any).__simulationControls
-                        const newValue = !controls.autoIntercept
-                        controls.autoIntercept = newValue
-                        setAutoIntercept(newValue)
+                        vibrate(15);
+                        const controls = (window as any).__simulationControls;
+                        const newValue = !controls.autoIntercept;
+                        controls.autoIntercept = newValue;
+                        setAutoIntercept(newValue);
                         // Save to localStorage
-                        localStorage.setItem('ironDome_interceptMode', newValue.toString())
-                        showNotification(newValue ? 'Auto-Intercept Enabled' : 'Manual Targeting Mode')
+                        localStorage.setItem(
+                          "ironDome_interceptMode",
+                          newValue.toString()
+                        );
+                        showNotification(
+                          newValue
+                            ? "Auto-Intercept Enabled"
+                            : "Manual Targeting Mode"
+                        );
                       }}
-                      title={autoIntercept ? 'Automatic interception enabled' : 'Click on threats to intercept'}
+                      title={
+                        autoIntercept
+                          ? "Automatic interception enabled"
+                          : "Click on threats to intercept"
+                      }
                     >
-                      {autoIntercept ? '🤖' : '🎯'}
+                      {autoIntercept ? "🤖" : "🎯"}
                     </button>
                   ) : (
-                    <div className="auto-intercept-locked" title={`Auto-intercept unlocks at Wave 5 (${5 - currentWave} waves to go)`}>
-                      <div style={{ fontSize: '14px' }}>🔒</div>
-                      <div style={{ fontSize: '9px', color: '#ccc' }}>Wave 5</div>
+                    <div
+                      className="auto-intercept-locked"
+                      title={`Auto-intercept unlocks at Wave 5 (${
+                        5 - currentWave
+                      } waves to go)`}
+                    >
+                      <div style={{ fontSize: "14px" }}>🔒</div>
+                      <div style={{ fontSize: "9px", color: "#ccc" }}>
+                        Wave 5
+                      </div>
                     </div>
                   )}
                 </div>
@@ -1740,31 +1822,46 @@ export const GameUI: React.FC<GameUIProps> = ({ waveManager, placementSystem, on
               <div className="top-left">
                 {/* Empty left section for consistency */}
               </div>
-              
+
               <div className="top-center">
                 <div className="ui-panel wave-panel">
                   <div className="wave-number">Sandbox Mode</div>
-                  <div style={{ fontSize: '14px', marginTop: '5px' }}>Free Play</div>
+                  <div style={{ fontSize: "14px", marginTop: "5px" }}>
+                    Free Play
+                  </div>
                 </div>
               </div>
-              
+
               <div className="top-right">
                 <div className="ui-panel intercept-mode-panel">
-                  <button 
-                    className={`intercept-mode-button ${autoIntercept ? 'active' : ''}`}
+                  <button
+                    className={`intercept-mode-button ${
+                      autoIntercept ? "active" : ""
+                    }`}
                     onClick={() => {
-                      vibrate(15)
-                      const controls = (window as any).__simulationControls
-                      const newValue = !controls.autoIntercept
-                      controls.autoIntercept = newValue
-                      setAutoIntercept(newValue)
+                      vibrate(15);
+                      const controls = (window as any).__simulationControls;
+                      const newValue = !controls.autoIntercept;
+                      controls.autoIntercept = newValue;
+                      setAutoIntercept(newValue);
                       // Save to localStorage
-                      localStorage.setItem('ironDome_interceptMode', newValue.toString())
-                      showNotification(newValue ? 'Auto-Intercept Enabled' : 'Manual Targeting Mode')
+                      localStorage.setItem(
+                        "ironDome_interceptMode",
+                        newValue.toString()
+                      );
+                      showNotification(
+                        newValue
+                          ? "Auto-Intercept Enabled"
+                          : "Manual Targeting Mode"
+                      );
                     }}
-                    title={autoIntercept ? 'Automatic interception enabled' : 'Click on threats to intercept'}
+                    title={
+                      autoIntercept
+                        ? "Automatic interception enabled"
+                        : "Click on threats to intercept"
+                    }
                   >
-                    {autoIntercept ? '🤖' : '🎯'}
+                    {autoIntercept ? "🤖" : "🎯"}
                   </button>
                 </div>
               </div>
@@ -1772,63 +1869,63 @@ export const GameUI: React.FC<GameUIProps> = ({ waveManager, placementSystem, on
           )}
         </div>
       </div>
-      
+
       <div className="bottom-controls">
         <div className="mode-switch">
-          <button 
-            className={`mode-button ${isGameMode ? 'active' : ''}`}
+          <button
+            className={`mode-button ${isGameMode ? "active" : ""}`}
             onClick={() => {
-              vibrate(15)
-              onModeChange?.(true)
+              vibrate(15);
+              onModeChange?.(true);
             }}
           >
             GAME
           </button>
-          <button 
-            className={`mode-button ${!isGameMode ? 'active' : ''}`}
+          <button
+            className={`mode-button ${!isGameMode ? "active" : ""}`}
             onClick={() => {
-              vibrate(15)
-              onModeChange?.(false)
+              vibrate(15);
+              onModeChange?.(false);
             }}
           >
             SANDBOX
           </button>
         </div>
-        
+
         {isGameMode && (
           <>
-            <button 
-              className={`control-button ${confirmNewGame ? 'warning' : ''}`}
+            <button
+              className={`control-button ${confirmNewGame ? "warning" : ""}`}
               onClick={() => {
-                vibrate(20)
+                vibrate(20);
                 if (!confirmNewGame) {
                   // First click - show confirmation
-                  setConfirmNewGame(true)
+                  setConfirmNewGame(true);
                   // Reset after 3 seconds
                   confirmTimeoutRef.current = setTimeout(() => {
-                    setConfirmNewGame(false)
-                  }, 3000)
+                    setConfirmNewGame(false);
+                  }, 3000);
                 } else {
                   // Second click - actually start new game
-                  setConfirmNewGame(false)
+                  setConfirmNewGame(false);
                   if (confirmTimeoutRef.current) {
-                    clearTimeout(confirmTimeoutRef.current)
-                    confirmTimeoutRef.current = null
+                    clearTimeout(confirmTimeoutRef.current);
+                    confirmTimeoutRef.current = null;
                   }
-                  startNewGame()
+                  startNewGame();
                 }
               }}
             >
-              {confirmNewGame ? 'Are you sure?' : 'New Game'}
+              {confirmNewGame ? "Are you sure?" : "New Game"}
             </button>
-            
+
             {!isWaveActive && preparationTime > 0 && (
-              <button 
+              <button
                 className="control-button"
                 onClick={() => {
-                  vibrate(15)
-                  waveManager.skipPreparation()
-                  showNotification('Skipping to next wave!')
+                  vibrate(15);
+                  waveManager.skipPreparation();
+                  showNotification("Skipping to next wave!");
                 }}
               >
                 Start Next Wave
@@ -1837,22 +1934,23 @@ export const GameUI: React.FC<GameUIProps> = ({ waveManager, placementSystem, on
           </>
         )}
       </div>
-      
+
       <div className="action-buttons">
-        <button 
-          className={`game-button ${placementMode ? 'active' : ''}`}
+        <button
+          className={`game-button ${placementMode ? "active" : ""}`}
           onClick={handlePlaceDome}
           disabled={!placementSystem.canPlaceNewDome()}
         >
-          {placementMode ? 'Cancel Placement' : 'Place Dome'}
-          {!placementMode && isGameMode && placementInfo.placedDomes >= placementInfo.unlockedDomes && (
-            <div className="button-cost">Cost: {costs.domeUnlock}</div>
-          )}
+          {placementMode ? "Cancel Placement" : "Place Dome"}
+          {!placementMode &&
+            isGameMode &&
+            placementInfo.placedDomes >= placementInfo.unlockedDomes && (
+              <div className="button-cost">Cost: {costs.domeUnlock}</div>
+            )}
         </button>
-        
-        
+
         {interceptors < 20 && isWaveActive && (
-          <button 
+          <button
             className="game-button warning"
             onClick={handleEmergencySupply}
             disabled={credits < costs.emergencySupply}
@@ -1862,14 +1960,12 @@ export const GameUI: React.FC<GameUIProps> = ({ waveManager, placementSystem, on
           </button>
         )}
       </div>
-      
+
       {/* Placement Mode Indicator for Mobile */}
       {placementMode && deviceInfo?.hasTouch && (
-        <div className="placement-mode-indicator">
-          Tap to place dome
-        </div>
+        <div className="placement-mode-indicator">Tap to place dome</div>
       )}
-      
+
       {/* Game Over Screen */}
       {gameOver && (
         <div className="game-over-screen" onClick={(e) => e.stopPropagation()}>
@@ -1880,7 +1976,9 @@ export const GameUI: React.FC<GameUIProps> = ({ waveManager, placementSystem, on
           <div className="game-over-stats">
             <div className="game-over-stat">
               <span className="game-over-stat-label">Final Score</span>
-              <span className="game-over-stat-value">{gameOver.score.toLocaleString()}</span>
+              <span className="game-over-stat-value">
+                {gameOver.score.toLocaleString()}
+              </span>
             </div>
             <div className="game-over-stat">
               <span className="game-over-stat-label">Waves Survived</span>
@@ -1889,41 +1987,43 @@ export const GameUI: React.FC<GameUIProps> = ({ waveManager, placementSystem, on
             {gameOver.isHighScore && (
               <div className="game-over-stat">
                 <span className="game-over-stat-label">Previous Best</span>
-                <span className="game-over-stat-value">{gameOver.previousHighScore.toLocaleString()}</span>
+                <span className="game-over-stat-value">
+                  {gameOver.previousHighScore.toLocaleString()}
+                </span>
               </div>
             )}
           </div>
           <div className="game-over-buttons">
-            <button 
+            <button
               className="game-over-button"
               onClick={() => {
-                setGameOver(null)
+                setGameOver(null);
                 // Re-enable OrbitControls
-                const controls = (window as any).__controls
-                if (controls) controls.enabled = true
+                const controls = (window as any).__controls;
+                if (controls) controls.enabled = true;
                 // Unpause simulation
-                const simulationControls = (window as any).__simulationControls
+                const simulationControls = (window as any).__simulationControls;
                 if (simulationControls) {
-                  simulationControls.pause = false
+                  simulationControls.pause = false;
                 }
-                startNewGame()
+                startNewGame();
               }}
             >
               New Game
             </button>
-            <button 
+            <button
               className="game-over-button"
               onClick={() => {
-                setGameOver(null)
+                setGameOver(null);
                 // Re-enable OrbitControls
-                const controls = (window as any).__controls
-                if (controls) controls.enabled = true
+                const controls = (window as any).__controls;
+                if (controls) controls.enabled = true;
                 // Unpause simulation
-                const simulationControls = (window as any).__simulationControls
+                const simulationControls = (window as any).__simulationControls;
                 if (simulationControls) {
-                  simulationControls.pause = false
+                  simulationControls.pause = false;
                 }
-                onModeChange?.(false)
+                onModeChange?.(false);
               }}
             >
               Sandbox Mode
@@ -1931,127 +2031,148 @@ export const GameUI: React.FC<GameUIProps> = ({ waveManager, placementSystem, on
           </div>
         </div>
       )}
-      
+
       {/* Shop Container */}
       {showShop && (
         <div className="shop-container">
           {/* Shop Panel (shows above button when expanded) */}
-          <div className={`shop-panel ${shopCollapsed ? 'collapsed' : ''}`}>
-              <div className="shop-header">
-                <h2 className="shop-title">Supply Shop</h2>
-                <button className="shop-close" onClick={() => {
-                  vibrate(10)
-                  setShopCollapsed(true)
+          <div className={`shop-panel ${shopCollapsed ? "collapsed" : ""}`}>
+            <div className="shop-header">
+              <h2 className="shop-title">Supply Shop</h2>
+              <button
+                className="shop-close"
+                onClick={() => {
+                  vibrate(10);
+                  setShopCollapsed(true);
                   // Reset time scale
-                  const simulationControls = (window as any).__simulationControls
+                  const simulationControls = (window as any)
+                    .__simulationControls;
                   if (simulationControls) {
-                    simulationControls.timeScale = 1.0
+                    simulationControls.timeScale = 1.0;
                   }
-                }}>✕</button>
-              </div>
-              
-              <div className="shop-content">
-            <div className="shop-item">
-              <div className="shop-item-header">
-                <div className="shop-item-icon">🚀</div>
-                <div className="shop-item-name">Interceptors</div>
-                <div className="shop-item-description">+50 units</div>
-              </div>
-              <div className="shop-item-buy">
-                <button 
-                  className="shop-item-button"
-                  onClick={handlePurchaseInterceptors}
-                  disabled={credits < costs.interceptorRestock}
-                >
-                  ${costs.interceptorRestock}
-                </button>
-              </div>
+                }}
+              >
+                ✕
+              </button>
             </div>
-            
-            <div className="shop-item">
-              <div className="shop-item-header">
-                <div className="shop-item-icon">🛡️</div>
-                <div className="shop-item-name">Dome Slot</div>
-                <div className="shop-item-description">+1 battery</div>
-              </div>
-              <div className="shop-item-buy">
-                <button 
-                  className="shop-item-button"
-                  onClick={() => {
-                    if (resourceManager.purchaseNewDome()) {
-                      vibrate(30)
-                      showNotification('New dome slot unlocked!')
-                      updateResourceDisplay()
-                    } else {
-                      vibrate([10, 10, 10]) // Error pattern
-                    }
-                  }}
-                  disabled={credits < costs.domeUnlock}
-                >
-                  ${costs.domeUnlock}
-                </button>
-              </div>
-            </div>
-            
-            <div className="shop-item">
-              <div className="shop-item-header">
-                <div className="shop-item-icon">🔧</div>
-                <div className="shop-item-name">Auto-Repair</div>
-                <div className="shop-item-description">
-                  {gameState.getAutoRepairLevel() === 0 
-                    ? 'Auto fix'
-                    : `Lvl ${gameState.getAutoRepairLevel()}/3`
-                  }
+
+            <div className="shop-content">
+              <div className="shop-item">
+                <div className="shop-item-header">
+                  <div className="shop-item-icon">🚀</div>
+                  <div className="shop-item-name">Interceptors</div>
+                  <div className="shop-item-description">+50 units</div>
+                </div>
+                <div className="shop-item-buy">
+                  <button
+                    className="shop-item-button"
+                    onClick={handlePurchaseInterceptors}
+                    disabled={credits < costs.interceptorRestock}
+                  >
+                    ${costs.interceptorRestock}
+                  </button>
                 </div>
               </div>
-              <div className="shop-item-buy">
-                <button 
-                  className="shop-item-button"
-                  onClick={() => {
-                    const currentLevel = gameState.getAutoRepairLevel()
-                    if (currentLevel >= 3) {
-                      showNotification('Auto-repair is already at maximum level!')
-                      return
+
+              <div className="shop-item">
+                <div className="shop-item-header">
+                  <div className="shop-item-icon">🛡️</div>
+                  <div className="shop-item-name">Dome Slot</div>
+                  <div className="shop-item-description">+1 battery</div>
+                </div>
+                <div className="shop-item-buy">
+                  <button
+                    className="shop-item-button"
+                    onClick={() => {
+                      if (resourceManager.purchaseNewDome()) {
+                        vibrate(30);
+                        showNotification("New dome slot unlocked!");
+                        updateResourceDisplay();
+                      } else {
+                        vibrate([10, 10, 10]); // Error pattern
+                      }
+                    }}
+                    disabled={credits < costs.domeUnlock}
+                  >
+                    ${costs.domeUnlock}
+                  </button>
+                </div>
+              </div>
+
+              <div className="shop-item">
+                <div className="shop-item-header">
+                  <div className="shop-item-icon">🔧</div>
+                  <div className="shop-item-name">Auto-Repair</div>
+                  <div className="shop-item-description">
+                    {gameState.getAutoRepairLevel() === 0
+                      ? "Auto fix"
+                      : `Lvl ${gameState.getAutoRepairLevel()}/3`}
+                  </div>
+                </div>
+                <div className="shop-item-buy">
+                  <button
+                    className="shop-item-button"
+                    onClick={() => {
+                      const currentLevel = gameState.getAutoRepairLevel();
+                      if (currentLevel >= 3) {
+                        showNotification(
+                          "Auto-repair is already at maximum level!"
+                        );
+                        return;
+                      }
+                      const cost = resourceManager
+                        .getCosts()
+                        .autoRepair(currentLevel + 1);
+                      if (gameState.spendCredits(cost)) {
+                        gameState.upgradeAutoRepair();
+                        vibrate(30);
+                        showNotification(
+                          `Auto-repair upgraded to level ${gameState.getAutoRepairLevel()}!`
+                        );
+                        updateResourceDisplay();
+                        // Apply auto-repair rate to all batteries
+                        const repairRates = [0, 0.5, 1.0, 2.0];
+                        const newRate =
+                          repairRates[gameState.getAutoRepairLevel()];
+                        placementSystem.getAllBatteries().forEach((battery) => {
+                          battery.setAutoRepairRate(newRate);
+                        });
+                      } else {
+                        vibrate([10, 10, 10]); // Error pattern
+                        showNotification("Insufficient credits!");
+                      }
+                    }}
+                    disabled={
+                      gameState.getAutoRepairLevel() >= 3 ||
+                      credits <
+                        resourceManager
+                          .getCosts()
+                          .autoRepair((gameState.getAutoRepairLevel() || 0) + 1)
                     }
-                    const cost = resourceManager.getCosts().autoRepair(currentLevel + 1)
-                    if (gameState.spendCredits(cost)) {
-                      gameState.upgradeAutoRepair()
-                      vibrate(30)
-                      showNotification(`Auto-repair upgraded to level ${gameState.getAutoRepairLevel()}!`)
-                      updateResourceDisplay()
-                      // Apply auto-repair rate to all batteries
-                      const repairRates = [0, 0.5, 1.0, 2.0]
-                      const newRate = repairRates[gameState.getAutoRepairLevel()]
-                      placementSystem.getAllBatteries().forEach(battery => {
-                        battery.setAutoRepairRate(newRate)
-                      })
-                    } else {
-                      vibrate([10, 10, 10]) // Error pattern
-                      showNotification('Insufficient credits!')
-                    }
-                  }}
-                  disabled={gameState.getAutoRepairLevel() >= 3 || credits < resourceManager.getCosts().autoRepair((gameState.getAutoRepairLevel() || 0) + 1)}
-                >
-                  {gameState.getAutoRepairLevel() >= 3 
-                    ? 'MAX' 
-                    : `$${resourceManager.getCosts().autoRepair((gameState.getAutoRepairLevel() || 0) + 1)}`
-                  }
-                </button>
+                  >
+                    {gameState.getAutoRepairLevel() >= 3
+                      ? "MAX"
+                      : `$${resourceManager
+                          .getCosts()
+                          .autoRepair(
+                            (gameState.getAutoRepairLevel() || 0) + 1
+                          )}`}
+                  </button>
+                </div>
               </div>
             </div>
           </div>
-          </div>
-          
+
           {/* Toggle Button (always visible) */}
           <button
             className="shop-toggle"
             onClick={() => {
-              vibrate(10)
-              setShopCollapsed(!shopCollapsed)
+              vibrate(10);
+              setShopCollapsed(!shopCollapsed);
               // Toggle time dilation
-              const simulationControls = (window as any).__simulationControls
+              const simulationControls = (window as any).__simulationControls;
               if (simulationControls) {
-                simulationControls.timeScale = shopCollapsed ? 0.1 : 1.0
+                simulationControls.timeScale = shopCollapsed ? 0.1 : 1.0;
               }
             }}
           >
@@ -2060,23 +2181,23 @@ export const GameUI: React.FC<GameUIProps> = ({ waveManager, placementSystem, on
           </button>
         </div>
       )}
-      
+
       {contextMenu && (
         <DomeContextMenu
           battery={contextMenu.battery}
           batteryId={contextMenu.batteryId}
           position={contextMenu.position}
           onClose={() => {
-            setContextMenu(null)
+            setContextMenu(null);
             // Re-enable OrbitControls
-            const controls = (window as any).__controls
-            if (controls) controls.enabled = true
+            const controls = (window as any).__controls;
+            if (controls) controls.enabled = true;
           }}
           placementSystem={placementSystem}
           isGameMode={isGameMode}
         />
       )}
-      
+
       {/* Pause Overlay */}
       {isPaused && isGameMode && !gameOver && (
         <div className="pause-overlay">
@@ -2084,30 +2205,30 @@ export const GameUI: React.FC<GameUIProps> = ({ waveManager, placementSystem, on
             <div className="pause-title">PAUSED</div>
             <div className="pause-subtitle">Game is paused</div>
             <div className="pause-buttons">
-              <button 
+              <button
                 className="pause-button"
                 onClick={() => {
-                  const controls = (window as any).__simulationControls
+                  const controls = (window as any).__simulationControls;
                   if (controls) {
-                    setIsPaused(false)
-                    controls.pause = false
-                    waveManager.resumeWave()
+                    setIsPaused(false);
+                    controls.pause = false;
+                    waveManager.resumeWave();
                   }
                 }}
               >
                 Resume Game
               </button>
-              <button 
+              <button
                 className="pause-button"
                 onClick={() => setShowHelp(true)}
               >
                 Help
               </button>
-              <button 
+              <button
                 className="pause-button"
                 onClick={() => {
-                  setIsPaused(false)
-                  handleNewGame()
+                  setIsPaused(false);
+                  handleNewGame();
                 }}
               >
                 New Game
@@ -2117,17 +2238,17 @@ export const GameUI: React.FC<GameUIProps> = ({ waveManager, placementSystem, on
           </div>
         </div>
       )}
-      
-      <HelpModal 
+
+      <HelpModal
         isOpen={showHelp}
         onClose={() => {
-          setShowHelp(false)
+          setShowHelp(false);
           // Re-enable OrbitControls
-          const controls = (window as any).__controls
-          if (controls) controls.enabled = true
+          const controls = (window as any).__controls;
+          if (controls) controls.enabled = true;
         }}
         isGameMode={isGameMode}
       />
     </>
-  )
-}
+  );
+};
