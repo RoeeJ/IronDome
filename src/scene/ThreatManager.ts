@@ -9,6 +9,14 @@ import { ExplosionManager, ExplosionType } from '../systems/ExplosionManager';
 import { GeometryFactory } from '../utils/GeometryFactory';
 import { MaterialCache } from '../utils/MaterialCache';
 import { SoundSystem } from '../systems/SoundSystem';
+import { 
+  AttackIntensity, 
+  AttackPattern, 
+  AttackParameters,
+  ScenarioPreset,
+  AttackParameterConverter,
+  ScenarioManager 
+} from '../game/scenarios/AttackScenarios';
 
 export interface ThreatSpawnConfig {
   type: ThreatType;
@@ -43,6 +51,11 @@ export class ThreatManager extends EventEmitter {
   > = new Map();
   private threatsToRemove: Set<Threat> = new Set(); // Queue for safe removal
   private readonly MAX_CRATERS = 15; // Limit active craters for performance
+  
+  // Scenario support
+  private scenarioManager: ScenarioManager = new ScenarioManager();
+  private currentAttackParameters: AttackParameters | null = null;
+  private baseSpawnAngle: number = 0; // For pattern-based spawning
 
   constructor(scene: THREE.Scene, world: CANNON.World) {
     super();
@@ -137,8 +150,16 @@ export class ThreatManager extends EventEmitter {
       return;
     }
 
-    const config = this.spawnConfigs[Math.floor(Math.random() * this.spawnConfigs.length)];
-    const interval = config.minInterval + Math.random() * (config.maxInterval - config.minInterval);
+    // Use scenario parameters if active
+    let interval: number;
+    if (this.currentAttackParameters) {
+      const intervals = AttackParameterConverter.getSpawnIntervals(this.currentAttackParameters.intensity);
+      interval = intervals.min + Math.random() * (intervals.max - intervals.min);
+    } else {
+      const config = this.spawnConfigs[Math.floor(Math.random() * this.spawnConfigs.length)];
+      interval = config.minInterval + Math.random() * (config.maxInterval - config.minInterval);
+    }
+    
     this.nextSpawnTime = Date.now() + interval;
   }
 
@@ -390,8 +411,21 @@ export class ThreatManager extends EventEmitter {
     }
 
     // Chance to spawn multiple threats simultaneously (salvo)
-    const isSalvo = Math.random() < this.salvoChance;
-    const salvoSize = isSalvo ? 2 + Math.floor(Math.random() * 4) : 1; // 2-5 threats in salvo
+    let isSalvo = Math.random() < this.salvoChance;
+    let salvoSize = 1;
+    
+    if (this.currentAttackParameters) {
+      // Use scenario-based salvo configuration
+      const salvoConfig = AttackParameterConverter.getSalvoConfig(this.currentAttackParameters.intensity);
+      isSalvo = Math.random() < salvoConfig.chance;
+      if (isSalvo) {
+        salvoSize = salvoConfig.minSize + 
+          Math.floor(Math.random() * (salvoConfig.maxSize - salvoConfig.minSize + 1));
+      }
+    } else {
+      // Default salvo behavior
+      salvoSize = isSalvo ? 2 + Math.floor(Math.random() * 4) : 1; // 2-5 threats in salvo
+    }
 
     for (let i = 0; i < salvoSize; i++) {
       this.spawnSingleThreat(i * 0.3); // Slight delay between salvo launches
@@ -402,21 +436,27 @@ export class ThreatManager extends EventEmitter {
     setTimeout(() => {
       const config = this.spawnConfigs[Math.floor(Math.random() * this.spawnConfigs.length)];
 
-      // Random spawn position on circle perimeter at appropriate height
-      const spawnAngle = Math.random() * Math.PI * 2;
-      const spawnX = Math.cos(spawnAngle) * config.spawnRadius;
-      const spawnZ = Math.sin(spawnAngle) * config.spawnRadius;
-
-      // Launch height depends on threat type
-      let spawnY = 5; // Default ground launch
+      // Use patterned spawn position if scenario is active
+      let spawnPosition: THREE.Vector3;
+      if (this.currentAttackParameters) {
+        spawnPosition = this.getPatternedSpawnPosition(config.spawnRadius);
+      } else {
+        // Default random spawn
+        const spawnAngle = Math.random() * Math.PI * 2;
+        const spawnX = Math.cos(spawnAngle) * config.spawnRadius;
+        const spawnZ = Math.sin(spawnAngle) * config.spawnRadius;
+        spawnPosition = new THREE.Vector3(spawnX, 5, spawnZ);
+      }
+      
+      // Adjust height based on threat type
       const threatStats = THREAT_CONFIGS[config.type];
       if (threatStats.isDrone) {
-        spawnY = 50; // Drones launch from higher altitude
+        spawnPosition.y = 50; // Drones launch from higher altitude
       } else if (config.type === ThreatType.CRUISE_MISSILE) {
-        spawnY = 30; // Cruise missiles launch from medium height
+        spawnPosition.y = 30; // Cruise missiles launch from medium height
+      } else {
+        spawnPosition.y = 5; // Ground launch
       }
-
-      const spawnPosition = new THREE.Vector3(spawnX, spawnY, spawnZ);
 
       // Target an active battery if any exist, otherwise random position
       let targetPosition: THREE.Vector3;
@@ -1228,5 +1268,165 @@ export class ThreatManager extends EventEmitter {
 
     // Start spawning
     requestAnimationFrame(spawnNext);
+  }
+  
+  // ==================== SCENARIO SUPPORT ====================
+  
+  /**
+   * Start an attack scenario with player-friendly parameters
+   */
+  startScenario(scenario: ScenarioPreset): void {
+    console.log(`Starting scenario: ${scenario.name}`);
+    
+    // Set attack parameters
+    this.currentAttackParameters = scenario.parameters;
+    
+    // Configure threat mix
+    if (scenario.parameters.threatMix) {
+      this.setThreatMix(scenario.parameters.threatMix);
+    }
+    
+    // Configure salvo chance based on intensity
+    const salvoConfig = AttackParameterConverter.getSalvoConfig(scenario.parameters.intensity);
+    this.salvoChance = salvoConfig.chance;
+    
+    // Set base angle for focused attacks
+    if (scenario.parameters.pattern === AttackPattern.FOCUSED || 
+        scenario.parameters.pattern === AttackPattern.SEQUENTIAL) {
+      // Point towards center or first battery
+      const targetPos = this.batteries.length > 0 ? 
+        this.batteries[0].getPosition() : new THREE.Vector3(0, 0, 0);
+      this.baseSpawnAngle = Math.atan2(targetPos.z, targetPos.x) + Math.PI;
+    }
+    
+    // Start the scenario manager
+    this.scenarioManager.startScenario(scenario, {
+      onComplete: () => {
+        console.log(`Scenario ${scenario.name} completed`);
+        this.stopScenario();
+      },
+      onUpdate: (progress) => {
+        // Could emit progress events here
+      }
+    });
+    
+    // Start spawning if not already
+    if (!this.isSpawning) {
+      this.startSpawning();
+    }
+  }
+  
+  /**
+   * Stop the current scenario
+   */
+  stopScenario(): void {
+    this.currentAttackParameters = null;
+    this.scenarioManager.stopScenario();
+    // Reset to default spawn configs
+    this.salvoChance = 0.3;
+  }
+  
+  /**
+   * Set attack intensity (for manual control)
+   */
+  setAttackIntensity(intensity: AttackIntensity): void {
+    if (!this.currentAttackParameters) {
+      this.currentAttackParameters = {
+        intensity,
+        pattern: AttackPattern.SPREAD,
+        threatMix: 'mixed'
+      };
+    } else {
+      this.currentAttackParameters.intensity = intensity;
+    }
+    
+    // Update salvo configuration
+    const salvoConfig = AttackParameterConverter.getSalvoConfig(intensity);
+    this.salvoChance = salvoConfig.chance;
+  }
+  
+  /**
+   * Set attack pattern (for manual control)
+   */
+  setAttackPattern(pattern: AttackPattern): void {
+    if (!this.currentAttackParameters) {
+      this.currentAttackParameters = {
+        intensity: AttackIntensity.MODERATE,
+        pattern,
+        threatMix: 'mixed'
+      };
+    } else {
+      this.currentAttackParameters.pattern = pattern;
+    }
+  }
+  
+  /**
+   * Override spawn position based on attack pattern
+   */
+  private getPatternedSpawnPosition(baseRadius: number): THREE.Vector3 {
+    if (!this.currentAttackParameters) {
+      // Default random spawn
+      const angle = Math.random() * Math.PI * 2;
+      const distance = baseRadius;
+      return new THREE.Vector3(
+        Math.cos(angle) * distance,
+        50 + Math.random() * 100,
+        Math.sin(angle) * distance
+      );
+    }
+    
+    const pattern = this.currentAttackParameters.pattern;
+    const radiusConfig = AttackParameterConverter.getSpawnRadiusConfig(pattern);
+    const adjustedRadius = baseRadius * radiusConfig.radiusMultiplier;
+    
+    let angle: number;
+    
+    switch (pattern) {
+      case AttackPattern.FOCUSED:
+      case AttackPattern.SEQUENTIAL:
+        // Spawn from a focused direction
+        if (radiusConfig.angleRange) {
+          angle = this.baseSpawnAngle + 
+            radiusConfig.angleRange.min + 
+            Math.random() * (radiusConfig.angleRange.max - radiusConfig.angleRange.min);
+        } else {
+          angle = this.baseSpawnAngle;
+        }
+        break;
+        
+      case AttackPattern.WAVES:
+        // Alternate between sectors
+        const waveIndex = Math.floor(Date.now() / 10000) % 3; // Change every 10 seconds
+        angle = (waveIndex * 2 * Math.PI / 3) + (Math.random() - 0.5) * Math.PI / 3;
+        break;
+        
+      case AttackPattern.SURROUND:
+      case AttackPattern.SPREAD:
+      default:
+        // Random angle
+        angle = Math.random() * Math.PI * 2;
+        break;
+    }
+    
+    const distance = adjustedRadius + (Math.random() - 0.5) * 50;
+    return new THREE.Vector3(
+      Math.cos(angle) * distance,
+      50 + Math.random() * 100,
+      Math.sin(angle) * distance
+    );
+  }
+  
+  /**
+   * Get current scenario info
+   */
+  getCurrentScenario(): ScenarioPreset | null {
+    return this.scenarioManager.getActiveScenario();
+  }
+  
+  /**
+   * Check if a scenario is active
+   */
+  isScenarioActive(): boolean {
+    return this.scenarioManager.isActive();
   }
 }

@@ -37,6 +37,8 @@ import { GeometryFactory } from './utils/GeometryFactory';
 import { MaterialCache } from './utils/MaterialCache';
 import { SoundSystem } from './systems/SoundSystem';
 import { Inspector } from './ui/Inspector';
+import { SandboxControls } from './ui/sandbox/SandboxControls';
+import { DeveloperControls } from './ui/sandbox/DeveloperControls';
 
 // Import new world systems
 import { CameraController, CameraMode } from './camera/CameraController';
@@ -226,6 +228,9 @@ environmentSystem.initialize({
 const dayNightCycle = new DayNightCycle(scene, ambientLight, directionalLight);
 dayNightCycle.setEnvironmentSystem(environmentSystem);
 dayNightCycle.setTime(14, 0, 0); // Start at 2 PM
+// Set time speed to make full day/night cycle take 20 minutes (like Minecraft)
+// 24 hours in 20 minutes = 24 hours in 1200 seconds = 72x speed
+dayNightCycle.setTimeSpeed(72);
 
 const worldScaleIndicators = new WorldScaleIndicators(scene, {
   showGrid: true,
@@ -1017,407 +1022,42 @@ function showNotification(message: string): void {
   }, 2000);
 }
 
-// Sandbox Controls
-const sandboxFolder = gui.addFolder('Sandbox Controls');
-const sandboxControls = {
-  // Threat spawning
-  spawnRocket: () => threatManager.spawnSpecificThreat('rocket'),
-  spawnMortar: () => threatManager.spawnSpecificThreat('mortar'),
-  spawnDrone: () => threatManager.spawnSpecificThreat('drone'),
-  spawnBallistic: () => threatManager.spawnSpecificThreat('ballistic'),
-  clearAllThreats: () => {
-    threatManager.clearAll();
-    showNotification('All threats cleared');
-  },
+// Create new sandbox controls
+const sandboxControls = new SandboxControls(gui, {
+  threatManager,
+  domePlacementSystem,
+  cameraController,
+  dayNightCycle,
+  worldScaleIndicators,
+  projectiles,
+  simulationControls,
+  showNotification
+});
 
-  // Salvo controls
-  salvoSize: 5,
-  salvoType: 'mixed',
-  launchSalvo: () => {
-    threatManager.spawnSalvo(sandboxControls.salvoSize, sandboxControls.salvoType);
-    showNotification(`Launched ${sandboxControls.salvoSize} ${sandboxControls.salvoType} threats`);
-  },
+// Create developer controls (hidden by default)
+const developerControls = new DeveloperControls({
+  threatManager,
+  simulationControls,
+  showNotification,
+  renderer,
+  scene
+});
 
-  // Battery controls
-  addRandomBattery: () => {
-    // Try to find a valid position for the battery
-    let attempts = 0;
-    const maxAttempts = 50;
-    let validPosition: THREE.Vector3 | null = null;
-
-    while (attempts < maxAttempts && !validPosition) {
-      const angle = Math.random() * Math.PI * 2;
-      const distance = 50 + Math.random() * 100;
-      const position = new THREE.Vector3(Math.cos(angle) * distance, 0, Math.sin(angle) * distance);
-
-      // Check if this position is valid
-      if (domePlacementSystem.isPositionValid(position)) {
-        validPosition = position;
-      }
-      attempts++;
-    }
-
-    if (validPosition) {
-      domePlacementSystem.placeBatteryAt(validPosition, `battery_${Date.now()}`, 1);
-      showNotification('Added random battery');
-    } else {
-      showNotification('No valid position found for battery', 'error');
-    }
-  },
-  upgradeAllBatteries: () => {
-    let upgraded = 0;
-    const batteries = domePlacementSystem.getAllBatteries();
-    console.log(`Found ${batteries.length} batteries to check for upgrades`);
-
-    batteries.forEach(battery => {
-      const batteryId = domePlacementSystem.getBatteryId(battery);
-      console.log(`Checking battery ID: ${batteryId}`);
-      if (batteryId) {
-        const placement = domePlacementSystem.getDomePlacements().find(p => p.id === batteryId);
-        console.log(`Battery ${batteryId} current level: ${placement?.level || 'not found'}`);
-        if (placement && placement.level < 5) {
-          if (domePlacementSystem.upgradeBattery(batteryId)) {
-            upgraded++;
-            console.log(`Successfully upgraded battery ${batteryId}`);
-          } else {
-            console.log(`Failed to upgrade battery ${batteryId}`);
-          }
-        }
-      }
-    });
-
-    if (upgraded > 0) {
-      showNotification(`Upgraded ${upgraded} batteries`);
-    } else {
-      showNotification('No batteries to upgrade (max level reached)');
-    }
-  },
-
-  // Visual settings
-  showRadarCoverage: false,
+// Legacy controls object for compatibility
+const legacySandboxControls = {
+  // These are kept for compatibility with other parts of the code
   showTrajectories: true,
   timeScale: 1.0,
-  enableFog: false,
-
-  // Defense settings
-  autoIntercept: true,
-
-  // Debug controls
-  logCraterStats: () => {
-    const craterStats = threatManager.getCraterStats();
-    console.log(`Active craters: ${craterStats.count}`);
-    craterStats.ids.forEach(id => console.log(`  - ${id}`));
-  },
-
-  logGroundEffects: () => {
-    const craterStats = threatManager.getCraterStats();
-    const explosionManager = ExplosionManager.getInstance(scene);
-    const explosionStats = explosionManager.getStats();
-    const launchEffects = threatManager.getLaunchEffectsSystem();
-    const scorchMarkCount = launchEffects.getScorchMarkCount();
-    console.log('=== GROUND EFFECTS DEBUG ===');
-    console.log(`Craters: ${craterStats.count}`);
-    console.log(`Shockwaves: ${explosionStats.activeShockwaves}`);
-    console.log(`Scorch marks: ${scorchMarkCount}`);
-    console.log('Check console for detailed logs from each system');
-  },
-
-  cleanupGroundEffects: () => {
-    console.log('=== CLEANING UP ALL GROUND EFFECTS ===');
-
-    // Clean up craters
-    threatManager.clearAll();
-
-    // Clean up scorch marks
-    const launchEffects = threatManager.getLaunchEffectsSystem();
-    launchEffects.cleanupOrphanedScorchMarks();
-
-    // Scan scene for any ground-level meshes that might be leftover effects
-    const groundEffects: THREE.Object3D[] = [];
-    scene.traverse(child => {
-      if (child instanceof THREE.Mesh && child.position.y < 0.1 && child.position.y >= 0) {
-        // Check if it's a circular/ring geometry (likely a ground effect)
-        const geo = child.geometry;
-        if (geo && (geo.type === 'CircleGeometry' || geo.type === 'RingGeometry')) {
-          groundEffects.push(child);
-        }
-      }
-    });
-
-    console.log(`Found ${groundEffects.length} potential ground effects in scene`);
-    groundEffects.forEach((obj, index) => {
-      console.log(`  ${index}: ${obj.type} at y=${obj.position.y.toFixed(3)}, name="${obj.name}"`);
-    });
-
-    // Remove them after confirmation
-    if (groundEffects.length > 0 && confirm(`Remove ${groundEffects.length} ground effects?`)) {
-      groundEffects.forEach(obj => {
-        scene.remove(obj);
-        if ((obj as THREE.Mesh).material) {
-          ((obj as THREE.Mesh).material as THREE.Material).dispose();
-        }
-      });
-      console.log('Removed ground effects');
-    }
-
-    // Also clean up orphaned dust rings from explosion manager
-    const explosionManager = ExplosionManager.getInstance(scene);
-    if (
-      (explosionManager as any).instancedRenderer &&
-      (explosionManager as any).instancedRenderer.cleanupOrphanedDustRings
-    ) {
-      (explosionManager as any).instancedRenderer.cleanupOrphanedDustRings();
-    }
-
-    console.log('Cleanup complete. Use "Debug Ground Effects" to verify.');
-  },
-
-  // Explosion test
-  testExplosions: () => {
-    const explosionManager = ExplosionManager.getInstance(scene);
-    const count = 25; // Test with 25 simultaneous explosions
-
-    for (let i = 0; i < count; i++) {
-      const angle = (i / count) * Math.PI * 2;
-      const radius = 50 + Math.random() * 50;
-      const position = new THREE.Vector3(
-        Math.cos(angle) * radius,
-        0, // Ground level for ground explosions
-        Math.sin(angle) * radius
-      );
-
-      // Alternate between air and ground explosions
-      const isGround = i % 2 === 0;
-      if (!isGround) {
-        position.y = 10 + Math.random() * 30; // Air explosions at height
-      }
-
-      explosionManager.createExplosion({
-        type: isGround ? ExplosionType.GROUND_IMPACT : ExplosionType.AIR_INTERCEPTION,
-        position,
-        radius: 10 + Math.random() * 5,
-      });
-
-      // Don't create separate craters - ground explosions already have shockwaves
-      // This was causing duplicate ground effects and z-fighting
-    }
-
-    const stats = explosionManager.getStats();
-    const craterStats = threatManager.getCraterStats();
-    showNotification(
-      `Created ${count} explosions. Lights: ${stats.activeLights}/${stats.activeLights + stats.availableLights}, Shockwaves: ${stats.activeShockwaves}, Craters: ${craterStats.count}`
-    );
-  },
+  autoIntercept: true
 };
 
-// Threat controls
-const threatGroup = sandboxFolder.addFolder('Spawn Threats');
-threatGroup.add(sandboxControls, 'spawnRocket').name('🚀 Spawn Rocket');
-threatGroup.add(sandboxControls, 'spawnMortar').name('💣 Spawn Mortar');
-threatGroup.add(sandboxControls, 'spawnDrone').name('🛸 Spawn Drone');
-threatGroup.add(sandboxControls, 'spawnBallistic').name('🎯 Spawn Ballistic');
-threatGroup.add(sandboxControls, 'clearAllThreats').name('🧹 Clear All Threats');
+// Update legacy controls when sandbox controls change
+// This allows other parts of the code to work with the legacy controls
+simulationControls.showTrajectories = legacySandboxControls.showTrajectories;
+simulationControls.timeScale = legacySandboxControls.timeScale;
+simulationControls.autoIntercept = legacySandboxControls.autoIntercept;
 
-// Salvo controls
-const salvoGroup = sandboxFolder.addFolder('Salvo Attack');
-salvoGroup.add(sandboxControls, 'salvoSize', 2, 20, 1).name('Salvo Size');
-salvoGroup
-  .add(sandboxControls, 'salvoType', ['mixed', 'rocket', 'mortar', 'ballistic'])
-  .name('Salvo Type');
-salvoGroup.add(sandboxControls, 'launchSalvo').name('🎆 Launch Salvo');
-
-// Battery controls
-const batteryGroup = sandboxFolder.addFolder('Battery Management');
-batteryGroup.add(sandboxControls, 'addRandomBattery').name('➕ Add Random Battery');
-batteryGroup.add(sandboxControls, 'upgradeAllBatteries').name('⬆️ Upgrade All Batteries');
-
-// Visual controls
-const visualGroup = sandboxFolder.addFolder('Visual Settings');
-visualGroup
-  .add(sandboxControls, 'showRadarCoverage')
-  .name('Show Radar Coverage')
-  .onChange((value: boolean) => {
-    if (radarNetwork) radarNetwork.setShowCoverage(value);
-  });
-visualGroup
-  .add(sandboxControls, 'showTrajectories')
-  .name('Show Trajectories')
-  .onChange((value: boolean) => {
-    simulationControls.showTrajectories = value;
-  });
-visualGroup
-  .add(sandboxControls, 'timeScale', 0.1, 3.0, 0.1)
-  .name('Time Scale')
-  .onChange((value: number) => {
-    simulationControls.timeScale = value;
-  });
-
-// World controls
-const worldFolder = gui.addFolder('World Settings');
-
-// Camera controls
-const cameraControls = {
-  mode: 'orbit',
-  followThreat: () => {
-    const threats = threatManager.getActiveThreats();
-    if (threats.length > 0) {
-      cameraController.setMode(CameraMode.FOLLOW_THREAT, threats[0]);
-    }
-  },
-  followInterceptor: () => {
-    if (projectiles.length > 0) {
-      cameraController.setMode(CameraMode.FOLLOW_INTERCEPTOR, projectiles[0]);
-    }
-  },
-  cinematicMode: () => cameraController.setMode(CameraMode.CINEMATIC),
-  tacticalView: () => cameraController.setMode(CameraMode.TACTICAL),
-  battleOverview: () => cameraController.setMode(CameraMode.BATTLE_OVERVIEW),
-  orbitMode: () => cameraController.setMode(CameraMode.ORBIT),
-};
-
-const cameraFolder = worldFolder.addFolder('Camera');
-cameraFolder
-  .add(cameraControls, 'mode', [
-    'orbit',
-    'follow_threat',
-    'follow_interceptor',
-    'cinematic',
-    'tactical',
-    'battle_overview',
-  ])
-  .name('Camera Mode')
-  .onChange((value: string) => {
-    switch (value) {
-      case 'follow_threat':
-        cameraControls.followThreat();
-        break;
-      case 'follow_interceptor':
-        cameraControls.followInterceptor();
-        break;
-      case 'cinematic':
-        cameraControls.cinematicMode();
-        break;
-      case 'tactical':
-        cameraControls.tacticalView();
-        break;
-      case 'battle_overview':
-        cameraControls.battleOverview();
-        break;
-      default:
-        cameraControls.orbitMode();
-    }
-  });
-cameraFolder.add(cameraControls, 'followThreat').name('Follow Threat');
-cameraFolder.add(cameraControls, 'followInterceptor').name('Follow Interceptor');
-
-// Time of day controls
-const timeControls = {
-  timeSpeed: 1,
-  currentTime: dayNightCycle.formatTime(),
-  pause: false,
-  setDawn: () => dayNightCycle.setDawn(),
-  setNoon: () => dayNightCycle.setNoon(),
-  setDusk: () => dayNightCycle.setDusk(),
-  setMidnight: () => dayNightCycle.setMidnight(),
-};
-
-const timeFolder = worldFolder.addFolder('Time of Day');
-timeFolder
-  .add(timeControls, 'timeSpeed', 0, 60, 1)
-  .name('Time Speed')
-  .onChange((value: number) => {
-    dayNightCycle.setTimeSpeed(value);
-  });
-timeFolder
-  .add(timeControls, 'pause')
-  .name('Pause Time')
-  .onChange((value: boolean) => {
-    if (value) dayNightCycle.pause();
-    else dayNightCycle.resume();
-  });
-timeFolder.add(timeControls, 'setDawn').name('🌅 Dawn');
-timeFolder.add(timeControls, 'setNoon').name('☀️ Noon');
-timeFolder.add(timeControls, 'setDusk').name('🌇 Dusk');
-timeFolder.add(timeControls, 'setMidnight').name('🌙 Midnight');
-
-// World scale indicators controls
-const indicatorControls = {
-  showGrid: true,
-  showDistanceMarkers: true,
-  showReferenceObjects: true,
-  showWindParticles: true,
-  showAltitudeMarkers: true,
-};
-
-const indicatorFolder = worldFolder.addFolder('Scale Indicators');
-indicatorFolder
-  .add(indicatorControls, 'showGrid')
-  .name('Show Grid')
-  .onChange((value: boolean) => {
-    worldScaleIndicators.setVisibility({ showGrid: value });
-  });
-indicatorFolder
-  .add(indicatorControls, 'showDistanceMarkers')
-  .name('Distance Markers')
-  .onChange((value: boolean) => {
-    worldScaleIndicators.setVisibility({ showDistanceMarkers: value });
-  });
-indicatorFolder
-  .add(indicatorControls, 'showReferenceObjects')
-  .name('Reference Objects')
-  .onChange((value: boolean) => {
-    worldScaleIndicators.setVisibility({ showReferenceObjects: value });
-  });
-indicatorFolder
-  .add(indicatorControls, 'showWindParticles')
-  .name('Wind Particles')
-  .onChange((value: boolean) => {
-    worldScaleIndicators.setVisibility({ showWindParticles: value });
-  });
-indicatorFolder
-  .add(indicatorControls, 'showAltitudeMarkers')
-  .name('Altitude Markers')
-  .onChange((value: boolean) => {
-    worldScaleIndicators.setVisibility({ showAltitudeMarkers: value });
-  });
-
-// Environment controls
-const envControls = {
-  windSpeed: 5,
-  fogDensity: 1,
-};
-
-const envFolder = worldFolder.addFolder('Environment');
-envFolder
-  .add(envControls, 'windSpeed', 0, 20, 1)
-  .name('Wind Speed')
-  .onChange((value: number) => {
-    environmentSystem.setWindSpeed(value);
-  });
-envFolder
-  .add(envControls, 'fogDensity', 0, 2, 0.1)
-  .name('Fog Density')
-  .onChange((value: number) => {
-    environmentSystem.setFogDensity(200 * value, 1000 / value);
-  });
-
-// Defense controls
-const defenseGroup = sandboxFolder.addFolder('Defense Settings');
-defenseGroup
-  .add(sandboxControls, 'autoIntercept')
-  .name('Auto Intercept')
-  .onChange((value: boolean) => {
-    simulationControls.autoIntercept = value;
-  });
-// Algorithms and coordination are now always enabled by default
-// No need for controls as they are production-ready
-
-// Performance testing controls
-const testingGroup = sandboxFolder.addFolder('Performance Testing');
-testingGroup.add(sandboxControls, 'testExplosions').name('💥 Test 25 Explosions');
-testingGroup.add(sandboxControls, 'logCraterStats').name('📊 Log Crater Stats');
-testingGroup.add(sandboxControls, 'logGroundEffects').name('🔍 Debug Ground Effects');
-testingGroup.add(sandboxControls, 'cleanupGroundEffects').name('🧹 Cleanup Ground Effects');
+// Old controls removed - using new SandboxControls and DeveloperControls classes
 
 // Sound controls
 const soundFolder = gui.addFolder('Sound Settings');

@@ -396,7 +396,8 @@ export class WorldScaleIndicators {
   }
 
   private createWindParticles() {
-    const particleCount = 200;
+    // More particles to cover the larger terrain area
+    const particleCount = 1000;
     const positions = new Float32Array(particleCount * 3);
     const colors = new Float32Array(particleCount * 3);
     const sizes = new Float32Array(particleCount);
@@ -405,9 +406,10 @@ export class WorldScaleIndicators {
     for (let i = 0; i < particleCount; i++) {
       const i3 = i * 3;
 
-      positions[i3] = (Math.random() - 0.5) * 1000;
+      // Spread particles across the entire terrain (2000x2000)
+      positions[i3] = (Math.random() - 0.5) * 2000;
       positions[i3 + 1] = Math.random() * 200;
-      positions[i3 + 2] = (Math.random() - 0.5) * 1000;
+      positions[i3 + 2] = (Math.random() - 0.5) * 2000;
 
       // White to light blue particles
       colors[i3] = 0.9 + Math.random() * 0.1;
@@ -416,12 +418,13 @@ export class WorldScaleIndicators {
 
       sizes[i] = Math.random() * 2 + 1;
 
-      // Store velocity for each particle
+      // Store velocity for each particle - small random variation only
+      // Main movement will come from global wind
       this.windParticleVelocities.push(
         new THREE.Vector3(
-          (Math.random() - 0.5) * 2,
-          (Math.random() - 0.5) * 0.5,
-          (Math.random() - 0.5) * 2
+          (Math.random() - 0.5) * 0.3,  // Small random drift
+          (Math.random() - 0.5) * 0.1,  // Very small vertical drift
+          (Math.random() - 0.5) * 0.3   // Small random drift
         )
       );
     }
@@ -499,24 +502,26 @@ export class WorldScaleIndicators {
         const i3 = i * 3;
         const velocity = this.windParticleVelocities[i];
 
-        // Apply wind if provided
+        // Apply wind if provided - wind is primary driver of movement
         if (windVector) {
-          positions[i3] += (velocity.x + windVector.x * 0.1) * deltaTime * 10;
-          positions[i3 + 1] += velocity.y * deltaTime * 10;
-          positions[i3 + 2] += (velocity.z + windVector.z * 0.1) * deltaTime * 10;
+          // Wind is the main force, velocity adds small variations
+          positions[i3] += (windVector.x + velocity.x) * deltaTime * 10;
+          positions[i3 + 1] += (windVector.y * 0.1 + velocity.y) * deltaTime * 10; // Less vertical wind
+          positions[i3 + 2] += (windVector.z + velocity.z) * deltaTime * 10;
         } else {
+          // Without wind, particles just drift slowly with their random velocities
           positions[i3] += velocity.x * deltaTime * 10;
           positions[i3 + 1] += velocity.y * deltaTime * 10;
           positions[i3 + 2] += velocity.z * deltaTime * 10;
         }
 
-        // Wrap around
-        if (positions[i3] > 500) positions[i3] = -500;
-        if (positions[i3] < -500) positions[i3] = 500;
+        // Wrap around entire terrain area
+        if (positions[i3] > 1000) positions[i3] = -1000;
+        if (positions[i3] < -1000) positions[i3] = 1000;
         if (positions[i3 + 1] > 200) positions[i3 + 1] = 0;
         if (positions[i3 + 1] < 0) positions[i3 + 1] = 200;
-        if (positions[i3 + 2] > 500) positions[i3 + 2] = -500;
-        if (positions[i3 + 2] < -500) positions[i3 + 2] = 500;
+        if (positions[i3 + 2] > 1000) positions[i3 + 2] = -1000;
+        if (positions[i3 + 2] < -1000) positions[i3 + 2] = 1000;
       }
 
       this.windParticles.geometry.attributes.position.needsUpdate = true;

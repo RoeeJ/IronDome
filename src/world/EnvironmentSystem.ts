@@ -23,6 +23,9 @@ export class EnvironmentSystem {
   private windDirection: THREE.Vector3 = new THREE.Vector3(1, 0, 0.5).normalize();
   private windSpeed: number = 5;
   private time: number = 0;
+  private windAngle: number = Math.atan2(0.5, 1); // Initial angle from windDirection
+  private targetWindAngle: number = this.windAngle;
+  private windTransitionSpeed: number = 0.1; // How fast wind changes direction
 
   // Skybox parameters
   private turbidity: number = 10;
@@ -436,6 +439,9 @@ export class EnvironmentSystem {
 
   update(deltaTime: number) {
     this.time += deltaTime;
+    
+    // Update wind direction gradually
+    this.updateWindDirection(deltaTime);
     // No cloud updates needed
   }
 
@@ -504,12 +510,36 @@ export class EnvironmentSystem {
     this.windSpeed = THREE.MathUtils.clamp(speed, 0, 20);
   }
 
+  private updateWindDirection(deltaTime: number) {
+    // Change target wind direction occasionally (every 20-40 seconds)
+    if (Math.random() < deltaTime / 30) { // Average every 30 seconds
+      // New target angle within ±45 degrees of current
+      const angleChange = (Math.random() - 0.5) * Math.PI / 2;
+      this.targetWindAngle = this.windAngle + angleChange;
+    }
+    
+    // Smoothly interpolate to target angle
+    const angleDiff = this.targetWindAngle - this.windAngle;
+    this.windAngle += angleDiff * this.windTransitionSpeed * deltaTime;
+    
+    // Update wind direction vector from angle
+    this.windDirection.set(
+      Math.cos(this.windAngle),
+      0,
+      Math.sin(this.windAngle)
+    ).normalize();
+    
+    // Also vary wind speed slightly (3-8 m/s)
+    const targetSpeed = 3 + Math.sin(this.time * 0.1) * 2.5;
+    this.windSpeed += (targetSpeed - this.windSpeed) * deltaTime * 0.5;
+  }
+
   getWindAt(position: THREE.Vector3): THREE.Vector3 {
-    // Add some turbulence based on position
+    // Add subtle turbulence based on position - reduced for more coherent wind flow
     const turbulence = new THREE.Vector3(
-      Math.sin(position.x * 0.01 + this.time) * 0.2,
-      Math.sin(position.y * 0.01 + this.time * 1.3) * 0.1,
-      Math.cos(position.z * 0.01 + this.time * 0.7) * 0.2
+      Math.sin(position.x * 0.01 + this.time) * 0.05,      // Reduced from 0.2
+      Math.sin(position.y * 0.01 + this.time * 1.3) * 0.02, // Reduced from 0.1
+      Math.cos(position.z * 0.01 + this.time * 0.7) * 0.05  // Reduced from 0.2
     );
 
     return this.windDirection.clone().multiplyScalar(this.windSpeed).add(turbulence);
