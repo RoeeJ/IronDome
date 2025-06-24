@@ -116,6 +116,9 @@ export class UnifiedTrailSystem {
     const line = new THREE.Line(geometry, material);
     line.frustumCulled = false;
     line.name = `trail_${config.color}`; // Add name for debugging
+    // Optimize: Trails don't need shadows
+    line.castShadow = false;
+    line.receiveShadow = false;
     this.scene.add(line);
 
     return {
@@ -152,6 +155,9 @@ export class UnifiedTrailSystem {
 
     const particles = new THREE.Points(geometry, material);
     particles.frustumCulled = false;
+    // Optimize: Particle trails don't need shadows
+    particles.castShadow = false;
+    particles.receiveShadow = false;
     this.scene.add(particles);
 
     return {

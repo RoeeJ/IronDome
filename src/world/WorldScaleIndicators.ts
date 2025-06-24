@@ -2,7 +2,8 @@ import * as THREE from 'three';
 import { MaterialCache } from '../utils/MaterialCache';
 import { GeometryFactory } from '../utils/GeometryFactory';
 import { debug } from '../utils/DebugLogger';
-import { BuildingSystem } from './BuildingSystem';
+import { OptimizedBuildingSystem } from './OptimizedBuildingSystem';
+import { WorldGeometryOptimizer } from '../rendering/WorldGeometryOptimizer';
 
 export interface ScaleIndicatorConfig {
   showGrid: boolean;
@@ -20,7 +21,7 @@ export class WorldScaleIndicators {
   private windParticles: THREE.Points | null = null;
   private windParticleVelocities: THREE.Vector3[] = [];
   private config: ScaleIndicatorConfig;
-  private buildingSystem: BuildingSystem;
+  private buildingSystem: OptimizedBuildingSystem;
 
   // Reference objects
   private buildings: THREE.Group = new THREE.Group();
@@ -49,7 +50,7 @@ export class WorldScaleIndicators {
     };
 
     // Initialize building system
-    this.buildingSystem = new BuildingSystem(scene);
+    this.buildingSystem = new OptimizedBuildingSystem(scene);
     // Make it globally available for explosion damage
     (window as any).__buildingSystem = this.buildingSystem;
   }
@@ -156,6 +157,9 @@ export class WorldScaleIndicators {
 
         const pole = new THREE.Mesh(poleGeometry, poleMaterial);
         pole.position.set(dir.x, 10, dir.z);
+        // Optimize: Disable shadows on markers
+        pole.castShadow = false;
+        pole.receiveShadow = false;
         this.distanceMarkers.add(pole);
 
         // Add flashing light on top
@@ -169,6 +173,9 @@ export class WorldScaleIndicators {
         const light = new THREE.Mesh(lightGeometry, lightMaterial);
         light.position.set(dir.x, 21, dir.z);
         light.userData = { baseOpacity: 0.8, phase: Math.random() * Math.PI * 2 };
+        // Optimize: Disable shadows on lights
+        light.castShadow = false;
+        light.receiveShadow = false;
         this.distanceMarkers.add(light);
       });
     });
@@ -267,11 +274,44 @@ export class WorldScaleIndicators {
         }
       }
     });
+    
+    // Merge all buildings into a single mesh for massive draw call reduction
+    debug.log('Merging building geometries for optimization...');
+    this.buildingSystem.mergeBuildingGeometries();
 
     // Skip trees and vehicles - focusing only on buildings
 
     this.indicators.add(this.buildings);
     // Trees and vehicles removed to eliminate cylinder/tube shapes
+  }
+  
+  /**
+   * Optimize all static geometry after creation
+   */
+  optimizeGeometry(): void {
+    debug.log('Optimizing world geometry...');
+    
+    // Optimize distance markers (poles and rings)
+    if (this.distanceMarkers.children.length > 0) {
+      const optimizedMarkers = WorldGeometryOptimizer.optimizeStaticGeometry(
+        this.distanceMarkers,
+        {
+          mergeByMaterial: true,
+          castShadows: false
+        }
+      );
+      
+      // Replace with optimized version
+      this.indicators.remove(this.distanceMarkers);
+      this.distanceMarkers = optimizedMarkers;
+      this.indicators.add(this.distanceMarkers);
+      
+      debug.log(`Optimized distance markers: ${this.distanceMarkers.children.length} draw calls`);
+    }
+    
+    // Report optimization stats
+    const stats = WorldGeometryOptimizer.analyzeScene(this.scene);
+    debug.log('Scene optimization analysis:', stats);
   }
 
   private createSimpleTree(): THREE.Group {

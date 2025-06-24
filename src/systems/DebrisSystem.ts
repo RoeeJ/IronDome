@@ -71,8 +71,9 @@ export class DebrisSystem {
       const mesh = new THREE.Mesh(this.debrisGeometry, material);
       mesh.scale.setScalar(size);
       mesh.position.copy(position);
-      mesh.castShadow = true;
-      mesh.receiveShadow = true;
+      // Optimize: Small debris doesn't need shadows
+      mesh.castShadow = size > 0.5; // Only large debris casts shadows
+      mesh.receiveShadow = false;
 
       // Random rotation
       mesh.rotation.set(

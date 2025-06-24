@@ -41,7 +41,8 @@ export class InstancedProjectileRenderer {
       interceptorMaterial,
       maxProjectiles
     );
-    this.interceptorMesh.castShadow = true;
+    // Optimize: Disable shadows for better performance
+    this.interceptorMesh.castShadow = false;
     this.interceptorMesh.receiveShadow = false;
 
     // Initialize all instances as invisible
@@ -65,7 +66,10 @@ export class InstancedProjectileRenderer {
     const index = this.availableIndices.pop()!;
     this.projectileToIndex.set(projectile.id, index);
 
-    // Hide the projectile's own mesh
+    // CRITICAL: Remove mesh from scene to prevent double rendering
+    if (projectile.mesh && projectile.mesh.parent) {
+      projectile.mesh.removeFromParent();
+    }
     projectile.mesh.visible = false;
 
     return true;

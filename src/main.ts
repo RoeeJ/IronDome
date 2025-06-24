@@ -158,14 +158,16 @@ const ambientLight = new THREE.AmbientLight(0xffffff, 0.6);
 scene.add(ambientLight);
 
 const directionalLight = new THREE.DirectionalLight(0xffffff, 0.8);
-directionalLight.position.set(50, 100, 50);
+// Position light further away to cover more area
+directionalLight.position.set(200, 400, 200);
 directionalLight.castShadow = true;
-directionalLight.shadow.camera.left = -100;
-directionalLight.shadow.camera.right = 100;
-directionalLight.shadow.camera.top = 100;
-directionalLight.shadow.camera.bottom = -100;
+// Expand shadow camera to cover the entire city area
+directionalLight.shadow.camera.left = -800;
+directionalLight.shadow.camera.right = 800;
+directionalLight.shadow.camera.top = 800;
+directionalLight.shadow.camera.bottom = -800;
 directionalLight.shadow.camera.near = 0.1;
-directionalLight.shadow.camera.far = 200;
+directionalLight.shadow.camera.far = 1000;
 
 // Adjust shadow map size based on device
 const shadowMapSize = deviceInfo.isMobile
@@ -235,6 +237,8 @@ const worldScaleIndicators = new WorldScaleIndicators(scene, {
   gridDivisions: 100,
 });
 worldScaleIndicators.initialize();
+// Optimize static world geometry to reduce draw calls
+worldScaleIndicators.optimizeGeometry();
 
 // Disabled battlefield zones to remove tube corridors and border markers
 // const battlefieldZones = new BattlefieldZones(scene)
@@ -263,6 +267,9 @@ threatManager.on('threatSpawned', (threat: Threat) => {
     } else {
       instancedThreatRenderer.addThreat(threat);
     }
+    // Add trail to batched renderer
+    const trailColor = threat.type === 'drone' ? new THREE.Color(0.5, 0.5, 0.5) : new THREE.Color(1, 0.3, 0);
+    instancedTrailRenderer.addTrail(threat, trailColor);
   }
 });
 
@@ -272,6 +279,11 @@ threatManager.on('threatDestroyed', (threatId: string) => {
       lodInstancedThreatRenderer.removeThreat(threatId);
     } else {
       instancedThreatRenderer.removeThreat(threatId);
+    }
+    // Remove trail from batched renderer
+    const threat = threatManager.threats.find(t => t.id === threatId);
+    if (threat) {
+      instancedTrailRenderer.removeTrail(threat);
     }
   }
 });
@@ -331,6 +343,13 @@ const lodInstancedThreatRenderer = new LODInstancedThreatRenderer(scene, camera)
 const useInstancedRendering = true;
 const useLODRendering = true;
 
+// Import and create batched trail renderer
+import { InstancedTrailRenderer } from './rendering/OptimizedInstancedRenderer';
+const instancedTrailRenderer = new InstancedTrailRenderer(500, 30); // 500 trails, 30 points each
+scene.add(instancedTrailRenderer.mesh);
+// Make it globally available
+(window as any).__instancedTrailRenderer = instancedTrailRenderer;
+
 // Import and create instanced debris renderer
 import { InstancedDebrisRenderer } from './rendering/InstancedDebrisRenderer';
 const instancedDebrisRenderer = new InstancedDebrisRenderer(scene, 500);
@@ -384,6 +403,27 @@ uiContainer.id = 'game-ui-root';
 document.body.appendChild(uiContainer);
 
 const uiRoot = createRoot(uiContainer);
+
+// Import RenderStats component
+import { RenderStats } from './ui/RenderStats';
+
+// Create container for render stats
+const renderStatsContainer = document.createElement('div');
+document.body.appendChild(renderStatsContainer);
+const renderStatsRoot = createRoot(renderStatsContainer);
+
+// Render stats visibility
+let showRenderStats = localStorage.getItem('ironDome_showRenderStats') === 'true';
+
+// Function to toggle render stats
+(window as any).toggleRenderStats = () => {
+  showRenderStats = !showRenderStats;
+  localStorage.setItem('ironDome_showRenderStats', showRenderStats.toString());
+  renderStatsRoot.render(React.createElement(RenderStats, { renderer, visible: showRenderStats }));
+};
+
+// Initial render of stats
+renderStatsRoot.render(React.createElement(RenderStats, { renderer, visible: showRenderStats }));
 
 // Function to update UI when mode changes
 const updateUIMode = () => {
@@ -1604,6 +1644,11 @@ window.addEventListener('keydown', e => {
   // Mouse wheel zoom
   if (e.key === '+' || e.key === '=') cameraController.zoom(-5);
   if (e.key === '-' || e.key === '_') cameraController.zoom(5);
+  
+  // R key toggles render stats
+  if (e.key === 'r' || e.key === 'R') {
+    (window as any).toggleRenderStats();
+  }
 });
 
 // Mouse wheel zoom
@@ -1732,6 +1777,8 @@ function animate() {
 
         // Remove projectiles that fall below ground
         if (projectile.body.position.y < -10) {
+          // Remove from trail renderer
+          instancedTrailRenderer.removeTrail(projectile);
           projectile.destroy(scene, world);
           projectiles.splice(i, 1);
         }
@@ -1777,6 +1824,9 @@ function animate() {
 
       // Update explosions
       instancedExplosionRenderer.update();
+      
+      // Update batched trails
+      instancedTrailRenderer.update();
 
       profiler.endSection('Instanced Rendering Update');
     }

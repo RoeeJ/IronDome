@@ -370,6 +370,10 @@ export class ExplosionManager {
     shockwave.position.copy(position);
     shockwave.position.y = 0.05 + Math.random() * 0.02; // Slight random height to prevent Z-fighting
     shockwave.rotation.x = -Math.PI / 2; // Horizontal for ground impacts
+    
+    // Optimize: Shockwaves don't need shadows
+    shockwave.castShadow = false;
+    shockwave.receiveShadow = false;
 
     // Add unique identifier to mesh for debugging
     shockwave.userData.shockwaveId = shockwaveId;

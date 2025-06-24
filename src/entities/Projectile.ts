@@ -168,6 +168,9 @@ export class Projectile {
         transparent: true,
       });
       this.trail = new THREE.Line(this.trailGeometry, trailMaterial);
+      // Optimize: Trails don't need shadows
+      this.trail.castShadow = false;
+      this.trail.receiveShadow = false;
       scene.add(this.trail);
     }
 

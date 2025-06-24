@@ -947,6 +947,9 @@ export class IronDomeBattery extends EventEmitter {
     });
     const bgBar = new THREE.Mesh(bgGeometry, bgMaterial);
     bgBar.position.y = 0; // Relative to group
+    // Optimize: UI elements don't need shadows
+    bgBar.castShadow = false;
+    bgBar.receiveShadow = false;
     this.healthBar.add(bgBar);
 
     // Health bar
@@ -961,6 +964,9 @@ export class IronDomeBattery extends EventEmitter {
     healthFill.position.y = 0; // Relative to group
     healthFill.position.z = 0.1;
     healthFill.name = 'health-fill';
+    // Optimize: UI elements don't need shadows
+    healthFill.castShadow = false;
+    healthFill.receiveShadow = false;
     this.healthBar.add(healthFill);
 
     // Add to scene (not group) so it can rotate independently

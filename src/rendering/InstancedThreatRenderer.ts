@@ -84,7 +84,8 @@ export class InstancedThreatRenderer {
     // Initialize all instances as invisible and set up available indices
     const zeroScale = new THREE.Matrix4().makeScale(0, 0, 0);
     Object.entries(this.threatMeshes).forEach(([type, mesh]) => {
-      mesh.castShadow = true;
+      // Optimize: Disable shadows for better performance
+      mesh.castShadow = false;
       mesh.receiveShadow = false;
 
       const indices: number[] = [];
@@ -140,7 +141,10 @@ export class InstancedThreatRenderer {
     const index = availableForType.pop()!;
     this.threatToIndex.set(threat.id, { type, meshCategory, index });
 
-    // Hide the threat's own mesh
+    // CRITICAL: Remove mesh from scene to prevent double rendering
+    if (threat.mesh && threat.mesh.parent) {
+      threat.mesh.removeFromParent();
+    }
     threat.mesh.visible = false;
 
     return true;

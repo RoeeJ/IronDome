@@ -172,6 +172,12 @@ export class InterceptionSystem {
         if (renderer) {
           renderer.removeProjectile(interceptor.id);
         }
+        
+        // Remove from trail renderer
+        const trailRenderer = (window as any).__instancedTrailRenderer;
+        if (trailRenderer) {
+          trailRenderer.removeTrail(interceptor);
+        }
 
         interceptor.destroy(this.scene, this.world);
         this.interceptors.splice(i, 1);
@@ -306,6 +312,13 @@ export class InterceptionSystem {
         const renderer = (window as any).__instancedProjectileRenderer;
         if (renderer) {
           renderer.addProjectile(interceptor);
+        }
+        
+        // Add trail to batched renderer
+        const trailRenderer = (window as any).__instancedTrailRenderer;
+        if (trailRenderer) {
+          const trailColor = new THREE.Color(0, 1, 1); // Cyan for interceptors
+          trailRenderer.addTrail(interceptor, trailColor);
         }
       });
 
@@ -661,6 +674,12 @@ export class InterceptionSystem {
     const renderer = (window as any).__instancedProjectileRenderer;
     if (renderer) {
       renderer.removeProjectile(interception.interceptor.id);
+    }
+    
+    // Remove from trail renderer
+    const trailRenderer = (window as any).__instancedTrailRenderer;
+    if (trailRenderer) {
+      trailRenderer.removeTrail(interception.interceptor);
     }
 
     interception.interceptor.destroy(this.scene, this.world);
