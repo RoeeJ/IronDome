@@ -24,13 +24,19 @@ export class OptimizedBuildingSystem {
   private buildingGroup = new THREE.Group();
   private debrisGroup = new THREE.Group();
   
-  // Window instancing
-  private windowMesh: THREE.InstancedMesh;
+  // Window instancing - separate meshes for lit and unlit windows
+  private litWindowMesh: THREE.InstancedMesh;
+  private unlitWindowMesh: THREE.InstancedMesh;
   private windowMatrix = new THREE.Matrix4();
   private windowCount = 0;
-  private maxWindows = 10000; // Support up to 10k windows
-  private windowPool: number[] = [];
+  private maxWindowsPerMesh = 10000; // 10k windows per mesh to handle all city windows
+  private litWindowPool: number[] = [];
+  private unlitWindowPool: number[] = [];
   private dummyObject = new THREE.Object3D();
+  private lastUpdateHour: number = -1; // Track last update to avoid constant changes
+  private windowStates: Map<string, { lit: boolean, litIndex?: number, unlitIndex?: number }> = new Map();
+  private switchCount?: number; // For debugging
+  private debugCount?: number; // For debugging count issues
   
   // Merged building geometry
   private mergedBuildingMesh: THREE.Mesh | null = null;
@@ -47,32 +53,63 @@ export class OptimizedBuildingSystem {
   }
   
   private initializeWindowInstancing(): void {
-    // Create instanced mesh for all windows
+    // Create instanced mesh for lit and unlit windows separately
     const windowGeometry = GeometryFactory.getInstance().getPlane(2, 3);
-    const windowMaterial = MaterialCache.getInstance().getMeshBasicMaterial({
-      color: 0xffff88,
+    
+    // Material for lit windows - bright warm glow
+    const litWindowMaterial = new THREE.MeshBasicMaterial({
+      color: 0xffee88, // Brighter warm yellow
       transparent: true,
-      opacity: 0.8,
+      opacity: 1.0, // Full opacity for lit windows
+      depthWrite: false,
+      renderOrder: 1,
     });
     
-    this.windowMesh = new THREE.InstancedMesh(
+    // Material for unlit windows - much darker
+    const unlitWindowMaterial = new THREE.MeshBasicMaterial({
+      color: 0x050508, // Almost black with slight blue tint
+      transparent: true,
+      opacity: 0.3, // Lower opacity for unlit windows
+      depthWrite: false,
+      renderOrder: 1,
+    });
+    
+    // Create separate instanced meshes
+    this.litWindowMesh = new THREE.InstancedMesh(
       windowGeometry,
-      windowMaterial,
-      this.maxWindows
+      litWindowMaterial,
+      this.maxWindowsPerMesh
     );
-    this.windowMesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
-    // Windows don't need shadows
-    this.windowMesh.castShadow = false;
-    this.windowMesh.receiveShadow = false;
+    this.litWindowMesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+    this.litWindowMesh.castShadow = false;
+    this.litWindowMesh.receiveShadow = false;
+    
+    this.unlitWindowMesh = new THREE.InstancedMesh(
+      windowGeometry,
+      unlitWindowMaterial,
+      this.maxWindowsPerMesh
+    );
+    this.unlitWindowMesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+    this.unlitWindowMesh.castShadow = false;
+    this.unlitWindowMesh.receiveShadow = false;
+    
+    console.log('Window materials setup:', {
+      litMaterial: litWindowMaterial,
+      unlitMaterial: unlitWindowMaterial,
+      maxWindowsPerMesh: this.maxWindowsPerMesh
+    });
     
     // Initialize all windows as invisible
     const zeroScale = new THREE.Matrix4().makeScale(0, 0, 0);
-    for (let i = 0; i < this.maxWindows; i++) {
-      this.windowMesh.setMatrixAt(i, zeroScale);
-      this.windowPool.push(i);
+    for (let i = 0; i < this.maxWindowsPerMesh; i++) {
+      this.litWindowMesh.setMatrixAt(i, zeroScale);
+      this.unlitWindowMesh.setMatrixAt(i, zeroScale);
+      this.litWindowPool.push(i);
+      this.unlitWindowPool.push(i);
     }
     
-    this.buildingGroup.add(this.windowMesh);
+    this.buildingGroup.add(this.litWindowMesh);
+    this.buildingGroup.add(this.unlitWindowMesh);
   }
   
   createBuilding(position: THREE.Vector3, width: number, height: number, depth: number): string {
@@ -97,43 +134,137 @@ export class OptimizedBuildingSystem {
     mesh.receiveShadow = true;
     mesh.userData.buildingId = id;
     
-    // Create windows using instancing
+    // Create windows using instancing - on all 4 sides
     const windowIndices: number[] = [];
     const windowStates: boolean[] = [];
     const windowRows = Math.floor(height / 5);
-    const windowCols = Math.floor(width / 4);
+    const windowColsX = Math.floor(width / 4);
+    const windowColsZ = Math.floor(depth / 4);
     
-    for (let row = 0; row < windowRows; row++) {
-      for (let col = 0; col < windowCols; col++) {
-        if (Math.random() > 0.3 && this.windowPool.length > 0) {
-          // Get an available window index
-          const windowIndex = this.windowPool.pop()!;
-          windowIndices.push(windowIndex);
-          windowStates.push(true); // Window is intact
-          
-          // Calculate world position for window
-          const localX = (col - windowCols / 2) * 4 + 2;
+    // Skip first floor for more realistic look (lobby/entrance)
+    const startRow = 1;
+    
+    // Helper function to add a window
+    const addWindow = (x: number, y: number, z: number, rotation: number = 0) => {
+      // Decide if window should be lit based on current time of day
+      // Get current time from the global dayNightCycle if available
+      let litChance = 0.05; // Default 5% for daytime
+      if ((window as any).__dayNightCycle) {
+        const timeObj = (window as any).__dayNightCycle.getTime();
+        const hours = timeObj.hours;
+        // Debug first building
+        if (this.buildings.size === 0) {
+          console.log('First building window creation, time:', hours);
+        }
+        // Match the time-based percentages
+        if (hours >= 11 && hours < 14) {
+          litChance = 0.02; // Noon - 2% lit
+        } else if (hours >= 9 && hours < 17) {
+          litChance = 0.05; // Day - 5% lit
+        } else if (hours >= 6 && hours < 9) {
+          litChance = 0.3; // Morning - 30% lit
+        } else if (hours >= 17 && hours < 20) {
+          litChance = 0.6; // Evening - 60% lit
+        } else if (hours >= 20 && hours < 22) {
+          litChance = 0.8; // Night - 80% lit
+        } else {
+          litChance = 0.5; // Late night - 50% lit
+        }
+      } else {
+        console.warn('dayNightCycle not available during building creation');
+      }
+      const isLit = Math.random() < litChance;
+      const pool = isLit ? this.litWindowPool : this.unlitWindowPool;
+      const mesh = isLit ? this.litWindowMesh : this.unlitWindowMesh;
+      
+      if (pool.length > 0) {
+        const poolIndex = pool.pop()!;
+        const windowKey = `${id}_${windowIndices.length}`; // Unique key for this window
+        
+        windowIndices.push(windowIndices.length); // Store sequential index
+        windowStates.push(true); // Window is intact
+        
+        // Store window state info
+        this.windowStates.set(windowKey, {
+          lit: isLit,
+          [isLit ? 'litIndex' : 'unlitIndex']: poolIndex
+        });
+        
+        this.dummyObject.position.set(
+          position.x + x,
+          height / 2 + y,
+          position.z + z
+        );
+        this.dummyObject.rotation.set(0, rotation, 0);
+        this.dummyObject.scale.set(1, 1, 1);
+        this.dummyObject.updateMatrix();
+        
+        mesh.setMatrixAt(poolIndex, this.dummyObject.matrix);
+        
+        // Debug first few windows
+        if (windowIndices.length <= 3) {
+          console.log(`Window ${windowIndices.length - 1} created:`, {
+            isLit,
+            mesh: isLit ? 'lit' : 'unlit',
+            poolIndex,
+            position: this.dummyObject.position
+          });
+        }
+      }
+    };
+    
+    // Front face (positive Z)
+    for (let row = startRow; row < windowRows; row++) {
+      for (let col = 0; col < windowColsX; col++) {
+        if (Math.random() > 0.2) { // 80% chance of window
+          const localX = (col - windowColsX / 2) * 4 + 2;
           const localY = (row - windowRows / 2) * 5 + 2.5;
-          const localZ = depth / 2 + 0.1;
-          
-          // Set up window transform - add to building center height
-          this.dummyObject.position.set(
-            position.x + localX,
-            height / 2 + localY,  // Use building height, not ground position
-            position.z + localZ
-          );
-          this.dummyObject.rotation.set(0, 0, 0);
-          this.dummyObject.scale.set(1, 1, 1);
-          this.dummyObject.updateMatrix();
-          
-          // Apply to instanced mesh
-          this.windowMesh.setMatrixAt(windowIndex, this.dummyObject.matrix);
+          const localZ = depth / 2 + 0.5;
+          addWindow(localX, localY, localZ, 0);
         }
       }
     }
     
-    // Update window mesh
-    this.windowMesh.instanceMatrix.needsUpdate = true;
+    // Back face (negative Z)
+    for (let row = startRow; row < windowRows; row++) {
+      for (let col = 0; col < windowColsX; col++) {
+        if (Math.random() > 0.2) {
+          const localX = (col - windowColsX / 2) * 4 + 2;
+          const localY = (row - windowRows / 2) * 5 + 2.5;
+          const localZ = -depth / 2 - 0.5;
+          addWindow(localX, localY, localZ, Math.PI);
+        }
+      }
+    }
+    
+    // Right face (positive X)
+    for (let row = startRow; row < windowRows; row++) {
+      for (let col = 0; col < windowColsZ; col++) {
+        if (Math.random() > 0.2) {
+          const localX = width / 2 + 0.5;
+          const localY = (row - windowRows / 2) * 5 + 2.5;
+          const localZ = (col - windowColsZ / 2) * 4 + 2;
+          addWindow(localX, localY, localZ, Math.PI / 2);
+        }
+      }
+    }
+    
+    // Left face (negative X)
+    for (let row = startRow; row < windowRows; row++) {
+      for (let col = 0; col < windowColsZ; col++) {
+        if (Math.random() > 0.2) {
+          const localX = -width / 2 - 0.5;
+          const localY = (row - windowRows / 2) * 5 + 2.5;
+          const localZ = (col - windowColsZ / 2) * 4 + 2;
+          addWindow(localX, localY, localZ, -Math.PI / 2);
+        }
+      }
+    }
+    
+    // Update both window meshes
+    this.litWindowMesh.instanceMatrix.needsUpdate = true;
+    this.unlitWindowMesh.instanceMatrix.needsUpdate = true;
+    console.log(`Building ${id} created with ${windowIndices.length} windows, total windows: ${this.windowCount + windowIndices.length}`);
     this.windowCount += windowIndices.length;
     
     const building: Building = {
@@ -234,10 +365,17 @@ export class OptimizedBuildingSystem {
       if (building.windowStates[i]) {
         building.windowStates[i] = false;
         
-        // Hide the window in instanced mesh
-        const windowIndex = building.windowIndices[i];
-        const zeroScale = new THREE.Matrix4().makeScale(0, 0, 0);
-        this.windowMesh.setMatrixAt(windowIndex, zeroScale);
+        // Hide the window in the appropriate instanced mesh
+        const windowKey = `${building.id}_${i}`;
+        const windowState = this.windowStates.get(windowKey);
+        if (windowState) {
+          const zeroScale = new THREE.Matrix4().makeScale(0, 0, 0);
+          if (windowState.lit && windowState.litIndex !== undefined) {
+            this.litWindowMesh.setMatrixAt(windowState.litIndex, zeroScale);
+          } else if (!windowState.lit && windowState.unlitIndex !== undefined) {
+            this.unlitWindowMesh.setMatrixAt(windowState.unlitIndex, zeroScale);
+          }
+        }
         
         // Create glass shatter effect (simplified)
         const localPos = this.getWindowWorldPosition(building, i);
@@ -245,8 +383,9 @@ export class OptimizedBuildingSystem {
       }
     }
     
-    // Update instanced mesh
-    this.windowMesh.instanceMatrix.needsUpdate = true;
+    // Update both instanced meshes
+    this.litWindowMesh.instanceMatrix.needsUpdate = true;
+    this.unlitWindowMesh.instanceMatrix.needsUpdate = true;
     
     // Check if building should collapse
     if (building.health <= 0) {
@@ -277,13 +416,24 @@ export class OptimizedBuildingSystem {
     
     building.isDestroyed = true;
     
-    // Return window indices to pool
-    building.windowIndices.forEach(index => {
-      const zeroScale = new THREE.Matrix4().makeScale(0, 0, 0);
-      this.windowMesh.setMatrixAt(index, zeroScale);
-      this.windowPool.push(index);
+    // Return window indices to pools
+    building.windowIndices.forEach((_, i) => {
+      const windowKey = `${building.id}_${i}`;
+      const windowState = this.windowStates.get(windowKey);
+      if (windowState) {
+        const zeroScale = new THREE.Matrix4().makeScale(0, 0, 0);
+        if (windowState.lit && windowState.litIndex !== undefined) {
+          this.litWindowMesh.setMatrixAt(windowState.litIndex, zeroScale);
+          this.litWindowPool.push(windowState.litIndex);
+        } else if (!windowState.lit && windowState.unlitIndex !== undefined) {
+          this.unlitWindowMesh.setMatrixAt(windowState.unlitIndex, zeroScale);
+          this.unlitWindowPool.push(windowState.unlitIndex);
+        }
+        this.windowStates.delete(windowKey);
+      }
     });
-    this.windowMesh.instanceMatrix.needsUpdate = true;
+    this.litWindowMesh.instanceMatrix.needsUpdate = true;
+    this.unlitWindowMesh.instanceMatrix.needsUpdate = true;
     
     // Create explosion effect
     const explosionManager = ExplosionManager.getInstance(this.scene);
@@ -324,9 +474,14 @@ export class OptimizedBuildingSystem {
       if (building.mesh.material) (building.mesh.material as THREE.Material).dispose();
     });
     
-    if (this.windowMesh) {
-      this.windowMesh.geometry.dispose();
-      if (this.windowMesh.material) (this.windowMesh.material as THREE.Material).dispose();
+    if (this.litWindowMesh) {
+      this.litWindowMesh.geometry.dispose();
+      if (this.litWindowMesh.material) (this.litWindowMesh.material as THREE.Material).dispose();
+    }
+    
+    if (this.unlitWindowMesh) {
+      this.unlitWindowMesh.geometry.dispose();
+      if (this.unlitWindowMesh.material) (this.unlitWindowMesh.material as THREE.Material).dispose();
     }
     
     if (this.mergedBuildingMesh) {
@@ -345,7 +500,7 @@ export class OptimizedBuildingSystem {
     return {
       buildingCount: this.buildings.size,
       windowCount: this.windowCount,
-      drawCalls: this.mergedBuildingMesh ? 2 : this.buildings.size + 1, // Buildings + windows
+      drawCalls: this.mergedBuildingMesh ? 3 : this.buildings.size + 2, // Buildings + lit windows + unlit windows
     };
   }
   
@@ -380,5 +535,241 @@ export class OptimizedBuildingSystem {
   
   getAllBuildings(): Building[] {
     return Array.from(this.buildings.values());
+  }
+  
+  
+  // Update window lighting based on time of day (0-24 hours)
+  updateTimeOfDay(hours: number): void {
+    // Only update when hour changes to avoid constant flickering
+    const currentHour = Math.floor(hours);
+    
+    // Force update if this is the first call or hour has changed significantly (time jump)
+    const timeDifference = Math.abs(currentHour - this.lastUpdateHour);
+    const forceUpdate = this.lastUpdateHour === -1 || timeDifference > 1;
+    
+    if (currentHour === this.lastUpdateHour && !forceUpdate) return;
+    this.lastUpdateHour = currentHour;
+    
+    // Determine target lit percentage based on time
+    let targetLitPercentage: number;
+    if (hours >= 6 && hours < 9) {
+      // Early morning - some lights turning off
+      targetLitPercentage = 0.3;
+    } else if (hours >= 9 && hours < 11) {
+      // Late morning - very few lights
+      targetLitPercentage = 0.05;
+    } else if (hours >= 11 && hours < 14) {
+      // Midday/noon - almost no lights (maybe just interior offices without windows)
+      targetLitPercentage = 0.02;
+    } else if (hours >= 14 && hours < 17) {
+      // Afternoon - still very few lights
+      targetLitPercentage = 0.05;
+    } else if (hours >= 17 && hours < 20) {
+      // Evening - lights turning on
+      targetLitPercentage = 0.6;
+    } else if (hours >= 20 && hours < 22) {
+      // Night - most lights on
+      targetLitPercentage = 0.8;
+    } else {
+      // Late night (22-6) - some lights turning off
+      targetLitPercentage = 0.5;
+    }
+    
+    // Simple implementation: randomly switch some windows to match target percentage
+    const totalWindows = this.windowStates.size;
+    const windowStatesArray = Array.from(this.windowStates.values());
+    const currentLitCount = windowStatesArray.filter(state => state && state.lit === true).length;
+    
+    // Extra debugging for the count issue
+    if (this.debugCount === undefined) this.debugCount = 0;
+    if (this.debugCount++ < 3) {
+      const sampleStates = windowStatesArray.slice(0, 10);
+      console.log('Sample window states for debugging:', sampleStates);
+      console.log('First state lit check:', sampleStates[0]?.lit, typeof sampleStates[0]?.lit);
+    }
+    const targetLitCount = Math.floor(totalWindows * targetLitPercentage);
+    const difference = targetLitCount - currentLitCount;
+    
+    // Debug window state distribution on first update
+    if (this.lastUpdateHour === -1) {
+      const litWithIndex = windowStatesArray.filter(s => s.lit && s.litIndex !== undefined).length;
+      const unlitWithIndex = windowStatesArray.filter(s => !s.lit && s.unlitIndex !== undefined).length;
+      console.log(`Initial window state distribution:
+        Total: ${totalWindows}
+        Lit (state.lit=true): ${currentLitCount}
+        Lit with index: ${litWithIndex}
+        Unlit with index: ${unlitWithIndex}
+        Pools - lit available: ${this.litWindowPool.length}, unlit available: ${this.unlitWindowPool.length}`);
+    }
+    
+    console.log(`Time of day update: ${hours.toFixed(1)}h, windows: ${currentLitCount}/${totalWindows} lit (${(currentLitCount/totalWindows*100).toFixed(0)}%) → target: ${targetLitCount} (${(targetLitPercentage * 100).toFixed(0)}%), change: ${difference}, forceUpdate: ${forceUpdate}`);
+    
+    // For force updates (time jumps), update all windows at once
+    // For gradual updates, limit to avoid performance issues
+    const maxWindowsPerUpdate = forceUpdate ? Math.abs(difference) : 100;
+    
+    // Skip very small changes unless it's a force update
+    if (!forceUpdate && Math.abs(difference) < 5) return;
+    
+    // Collect all window keys
+    const windowKeys = Array.from(this.windowStates.keys());
+    console.log(`Total window keys: ${windowKeys.length}, first few keys:`, windowKeys.slice(0, 3));
+    
+    if (difference > 0) {
+      // Need to turn on more windows
+      const unlitWindows = windowKeys.filter(key => {
+        const state = this.windowStates.get(key);
+        return state && !state.lit;
+      });
+      const toSwitch = Math.min(Math.abs(difference), unlitWindows.length);
+      
+      // Randomly select windows to turn on
+      let switchedCount = 0;
+      for (let i = 0; i < toSwitch && i < maxWindowsPerUpdate; i++) {
+        if (unlitWindows.length === 0) break;
+        
+        const randomIndex = Math.floor(Math.random() * unlitWindows.length);
+        const windowKey = unlitWindows.splice(randomIndex, 1)[0];
+        const switched = this.switchWindowState(windowKey, true);
+        if (switched) switchedCount++;
+      }
+      if (forceUpdate) {
+        console.log(`Turned ON ${switchedCount} windows (force update)`);
+      }
+    } else if (difference < 0) {
+      // Need to turn off more windows
+      const litWindows = windowKeys.filter(key => {
+        const state = this.windowStates.get(key);
+        return state && state.lit;
+      });
+      
+      if (forceUpdate && litWindows.length === 0) {
+        console.error('No lit windows found to turn off! Window states might be corrupted.');
+        // Debug: check a sample of window states
+        const sampleStates = Array.from(this.windowStates.entries()).slice(0, 5);
+        console.log('Sample window states:', sampleStates);
+      }
+      const toSwitch = Math.min(Math.abs(difference), litWindows.length);
+      
+      // Randomly select windows to turn off
+      let switchedCount = 0;
+      for (let i = 0; i < toSwitch && i < maxWindowsPerUpdate; i++) {
+        if (litWindows.length === 0) break;
+        
+        const randomIndex = Math.floor(Math.random() * litWindows.length);
+        const windowKey = litWindows.splice(randomIndex, 1)[0];
+        const switched = this.switchWindowState(windowKey, false);
+        if (switched) switchedCount++;
+      }
+      if (forceUpdate) {
+        console.log(`Turned OFF ${switchedCount} windows (force update)`);
+      }
+    }
+    
+    // Update instance matrices
+    this.litWindowMesh.instanceMatrix.needsUpdate = true;
+    this.unlitWindowMesh.instanceMatrix.needsUpdate = true;
+  }
+  
+  // Switch a window between lit and unlit state
+  private switchWindowState(windowKey: string, toLit: boolean): boolean {
+    const state = this.windowStates.get(windowKey);
+    if (!state) {
+      console.warn(`Window state not found for key: ${windowKey}`);
+      return false;
+    }
+    if (state.lit === toLit) {
+      return false; // Already in desired state
+    }
+    
+    // Get the building and window index from the key
+    const parts = windowKey.split('_');
+    const windowIndexStr = parts[parts.length - 1];
+    const buildingIdParts = parts.slice(0, -1);
+    
+    // Find the building that matches this key
+    let building: Building | undefined;
+    // The window key format is: buildingId_windowIndex
+    // We need to find which building this belongs to
+    const lastUnderscore = windowKey.lastIndexOf('_');
+    const potentialBuildingId = windowKey.substring(0, lastUnderscore);
+    
+    building = this.buildings.get(potentialBuildingId);
+    
+    // If not found by exact match, try the slow way
+    if (!building) {
+      for (const [id, b] of this.buildings) {
+        if (windowKey.startsWith(id + '_')) {
+          building = b;
+          break;
+        }
+      }
+    }
+    
+    if (!building) {
+      console.warn(`Building not found for window key: ${windowKey}`);
+      return false;
+    }
+    
+    const windowIndex = parseInt(windowIndexStr);
+    if (!building.windowStates[windowIndex]) {
+      return false; // Skip broken windows
+    }
+    
+    // Get current position from the old mesh
+    const fromMesh = state.lit ? this.litWindowMesh : this.unlitWindowMesh;
+    const fromIndex = state.lit ? state.litIndex : state.unlitIndex;
+    
+    if (fromIndex === undefined) {
+      console.warn(`No index found for window ${windowKey} in ${state.lit ? 'lit' : 'unlit'} mesh`);
+      return false;
+    }
+    
+    const matrix = new THREE.Matrix4();
+    fromMesh.getMatrixAt(fromIndex, matrix);
+    
+    // Hide in old mesh
+    const zeroScale = new THREE.Matrix4().makeScale(0, 0, 0);
+    fromMesh.setMatrixAt(fromIndex, zeroScale);
+    
+    // Return index to pool
+    if (state.lit) {
+      this.litWindowPool.push(fromIndex);
+    } else {
+      this.unlitWindowPool.push(fromIndex);
+    }
+    
+    // Get new index from target pool
+    const toPool = toLit ? this.litWindowPool : this.unlitWindowPool;
+    const toMesh = toLit ? this.litWindowMesh : this.unlitWindowMesh;
+    
+    if (toPool.length > 0) {
+      const newIndex = toPool.pop()!;
+      
+      // Set in new mesh
+      toMesh.setMatrixAt(newIndex, matrix);
+      
+      // Update state
+      state.lit = toLit;
+      if (toLit) {
+        state.litIndex = newIndex;
+        delete state.unlitIndex; // Clear the old index
+      } else {
+        state.unlitIndex = newIndex;
+        delete state.litIndex; // Clear the old index
+      }
+      
+      // Log first few switches for debugging
+      if (this.switchCount === undefined) this.switchCount = 0;
+      this.switchCount++;
+      if (this.switchCount <= 10 || this.switchCount % 100 === 0) {
+        console.log(`Switched window ${windowKey} to ${toLit ? 'lit' : 'unlit'} (${this.switchCount} total)`);
+      }
+      
+      return true;
+    }
+    
+    console.warn(`Failed to switch window ${windowKey} - no indices available in target pool`);
+    return false;
   }
 }

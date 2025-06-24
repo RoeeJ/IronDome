@@ -232,6 +232,9 @@ dayNightCycle.setTime(14, 0, 0); // Start at 2 PM
 // 24 hours in 20 minutes = 24 hours in 1200 seconds = 72x speed
 dayNightCycle.setTimeSpeed(72);
 
+// Make dayNightCycle globally available for building window system
+(window as any).__dayNightCycle = dayNightCycle;
+
 const worldScaleIndicators = new WorldScaleIndicators(scene, {
   showGrid: true,
   showDistanceMarkers: false, // Disabled - removes red poles
@@ -1362,6 +1365,11 @@ function animate() {
   // Update world scale indicators with wind
   const windVector = environmentSystem.getWindAt(new THREE.Vector3(0, 50, 0));
   worldScaleIndicators.update(deltaTime, windVector);
+  
+  // Update building window lighting based on time of day
+  // Do this even when paused so sandbox time controls work
+  const currentHour = dayNightCycle.getTime().hours;
+  worldScaleIndicators.updateTimeOfDay(currentHour);
 
   // Update battlefield zones
   if (battlefieldZones) battlefieldZones.update(deltaTime);

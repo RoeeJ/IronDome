@@ -535,11 +535,13 @@ export class EnvironmentSystem {
   }
 
   getWindAt(position: THREE.Vector3): THREE.Vector3 {
-    // Add subtle turbulence based on position - reduced for more coherent wind flow
+    // Add more turbulence for natural wind flow
     const turbulence = new THREE.Vector3(
-      Math.sin(position.x * 0.01 + this.time) * 0.05,      // Reduced from 0.2
-      Math.sin(position.y * 0.01 + this.time * 1.3) * 0.02, // Reduced from 0.1
-      Math.cos(position.z * 0.01 + this.time * 0.7) * 0.05  // Reduced from 0.2
+      Math.sin(position.x * 0.005 + this.time * 0.8) * 0.3 + 
+      Math.sin(position.x * 0.02 + this.time * 1.5) * 0.15,
+      Math.sin(position.y * 0.01 + this.time * 1.3) * 0.1,
+      Math.cos(position.z * 0.005 + this.time * 0.6) * 0.3 +
+      Math.cos(position.z * 0.02 + this.time * 1.2) * 0.15
     );
 
     return this.windDirection.clone().multiplyScalar(this.windSpeed).add(turbulence);

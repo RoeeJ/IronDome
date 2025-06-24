@@ -23,6 +23,7 @@ export class WorldScaleIndicators {
   private config: ScaleIndicatorConfig;
   private buildingSystem: OptimizedBuildingSystem;
   private grid: THREE.GridHelper | null = null;
+  private time: number = 0;
 
   // Reference objects
   private buildings: THREE.Group = new THREE.Group();
@@ -407,7 +408,9 @@ export class WorldScaleIndicators {
       const i3 = i * 3;
 
       // Spread particles across the entire terrain (2000x2000)
-      positions[i3] = (Math.random() - 0.5) * 2000;
+      // But stagger their initial positions to avoid wall effect
+      const staggerOffset = (i / particleCount) * 500; // Spread initial positions along wind direction
+      positions[i3] = (Math.random() - 0.5) * 2000 + staggerOffset;
       positions[i3 + 1] = Math.random() * 200;
       positions[i3 + 2] = (Math.random() - 0.5) * 2000;
 
@@ -418,14 +421,17 @@ export class WorldScaleIndicators {
 
       sizes[i] = Math.random() * 2 + 1;
 
-      // Store velocity for each particle - small random variation only
-      // Main movement will come from global wind
+      // Store velocity for each particle - more random variation for natural movement
+      // Each particle gets different speed and slight direction variation
+      const speedVariation = 0.5 + Math.random() * 1.0; // 50% to 150% of base speed
+      const angleVariation = (Math.random() - 0.5) * 0.3; // ±15 degrees variation
+      
       this.windParticleVelocities.push(
         new THREE.Vector3(
-          (Math.random() - 0.5) * 0.3,  // Small random drift
-          (Math.random() - 0.5) * 0.1,  // Very small vertical drift
-          (Math.random() - 0.5) * 0.3   // Small random drift
-        )
+          (Math.random() - 0.5) * 2.0,  // More random drift
+          (Math.random() - 0.5) * 0.5,  // Some vertical movement
+          (Math.random() - 0.5) * 2.0   // More random drift
+        ).multiplyScalar(speedVariation)
       );
     }
 
@@ -494,6 +500,7 @@ export class WorldScaleIndicators {
   }
 
   update(deltaTime: number, windVector?: THREE.Vector3) {
+    this.time += deltaTime;
     // Update wind particles
     if (this.windParticles && this.config.showWindParticles) {
       const positions = this.windParticles.geometry.attributes.position.array as Float32Array;
@@ -502,14 +509,21 @@ export class WorldScaleIndicators {
         const i3 = i * 3;
         const velocity = this.windParticleVelocities[i];
 
-        // Apply wind if provided - wind is primary driver of movement
+        // Apply wind if provided - blend wind with particle's own movement
         if (windVector) {
-          // Wind is the main force, velocity adds small variations
-          positions[i3] += (windVector.x + velocity.x) * deltaTime * 10;
-          positions[i3 + 1] += (windVector.y * 0.1 + velocity.y) * deltaTime * 10; // Less vertical wind
-          positions[i3 + 2] += (windVector.z + velocity.z) * deltaTime * 10;
+          // Blend global wind with particle's individual movement for more natural flow
+          // Each particle responds differently to wind based on its "weight"
+          const particleWeight = 0.3 + (i % 7) * 0.1; // Different particles have different wind response
+          
+          positions[i3] += (windVector.x * particleWeight + velocity.x) * deltaTime * 10;
+          positions[i3 + 1] += (windVector.y * 0.1 * particleWeight + velocity.y) * deltaTime * 10;
+          positions[i3 + 2] += (windVector.z * particleWeight + velocity.z) * deltaTime * 10;
+          
+          // Add some swirling motion based on position
+          const swirl = Math.sin(positions[i3] * 0.01 + this.time * 0.5) * 0.2;
+          positions[i3 + 2] += swirl * deltaTime * 10;
         } else {
-          // Without wind, particles just drift slowly with their random velocities
+          // Without wind, particles just drift with their random velocities
           positions[i3] += velocity.x * deltaTime * 10;
           positions[i3 + 1] += velocity.y * deltaTime * 10;
           positions[i3 + 2] += velocity.z * deltaTime * 10;
@@ -619,6 +633,13 @@ export class WorldScaleIndicators {
     if (this.altitudeMarkers) {
       this.altitudeMarkers.visible = config.showAltitudeMarkers !== undefined ? 
         config.showAltitudeMarkers : this.config.showAltitudeMarkers;
+    }
+  }
+  
+  // Update building window lighting based on time of day
+  updateTimeOfDay(hours: number) {
+    if (this.buildingSystem) {
+      this.buildingSystem.updateTimeOfDay(hours);
     }
   }
 }
