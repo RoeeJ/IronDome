@@ -22,6 +22,7 @@ export class WorldScaleIndicators {
   private windParticleVelocities: THREE.Vector3[] = [];
   private config: ScaleIndicatorConfig;
   private buildingSystem: OptimizedBuildingSystem;
+  private grid: THREE.GridHelper | null = null;
 
   // Reference objects
   private buildings: THREE.Group = new THREE.Group();
@@ -84,15 +85,15 @@ export class WorldScaleIndicators {
     const materialCache = MaterialCache.getInstance();
 
     // Main grid
-    const mainGrid = new THREE.GridHelper(
+    this.grid = new THREE.GridHelper(
       this.config.gridSize,
       this.config.gridDivisions,
       0x0038b8,
       0x444444
     );
-    mainGrid.material.opacity = 0.3;
-    mainGrid.material.transparent = true;
-    this.indicators.add(mainGrid);
+    this.grid.material.opacity = 0.3;
+    this.grid.material.transparent = true;
+    this.indicators.add(this.grid);
 
     // Sub-grid for finer detail
     const subGrid = new THREE.GridHelper(
@@ -577,5 +578,42 @@ export class WorldScaleIndicators {
     }
 
     this.scene.remove(this.indicators);
+  }
+  
+  /**
+   * Update visibility of different indicator types dynamically
+   */
+  updateVisibility(config: Partial<ScaleIndicatorConfig>): void {
+    // Update internal config
+    Object.assign(this.config, config);
+    
+    // Toggle grid visibility
+    if (this.grid) {
+      this.grid.visible = config.showGrid !== undefined ? config.showGrid : this.config.showGrid;
+    }
+    
+    // Toggle distance markers
+    if (this.distanceMarkers) {
+      this.distanceMarkers.visible = config.showDistanceMarkers !== undefined ? 
+        config.showDistanceMarkers : this.config.showDistanceMarkers;
+    }
+    
+    // Toggle reference objects (buildings)
+    if (this.buildings) {
+      this.buildings.visible = config.showReferenceObjects !== undefined ? 
+        config.showReferenceObjects : this.config.showReferenceObjects;
+    }
+    
+    // Toggle wind particles
+    if (this.windParticles) {
+      this.windParticles.visible = config.showWindParticles !== undefined ? 
+        config.showWindParticles : this.config.showWindParticles;
+    }
+    
+    // Toggle altitude markers
+    if (this.altitudeMarkers) {
+      this.altitudeMarkers.visible = config.showAltitudeMarkers !== undefined ? 
+        config.showAltitudeMarkers : this.config.showAltitudeMarkers;
+    }
   }
 }

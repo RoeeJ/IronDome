@@ -231,7 +231,7 @@ const worldScaleIndicators = new WorldScaleIndicators(scene, {
   showGrid: true,
   showDistanceMarkers: false, // Disabled - removes red poles
   showReferenceObjects: true, // Keep buildings only
-  showWindParticles: false, // Disabled - removes particle effects
+  showWindParticles: true, // Re-enabled wind particles
   showAltitudeMarkers: false, // Disabled - removes cone indicators
   gridSize: 2000,
   gridDivisions: 100,
