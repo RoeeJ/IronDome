@@ -946,6 +946,10 @@ export class ThreatManager extends EventEmitter {
       this.batteries.splice(index, 1);
     }
   }
+  
+  setInstanceManager(manager: any): void {
+    this.instanceManager = manager;
+  }
 
   private checkBatteryHit(impactPosition: THREE.Vector3): IronDomeBattery | null {
     const hitRadius = 15; // Radius within which a battery takes damage

@@ -69,7 +69,7 @@ const camera = new THREE.PerspectiveCamera(
   75,
   window.innerWidth / window.innerHeight,
   0.1,
-  3000 // Further increased far plane for extended world
+  5000 // Extended far plane for much larger world
 );
 camera.position.set(150, 80, 150); // Moved camera further back for better overview
 camera.lookAt(0, 0, 0);
@@ -225,13 +225,16 @@ optimizedDayNight.setTime(14); // Start at 2 PM
 
 const buildingSystem = new BuildingSystem(scene);
 buildingSystem.generateCity(0, 0, 800); // SUPER SAIYAN 2: MASSIVE CITY!
+// PERFORMANCE: Merge static city geometry to reduce draw calls
+// Only merges roads and light poles, preserves buildings for windows
+buildingSystem.mergeStaticGeometry();
 
 // Make globally accessible for SandboxControls and explosion damage
 (window as any).__optimizedDayNight = optimizedDayNight;
 (window as any).__buildingSystem = buildingSystem;
 
 // Create invisible ground plane for raycasting
-const groundGeometry = new THREE.PlaneGeometry(4000, 4000);
+const groundGeometry = new THREE.PlaneGeometry(8000, 8000); // Expanded to match terrain
 const groundMaterial = MaterialCache.getInstance().getMeshBasicMaterial({ 
   visible: false,
   side: THREE.DoubleSide 
@@ -243,23 +246,27 @@ scene.add(groundMesh);
 
 // Threat Manager with extended bounds
 const threatManager = new ThreatManager(scene, world);
+threatManager.setInstanceManager(projectileInstanceManager);
 // Set extended spawn bounds for threats
 (threatManager as any).spawnBounds = {
-  minX: -800,
-  maxX: 800,
-  minZ: -800,
-  maxZ: 800,
+  minX: -2000,
+  maxX: 2000,
+  minZ: -2000,
+  maxZ: 2000,
   minY: 50,
-  maxY: 300,
+  maxY: 400,
 };
 // Make threat manager globally available for explosion system
 (window as any).__threatManager = threatManager;
 
-// CHAINSAW: Removed instanced rendering hooks - using standard meshes
+// PERFORMANCE: Re-enable instanced rendering for projectiles
+import { ProjectileInstanceManager } from './rendering/ProjectileInstanceManager';
+const projectileInstanceManager = new ProjectileInstanceManager(scene);
+(window as any).__projectileInstanceManager = projectileInstanceManager;
 
 // Invisible Radar System - provides detection without visual towers
 import { InvisibleRadarSystem } from './scene/InvisibleRadarSystem';
-const radarNetwork = new InvisibleRadarSystem(800); // 800m detection radius
+const radarNetwork = new InvisibleRadarSystem(1500); // Extended detection radius for larger area
 
 // Dome Placement System
 const domePlacementSystem = new DomePlacementSystem(scene, world);
@@ -285,6 +292,7 @@ const batteries = domePlacementSystem.getAllBatteries();
 batteries.forEach(battery => {
   battery.setResourceManagement(true);
   if (radarNetwork) battery.setRadarNetwork(radarNetwork);
+  battery.setInstanceManager(projectileInstanceManager);
   // Don't add battery again - already added in setInterceptionSystem with proper ID
   // interceptionSystem.addBattery(battery); // REMOVED - causes duplicate batteries!
   threatManager.registerBattery(battery);

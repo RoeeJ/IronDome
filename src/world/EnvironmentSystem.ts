@@ -36,8 +36,8 @@ export class EnvironmentSystem {
   private azimuth: number = 180;
 
   // Terrain parameters
-  private terrainSize: number = 2000;
-  private mountainCount: number = 12; // Increased for better mountain range
+  private terrainSize: number = 6000; // Expanded from 2000
+  private mountainCount: number = 16; // Increased for larger terrain
   private hillCount: number = 0; // No hills, focus on mountains
 
   constructor(scene: THREE.Scene) {
@@ -49,8 +49,8 @@ export class EnvironmentSystem {
     const defaultConfig: EnvironmentConfig = {
       fogEnabled: true,
       fogColor: new THREE.Color(0x2a5298),
-      fogNear: 1200, // Start fog beyond city limits (city extends to ~900m)
-      fogFar: 2000, // Extended fog distance for larger world
+      fogNear: 2000, // Start fog well beyond city limits
+      fogFar: 4000, // Extended fog distance for much larger world
       skyboxEnabled: true,
       terrainEnabled: true,
       cloudsEnabled: false, // Disabled clouds
@@ -183,7 +183,7 @@ export class EnvironmentSystem {
     const materialCache = MaterialCache.getInstance();
 
     // Create natural mountain terrain using height map
-    const terrainSize = 4000; // Even larger terrain for majestic mountains
+    const terrainSize = 8000; // Expanded terrain for even more majestic mountains
     const segments = 256; // Higher resolution for detailed terrain
     const maxHeight = 600; // Taller mountains
 

@@ -63,6 +63,7 @@ export class IronDomeBattery extends EventEmitter {
   private useInstancedRendering: boolean = false;
   private autoRepairRate: number = 0; // Health per second
   private lastRepairTime: number = 0;
+  private instanceManager?: any; // ProjectileInstanceManager reference
 
   constructor(scene: THREE.Scene, world: CANNON.World, config: Partial<BatteryConfig> = {}) {
     super();
@@ -308,6 +309,10 @@ export class IronDomeBattery extends EventEmitter {
 
   setRadarNetwork(radarNetwork: StaticRadarNetwork | InvisibleRadarSystem): void {
     this.radarNetwork = radarNetwork;
+  }
+  
+  setInstanceManager(instanceManager: any): void {
+    this.instanceManager = instanceManager;
   }
 
   canIntercept(threat: Threat): boolean {
@@ -655,6 +660,8 @@ export class IronDomeBattery extends EventEmitter {
       failureMode: 'none', // No failures for manual control
       maxLifetime: 15,
       batteryPosition: this.config.position,
+      useInstancing: !!this.instanceManager,
+      instanceManager: this.instanceManager,
     });
 
     // Mark tube as reloading
@@ -760,6 +767,8 @@ export class IronDomeBattery extends EventEmitter {
       failureTime,
       maxLifetime: 10, // 10 second max flight time
       batteryPosition: this.config.position, // Pass battery position for self-destruct check
+      useInstancing: !!this.instanceManager,
+      instanceManager: this.instanceManager,
     });
 
     // Update tube state

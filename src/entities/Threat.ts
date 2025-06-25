@@ -162,6 +162,8 @@ export const THREAT_CONFIGS: Record<ThreatType, ThreatConfig> = {
 export interface ThreatOptions extends Omit<ProjectileOptions, 'color' | 'radius' | 'mass'> {
   type: ThreatType;
   targetPosition: THREE.Vector3;
+  useInstancing?: boolean;
+  instanceManager?: any;
 }
 
 export class Threat extends Projectile {
@@ -186,6 +188,8 @@ export class Threat extends Projectile {
       trailLength: config.isDrone ? 50 : 200, // Shorter trail for drones
       useExhaustTrail: !config.isDrone, // No exhaust for drones
       isInterceptor: false,
+      useInstancing: options.useInstancing,
+      instanceManager: options.instanceManager,
     });
 
     this.type = options.type;
@@ -197,7 +201,15 @@ export class Threat extends Projectile {
     this.calculateImpactPrediction();
 
     // Replace default sphere mesh with proper missile model
-    this.replaceMeshWithModel(scene, options.type);
+    // Only if not using instancing
+    if (!options.useInstancing || !(this as any).instanceId) {
+      this.replaceMeshWithModel(scene, options.type);
+    } else if (options.useInstancing && options.instanceManager) {
+      // For instancing, we need to allocate the correct threat type instance
+      options.instanceManager.releaseInstance(this.id); // Release generic allocation
+      const newId = options.instanceManager.allocateInstance(this.id, 'threat', options.type);
+      (this as any).instanceId = newId;
+    }
 
     // Set up special physics for drones
     if (config.isDrone) {

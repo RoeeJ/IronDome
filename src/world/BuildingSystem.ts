@@ -1,6 +1,8 @@
 import * as THREE from 'three';
 import { MaterialCache } from '../utils/MaterialCache';
 import { debug } from '../utils/logger';
+import { StaticGeometryMerger } from '../utils/StaticGeometryMerger';
+import { StreetLightInstanceManager } from '../rendering/StreetLightInstanceManager';
 
 interface Building {
   id: string;
@@ -38,7 +40,7 @@ export class BuildingSystem {
   private windowMatrix = new THREE.Matrix4();
   private windowCount = 0;
   private maxWindowsPerMesh = 10000; // 10k windows per mesh to handle all city windows
-  private maxWindowsPerBuilding = 100; // Limit to ensure even distribution
+  private maxWindowsPerBuilding = 200; // Increased limit since we're using instancing efficiently
   private litWindowPool: number[] = [];
   private unlitWindowPool: number[] = [];
   private dummyObject = new THREE.Object3D();
@@ -52,6 +54,14 @@ export class BuildingSystem {
   private streetLights: THREE.Group = new THREE.Group();
   private roads: THREE.Group = new THREE.Group();
   private lastLightingUpdate = 0;
+  private streetLightManager?: StreetLightInstanceManager;
+  
+  // Merged static geometry
+  private mergedStaticGeometry: {
+    buildings?: THREE.Mesh;
+    roads?: THREE.Mesh;
+    lights?: THREE.Mesh;
+  } = {};
   
   constructor(scene: THREE.Scene) {
     this.scene = scene;
@@ -67,6 +77,9 @@ export class BuildingSystem {
     this.scene.add(this.roads);
     
     this.initializeWindowInstancing();
+    
+    // Initialize street light instance manager
+    this.streetLightManager = new StreetLightInstanceManager(scene);
   }
   
   private initializeWindowInstancing(): void {
@@ -136,7 +149,7 @@ export class BuildingSystem {
     const floors = Math.floor(height / 4); // Assume 4m per floor
     
     // UNIFORM WINDOWS: Calculate windows based on building surface area, not location
-    const windowDensity = 0.7; // 70% chance of window per possible slot
+    const windowDensity = 0.85; // 85% chance of window per possible slot (increased from 70%)
     
     // Store building info for collision detection
     this.buildingInfos.push({
@@ -165,9 +178,9 @@ export class BuildingSystem {
     const windowIndices: number[] = [];
     const windowStates: boolean[] = [];
     // BALANCED WINDOWS: Calculate based on building size but cap total
-    const baseRows = Math.floor(height / 8); // Wider vertical spacing
-    const baseColsX = Math.floor(width / 6); // Wider horizontal spacing
-    const baseColsZ = Math.floor(depth / 6);
+    const baseRows = Math.floor(height / 5); // Tighter vertical spacing (was 8)
+    const baseColsX = Math.floor(width / 4); // Tighter horizontal spacing (was 6)
+    const baseColsZ = Math.floor(depth / 4); // Tighter horizontal spacing (was 6)
     
     // Calculate total potential windows
     const potentialWindows = baseRows * (baseColsX * 2 + baseColsZ * 2) * windowDensity;
@@ -967,52 +980,10 @@ export class BuildingSystem {
   }
   
   private createStreetLight(x: number, z: number, isMajorLight: boolean = false): void {
-    // SUPER SAIYAN 2: EPIC STREET LIGHTS!
-    const poleHeight = isMajorLight ? 15 : 10;
-    const poleRadius = isMajorLight ? 0.6 : 0.3;
-    const pole = new THREE.CylinderGeometry(poleRadius, poleRadius * 1.5, poleHeight); // Tapered pole
-    const poleMaterial = MaterialCache.getInstance().getMeshStandardMaterial({
-      color: 0x333333, // Dark metal
-      metalness: 0.9,
-      roughness: 0.1
-    });
-    const poleMesh = new THREE.Mesh(pole, poleMaterial);
-    poleMesh.position.set(x, poleHeight / 2 + 0.5, z); // Adjust height based on pole size
-    poleMesh.castShadow = true;
-    poleMesh.receiveShadow = true;
-    
-    // Light fixture - bigger for major lights
-    const fixtureSize = isMajorLight ? 2.5 : 1.5;
-    const fixtureHeight = isMajorLight ? 3 : 2;
-    const fixture = new THREE.ConeGeometry(fixtureSize, fixtureHeight, 8);
-    const fixtureMaterial = MaterialCache.getInstance().getMeshStandardMaterial({
-      color: 0x222222,
-      metalness: 0.8,
-      roughness: 0.2
-    });
-    const fixtureMesh = new THREE.Mesh(fixture, fixtureMaterial);
-    fixtureMesh.position.set(x, poleHeight + 1, z);
-    fixtureMesh.rotation.x = Math.PI;
-    
-    // KAMEHAMEHA: GLOWING BULB! - brighter for major lights
-    const bulbSize = isMajorLight ? 1.5 : 1;
-    const bulb = new THREE.SphereGeometry(bulbSize); 
-    const bulbMaterial = MaterialCache.getInstance().getMeshBasicMaterial({
-      color: isMajorLight ? 0xffffff : 0xffffaa, // Whiter light for major roads
-      transparent: true,
-      opacity: isMajorLight ? 1.0 : 0.9
-    });
-    const bulbMesh = new THREE.Mesh(bulb, bulbMaterial);
-    bulbMesh.position.set(x, poleHeight + 0.5, z);
-    bulbMesh.userData.isStreetLight = true;
-    bulbMesh.userData.isMajorLight = isMajorLight;
-    
-    // NO POINT LIGHTS! Just visual glow effect
-    // Point lights are added selectively in updateStreetLights
-    
-    this.streetLights.add(poleMesh);
-    this.streetLights.add(fixtureMesh);
-    this.streetLights.add(bulbMesh);
+    // Use the instance manager to create street lights
+    if (this.streetLightManager) {
+      this.streetLightManager.createStreetLight(x, z, isMajorLight);
+    }
   }
   
   damageBuilding(buildingId: string, damage: number): void {
@@ -1343,25 +1314,18 @@ export class BuildingSystem {
   private updateStreetLights(hours: number): void {
     const isDark = hours < 6 || hours >= 18; // Street lights on 6 PM - 6 AM
     
-    // First, remove all existing point lights to stay under limit
-    const pointLights = this.streetLights.children.filter(child => child instanceof THREE.PointLight);
-    pointLights.forEach(light => this.streetLights.remove(light));
+    if (!this.streetLightManager) return;
     
-    this.streetLights.children.forEach(child => {
-      if (child.userData.isStreetLight && child instanceof THREE.Mesh) {
-        const material = child.material as THREE.MeshBasicMaterial;
-        if (isDark) {
-          material.opacity = 1.0;
-          material.color.setHex(0xffffaa); // Warm glow
-        } else {
-          material.opacity = 0.1;
-          material.color.setHex(0x444444); // Dim gray
-        }
-      }
+    // First, remove all existing point lights from street lights
+    this.streetLightManager.getStreetLights().forEach((instance, id) => {
+      this.streetLightManager!.removePointLight(id);
     });
     
+    // Update street light appearance based on time
+    this.streetLightManager.updateTimeOfDay(isDark);
+    
     // SMART LIGHTING: Only add a FEW key intersection lights when dark
-    if (isDark && pointLights.length === 0) {
+    if (isDark) {
       const keyLightPositions = [
         { x: 0, z: 0 }, // Main intersection
         { x: -400, z: -400 }, { x: 400, z: -400 },
@@ -1370,12 +1334,33 @@ export class BuildingSystem {
         { x: -400, z: 0 }, { x: 400, z: 0 }
       ];
       
-      // Maximum 8 actual lights for performance
-      keyLightPositions.slice(0, 8).forEach(pos => {
-        const pointLight = new THREE.PointLight(0xffeeaa, 0.5, 100);
-        pointLight.position.set(pos.x, 20, pos.z); // Higher to avoid conflicts
-        pointLight.castShadow = false; // No shadows for performance
-        this.streetLights.add(pointLight);
+      // Find the closest street lights to these positions and add point lights
+      const streetLights = Array.from(this.streetLightManager.getStreetLights().entries());
+      let addedLights = 0;
+      
+      keyLightPositions.forEach(targetPos => {
+        if (addedLights >= 8) return; // Maximum 8 lights
+        
+        // Find closest street light to this position
+        let closestId = '';
+        let closestDist = Infinity;
+        
+        streetLights.forEach(([id, instance]) => {
+          const dist = Math.sqrt(
+            Math.pow(instance.position.x - targetPos.x, 2) +
+            Math.pow(instance.position.z - targetPos.z, 2)
+          );
+          if (dist < closestDist && !instance.bulbLight) {
+            closestDist = dist;
+            closestId = id;
+          }
+        });
+        
+        // Add point light to closest street light
+        if (closestId && closestDist < 100) {
+          this.streetLightManager.addPointLight(closestId);
+          addedLights++;
+        }
       });
     }
   }
@@ -1487,5 +1472,55 @@ export class BuildingSystem {
    */
   getBuildings(): BuildingInfo[] {
     return this.buildingInfos;
+  }
+  
+  /**
+   * Merge all static city geometry to reduce draw calls
+   */
+  mergeStaticGeometry(): void {
+    console.log('🔥 MERGING CITY GEOMETRY FOR PERFORMANCE!');
+    
+    // IMPORTANT: Do NOT merge buildings as it breaks window instancing
+    // Buildings need to maintain their identity for window positioning
+    // ALSO: Do NOT merge street lights as it breaks their visibility
+    
+    // Update all world matrices first
+    this.roads.updateMatrixWorld(true);
+    
+    // Collect all road meshes
+    const roadMeshes: THREE.Mesh[] = [];
+    this.roads.children.forEach(child => {
+      if (child instanceof THREE.Mesh) {
+        roadMeshes.push(child);
+      }
+    });
+    
+    console.log(`Merging: ${roadMeshes.length} roads`);
+    console.log(`Keeping separate: ${this.buildings.length} buildings (for windows), all street lights (for visibility)`);
+    
+    // Perform merge on roads only
+    const mergedRoads = roadMeshes.length > 0 ? StaticGeometryMerger.mergeGeometries(roadMeshes) : null;
+    
+    // Replace road meshes with merged version
+    if (mergedRoads) {
+      // Clear all road meshes
+      this.roads.clear();
+      
+      // Add merged road mesh
+      this.roads.add(mergedRoads);
+      this.mergedStaticGeometry.roads = mergedRoads;
+      console.log(`✅ Roads merged: ${roadMeshes.length} meshes → 1 draw call`);
+    }
+    
+    const stats = this.getStats();
+    const streetLightCount = this.streetLightManager ? this.streetLightManager.getStreetLightCount() : 0;
+    // Street lights now use 6 instanced meshes (3 components x 2 types)
+    const totalDrawCalls = stats.buildingCount + 1 + 6 + 2; // buildings + roads + street light instances + windows
+    console.log(`🏆 CITY OPTIMIZATION COMPLETE!`);
+    console.log(`   Buildings: ${stats.buildingCount} (preserved for windows)`);
+    console.log(`   Roads: 1 merged mesh`);
+    console.log(`   Street lights: ${streetLightCount} lights using 6 instanced meshes`);
+    console.log(`   Windows: 2 instanced meshes`);
+    console.log(`   Estimated total: ~${totalDrawCalls} draw calls`);
   }
 }

@@ -24,6 +24,8 @@ export interface ProjectileOptions {
   failureTime?: number;
   maxLifetime?: number; // Maximum flight time before self-destruct (seconds)
   batteryPosition?: THREE.Vector3; // Battery position for self-destruct check
+  useInstancing?: boolean; // Use instanced rendering
+  instanceManager?: any; // ProjectileInstanceManager reference
 }
 
 export class Projectile {
@@ -50,6 +52,9 @@ export class Projectile {
   private radius: number;
   private maxLifetime: number;
   private batteryPosition?: THREE.Vector3;
+  private useInstancing: boolean = false;
+  private instanceManager?: any;
+  private instanceId?: number;
 
   // Physics scaling factor for simulator world
   private static readonly WORLD_SCALE = 0.3; // 30% of real-world values
@@ -90,6 +95,8 @@ export class Projectile {
       failureTime = 0,
       maxLifetime = isInterceptor ? 10 : 30, // 10s for interceptors, 30s for threats
       batteryPosition,
+      useInstancing = false,
+      instanceManager,
     } = options;
 
     this.id = `projectile_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
@@ -102,31 +109,50 @@ export class Projectile {
     this.radius = radius;
     this.maxLifetime = maxLifetime;
     this.batteryPosition = batteryPosition;
+    this.useInstancing = useInstancing;
+    this.instanceManager = instanceManager;
 
-    // Create mesh using missile model factory
-    const modelFactory = MissileModelFactory.getInstance();
-    if (isInterceptor) {
-      // Create interceptor model
-      this.mesh = modelFactory.createInterceptorModel(color);
-
-      // Load optimized Tamir model using shared cache (if enabled)
-      const modelQuality = (window as any).__interceptorModelQuality || 'ultra';
-      if (modelQuality !== 'none') {
-        this.loadTamirModelOptimized(scene, radius, modelQuality);
+    // Create mesh using missile model factory or instancing
+    if (useInstancing && instanceManager) {
+      // Use instanced rendering
+      this.instanceId = instanceManager.allocateInstance(this.id, isInterceptor ? 'interceptor' : 'threat');
+      if (this.instanceId !== null) {
+        // Create dummy mesh for physics sync
+        this.mesh = new THREE.Object3D() as any;
+        this.mesh.position.copy(position);
+        // Don't add to scene - it's rendered via instancing
+      } else {
+        // Fallback to regular mesh if instance allocation failed
+        this.useInstancing = false;
       }
-    } else {
-      // Threat missile - simple sphere for compatibility
-      // (Threats should use their own models via Threat class)
-      const geometry = GeometryFactory.getInstance().getSphere(radius, 12, 6); // Reduced segments
-      const material = MaterialCache.getInstance().getMeshStandardMaterial({
-        color,
-      });
-      this.mesh = new THREE.Mesh(geometry, material);
     }
+    
+    if (!useInstancing || this.instanceId === null) {
+      // Regular mesh creation
+      const modelFactory = MissileModelFactory.getInstance();
+      if (isInterceptor) {
+        // Create interceptor model
+        this.mesh = modelFactory.createInterceptorModel(color);
 
-    this.mesh.castShadow = true;
-    this.mesh.position.copy(position);
-    scene.add(this.mesh);
+        // Load optimized Tamir model using shared cache (if enabled)
+        const modelQuality = (window as any).__interceptorModelQuality || 'ultra';
+        if (modelQuality !== 'none') {
+          this.loadTamirModelOptimized(scene, radius, modelQuality);
+        }
+      } else {
+        // Threat missile - simple sphere for compatibility
+        // (Threats should use their own models via Threat class)
+        const geometry = GeometryFactory.getInstance().getSphere(radius, 12, 6); // Reduced segments
+        const material = MaterialCache.getInstance().getMeshStandardMaterial({
+          color,
+        });
+        this.mesh = new THREE.Mesh(geometry, material);
+      }
+
+      this.mesh.castShadow = true;
+      this.mesh.position.copy(position);
+      scene.add(this.mesh);
+    }
 
     // Create physics body
     const shape = new CANNON.Sphere(radius);
@@ -299,6 +325,16 @@ export class Projectile {
     if (currentVel.length() > 1) {
       this.orientMissile(currentVel);
     }
+    
+    // Update instance transform if using instancing
+    if (this.useInstancing && this.instanceManager && this.instanceId !== null) {
+      this.instanceManager.updateInstance(
+        this.id,
+        this.mesh.position,
+        this.mesh.rotation,
+        this.mesh.scale
+      );
+    }
 
     // Update trail
     if (this.useUnifiedTrail) {
@@ -374,7 +410,15 @@ export class Projectile {
 
   destroy(scene: THREE.Scene, world: CANNON.World): void {
     this.isActive = false;
-    scene.remove(this.mesh);
+    
+    // Release instance if using instancing
+    if (this.useInstancing && this.instanceManager && this.instanceId !== null) {
+      this.instanceManager.releaseInstance(this.id);
+    } else {
+      // Only remove mesh if not using instancing
+      scene.remove(this.mesh);
+    }
+    
     world.removeBody(this.body);
 
     // Remove from unified trail system if used
