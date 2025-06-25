@@ -17,6 +17,7 @@ import {
   AttackParameterConverter,
   ScenarioManager 
 } from '../game/scenarios/AttackScenarios';
+import { ThreatLauncherSystem, LauncherConfig, LauncherSite } from './ThreatLauncherSystem';
 
 export interface ThreatSpawnConfig {
   type: ThreatType;
@@ -56,6 +57,10 @@ export class ThreatManager extends EventEmitter {
   private scenarioManager: ScenarioManager = new ScenarioManager();
   private currentAttackParameters: AttackParameters | null = null;
   private baseSpawnAngle: number = 0; // For pattern-based spawning
+  
+  // Launcher system for realistic volleys
+  private launcherSystem: ThreatLauncherSystem;
+  private launcherSiteVisuals: Map<string, THREE.Mesh> = new Map();
 
   constructor(scene: THREE.Scene, world: CANNON.World) {
     super();
@@ -67,6 +72,10 @@ export class ThreatManager extends EventEmitter {
 
     // Initialize explosion manager
     this.explosionManager = ExplosionManager.getInstance(scene);
+    
+    // Initialize launcher system
+    this.launcherSystem = new ThreatLauncherSystem();
+    this.createLauncherSiteVisuals();
 
     // Default spawn configurations with all threat types
     this.spawnConfigs = [
@@ -136,7 +145,9 @@ export class ThreatManager extends EventEmitter {
 
   startSpawning(): void {
     this.isSpawning = true;
-    this.scheduleNextSpawn();
+    // Activate default launcher sites
+    this.launcherSystem.activateDirection('north');
+    this.launcherSystem.activateDirection('south');
   }
 
   stopSpawning(): void {
@@ -340,7 +351,8 @@ export class ThreatManager extends EventEmitter {
             if (shockwaveDamage > 0) {
               battery.takeDamage(shockwaveDamage);
               this.emit('batteryHit', { battery, damage: shockwaveDamage, isShockwave: true });
-              console.log(
+              debug.category(
+                'Combat',
                 `Shockwave damaged battery at ${distance.toFixed(1)}m for ${shockwaveDamage} damage`
               );
             }
@@ -368,14 +380,16 @@ export class ThreatManager extends EventEmitter {
       }
     }
 
-    // Spawn new threats
-    if (this.isSpawning && Date.now() >= this.nextSpawnTime) {
-      this.spawnThreat();
-      this.scheduleNextSpawn();
+    // Spawn new threats using launcher system
+    if (this.isSpawning) {
+      this.checkAndFireLaunchers();
     }
 
     // Update impact markers
     this.updateImpactMarkers();
+    
+    // Update launcher site visuals
+    this.updateLauncherSiteVisuals();
 
     // Process removal queue - safe to do after main update loop
     if (this.threatsToRemove.size > 0) {
@@ -404,6 +418,149 @@ export class ThreatManager extends EventEmitter {
     }
   }
 
+  private checkAndFireLaunchers(): void {
+    const currentTime = Date.now();
+    const readyLaunchers = this.launcherSystem.getReadyLaunchers(currentTime);
+    
+    readyLaunchers.forEach(({ launcher, site }) => {
+      this.fireVolleyFromLauncher(launcher, site);
+    });
+  }
+  
+  private fireVolleyFromLauncher(launcher: LauncherConfig, site: LauncherSite): void {
+    // Determine volley size
+    const volleySize = launcher.volleySize.min + 
+      Math.floor(Math.random() * (launcher.volleySize.max - launcher.volleySize.min + 1));
+    
+    // Fire the volley with staggered timing
+    for (let i = 0; i < volleySize; i++) {
+      setTimeout(() => {
+        this.spawnThreatFromLauncher(launcher, site);
+      }, i * launcher.volleyDelay);
+    }
+  }
+  
+  private spawnThreatFromLauncher(launcher: LauncherConfig, site: LauncherSite): void {
+    // Performance limit
+    if (this.threats.length > 50) return;
+    
+    const spawnPosition = launcher.position.clone();
+    spawnPosition.y = 5; // Ground level launch
+    
+    // Select target - prefer operational batteries
+    let targetPosition: THREE.Vector3;
+    const operationalBatteries = this.batteries.filter(b => b.isOperational());
+    
+    if (operationalBatteries.length > 0) {
+      const targetBattery = operationalBatteries[Math.floor(Math.random() * operationalBatteries.length)];
+      targetPosition = targetBattery.getPosition().clone();
+      
+      // Add spread
+      const spreadAngle = Math.random() * Math.PI * 2;
+      const spreadDistance = Math.random() * launcher.spread;
+      targetPosition.x += Math.cos(spreadAngle) * spreadDistance;
+      targetPosition.z += Math.sin(spreadAngle) * spreadDistance;
+      targetPosition.y = 0;
+    } else {
+      // Target city center with spread
+      targetPosition = new THREE.Vector3(
+        (Math.random() - 0.5) * 100,
+        0,
+        (Math.random() - 0.5) * 100
+      );
+    }
+    
+    // Get threat configuration
+    const threatStats = THREAT_CONFIGS[launcher.type];
+    
+    // Calculate launch parameters based on threat type
+    let velocity: THREE.Vector3;
+    
+    if (threatStats.isMortar) {
+      // Mortars use high angle
+      const distance = spawnPosition.distanceTo(targetPosition);
+      const mortarAngle = 80 + Math.random() * 5; // 80-85 degrees
+      const angleRad = (mortarAngle * Math.PI) / 180;
+      
+      const g = 9.82;
+      const mortarVelocity = Math.sqrt((distance * g) / Math.sin(2 * angleRad));
+      
+      const launchParams = {
+        angle: mortarAngle,
+        azimuth: Math.atan2(
+          targetPosition.z - spawnPosition.z,
+          targetPosition.x - spawnPosition.x
+        ),
+        velocity: Math.min(mortarVelocity, threatStats.velocity),
+      };
+      velocity = TrajectoryCalculator.getVelocityVector(launchParams);
+    } else {
+      // Regular rockets - calculate launch parameters
+      const launchParams = TrajectoryCalculator.calculateLaunchParameters(
+        spawnPosition,
+        targetPosition,
+        threatStats.velocity
+      );
+      
+      if (launchParams) {
+        // Force high angle for ballistic trajectory
+        const minAngle = 65;
+        const maxAngle = 80;
+        launchParams.angle = minAngle + Math.random() * (maxAngle - minAngle);
+        
+        // Recalculate velocity for the high angle
+        const distance = spawnPosition.distanceTo(targetPosition);
+        const angleRad = (launchParams.angle * Math.PI) / 180;
+        const g = 9.82;
+        const requiredVelocity = Math.sqrt((distance * g) / Math.sin(2 * angleRad));
+        
+        // Use calculated velocity if reasonable
+        if (requiredVelocity < threatStats.velocity * 1.5) {
+          launchParams.velocity = requiredVelocity;
+        }
+        
+        velocity = TrajectoryCalculator.getVelocityVector(launchParams);
+      } else {
+        // Fallback if calculation fails
+        const direction = targetPosition.clone().sub(spawnPosition).normalize();
+        velocity = direction.multiplyScalar(threatStats.velocity);
+      }
+    }
+    
+    // Create the threat
+    const threat = new Threat(this.scene, this.world, {
+      type: launcher.type,
+      position: spawnPosition,
+      velocity,
+      targetPosition,
+    });
+    this.threats.push(threat);
+    
+    // Play launch sound - check if it's a valid threat type for sound
+    if (Object.values(ThreatType).includes(launcher.type)) {
+      SoundSystem.getInstance().playLaunch(launcher.type, spawnPosition);
+    }
+    
+    // Create launch effects
+    this.launchEffects.createLaunchEffect(spawnPosition, velocity.clone().normalize());
+    
+    // Calculate and show impact prediction
+    const trajectory = TrajectoryCalculator.predictTrajectory(
+      threat.body.position.clone(),
+      threat.body.velocity.clone()
+    );
+    
+    if (trajectory.length > 0) {
+      const impactPoint = trajectory[trajectory.length - 1];
+      if (Math.abs(impactPoint.y) < 1) {
+        this.addImpactMarker(impactPoint);
+      }
+    }
+    
+    // Emit threat spawned event
+    this.emit('threatSpawned', threat);
+  }
+  
   private spawnThreat(): void {
     // Performance limit: Skip spawning if too many active threats
     if (this.threats.length > 50) {
@@ -1428,5 +1585,67 @@ export class ThreatManager extends EventEmitter {
    */
   isScenarioActive(): boolean {
     return this.scenarioManager.isActive();
+  }
+  
+  private createLauncherSiteVisuals(): void {
+    const materialCache = MaterialCache.getInstance();
+    const geometryFactory = GeometryFactory.getInstance();
+    
+    // Create visual indicators for all launcher sites
+    this.launcherSystem.getAllSites().forEach(site => {
+      // Create a simple marker for each launcher site
+      const markerGeometry = geometryFactory.getCone(5, 10, 8);
+      const markerMaterial = materialCache.getMeshStandardMaterial({
+        color: 0xff0000,
+        emissive: 0xff0000,
+        emissiveIntensity: 0.3,
+      });
+      
+      const marker = new THREE.Mesh(markerGeometry, markerMaterial);
+      marker.position.copy(site.position);
+      marker.position.y = 5;
+      marker.visible = false; // Start hidden, show only when active
+      
+      this.scene.add(marker);
+      this.launcherSiteVisuals.set(site.id, marker);
+    });
+  }
+  
+  private updateLauncherSiteVisuals(): void {
+    const activeSites = this.launcherSystem.getActiveSites();
+    const activeSiteIds = new Set(activeSites.map(site => site.id));
+    
+    // Update visibility based on active sites
+    this.launcherSiteVisuals.forEach((marker, siteId) => {
+      marker.visible = activeSiteIds.has(siteId);
+      
+      // Pulse effect for active sites
+      if (marker.visible) {
+        const time = Date.now() * 0.001;
+        const material = marker.material as THREE.MeshStandardMaterial;
+        material.emissiveIntensity = 0.3 + Math.sin(time * 3) * 0.2;
+      }
+    });
+  }
+  
+  /**
+   * Set launcher attack pattern
+   */
+  setLauncherAttackPattern(pattern: 'concentrated' | 'distributed' | 'sequential' | 'random'): void {
+    this.launcherSystem.setAttackPattern(pattern);
+  }
+  
+  /**
+   * Activate launchers by direction
+   */
+  activateLauncherDirection(direction: 'north' | 'south' | 'east' | 'west'): void {
+    this.launcherSystem.activateDirection(direction);
+  }
+  
+  /**
+   * Deactivate launchers by direction
+   */
+  deactivateLauncherDirection(direction: 'north' | 'south' | 'east' | 'west'): void {
+    this.launcherSystem.deactivateDirection(direction);
   }
 }

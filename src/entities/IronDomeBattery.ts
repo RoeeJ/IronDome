@@ -888,8 +888,8 @@ export class IronDomeBattery extends EventEmitter {
   }
 
   setResourceManagement(enabled: boolean): void {
-    console.log(
-      '[Battery] setResourceManagement called with:',
+    debug.module('Battery').log(
+      'setResourceManagement called with:',
       enabled,
       'current useResources:',
       this.useResources
@@ -901,7 +901,7 @@ export class IronDomeBattery extends EventEmitter {
       // Remove health bar if it exists
       if (this.healthBar) {
         this.healthBar.visible = false;
-        console.log('[Battery] Health bar hidden (sandbox mode)');
+        debug.module('Battery').log('Health bar hidden (sandbox mode)');
       }
       // Reset health to max and prevent damage
       this.currentHealth = this.maxHealth;
@@ -909,18 +909,18 @@ export class IronDomeBattery extends EventEmitter {
     } else {
       // Re-enable health bar
       if (!this.healthBar) {
-        console.log("[Battery] Health bar doesn't exist, creating it");
+        debug.module('Battery').log("Health bar doesn't exist, creating it");
         // Create health bar if it doesn't exist yet
         this.createHealthBar();
       }
       this.healthBar.visible = true;
       this.updateHealthBar(); // Update to show current health
-      console.log('[Battery] Health bar enabled and updated, visible:', this.healthBar.visible);
+      debug.module('Battery').log('Health bar enabled and updated, visible:', this.healthBar.visible);
     }
   }
 
   private createHealthBar(): void {
-    console.log('[HealthBar] Creating health bar, useResources:', this.useResources);
+    debug.module('Battery').log('Creating health bar, useResources:', this.useResources);
 
     // Remove existing health bar if it exists
     if (this.healthBar) {
@@ -976,8 +976,8 @@ export class IronDomeBattery extends EventEmitter {
 
     // Set initial visibility based on resource management mode
     this.healthBar.visible = this.useResources;
-    console.log(
-      '[HealthBar] Created at position:',
+    debug.module('Battery').log(
+      'Health bar created at position:',
       this.healthBar.position,
       'visible:',
       this.healthBar.visible
@@ -1174,25 +1174,43 @@ export class IronDomeBattery extends EventEmitter {
         }
         debug.asset('loading', 'battery-scale', { scaleFactor });
 
-        // Center the model at origin
+        // Center the model at origin BEFORE optimization
         box.setFromObject(object);
         const center = box.getCenter(new THREE.Vector3());
         const minY = box.min.y;
         object.position.set(-center.x, -minY, -center.z); // Place on ground
-        debug.asset('loading', 'battery-position', { position: object.position });
+        debug.asset('loading', 'battery-position-before-opt', { position: object.position, minY });
 
         // Analyze model complexity before optimization
         const beforeStats = GeometryOptimizer.analyzeComplexity(object);
         debug.log('Battery model complexity BEFORE optimization:', beforeStats);
 
-        // Optimize the model aggressively
+        // Optimize the model but preserve important details like legs
         GeometryOptimizer.optimizeObject(object, {
-          simplify: true, // Enable our basic simplification
-          simplifyRatio: 0.1, // Keep only 10% of triangles
-          mergeByMaterial: true, // This is the key optimization
-          removeSmallDetails: true,
-          smallDetailThreshold: 2.0, // Remove details smaller than 2.0 units
+          simplify: false, // Disable simplification to keep all geometry
+          simplifyRatio: 1.0, // Keep 100% of triangles
+          mergeByMaterial: true, // Still merge by material for performance
+          removeSmallDetails: false, // Don't remove any details
+          smallDetailThreshold: 0.1, // Very small threshold
         });
+        
+        // Recalculate bounds after optimization as geometry may have changed
+        box.setFromObject(object);
+        const newMinY = box.min.y;
+        const newSize = box.getSize(new THREE.Vector3());
+        
+        // Debug: Let's see what's happening
+        debug.module('Battery').log('Battery OBJ Debug:', {
+          originalMinY: minY,
+          newMinY: newMinY,
+          sizeBefore: size,
+          sizeAfter: newSize,
+          groupPosition: this.group.position,
+        });
+        
+        // Try NOT repositioning after optimization - just use the original position
+        // object.position.set(-center.x, -newMinY + domeYOffset, -center.z);
+        debug.asset('loading', 'battery-position-after-opt', { position: object.position, newMinY });
 
         // Analyze after optimization
         const afterStats = GeometryOptimizer.analyzeComplexity(object);
@@ -1319,7 +1337,7 @@ export class IronDomeBattery extends EventEmitter {
 
         // Ensure visibility in game mode
         if (this.useResources && !this.healthBar.visible) {
-          console.log('[Battery] Health bar was hidden, making visible');
+          debug.module('Battery').log('Health bar was hidden, making visible');
           this.healthBar.visible = true;
         }
       }

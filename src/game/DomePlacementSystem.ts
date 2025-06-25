@@ -8,6 +8,8 @@ import { InterceptionSystem } from '../scene/InterceptionSystem';
 import { StaticRadarNetwork } from '../scene/StaticRadarNetwork';
 import { InvisibleRadarSystem } from '../scene/InvisibleRadarSystem';
 import { InstancedOBJDomeRenderer } from '../rendering/InstancedOBJDomeRenderer';
+import { OBJLoader } from 'three/examples/jsm/loaders/OBJLoader.js';
+import { debug } from '../utils/DebugLogger';
 
 export interface PlacedDome {
   id: string;
@@ -23,7 +25,7 @@ export class DomePlacementSystem {
   private gameState: GameState;
   private resourceManager: ResourceManager;
   private placementMode: boolean = false;
-  private placementPreview?: THREE.Mesh;
+  private placementPreview?: THREE.Group;
   private rangePreview?: THREE.Mesh;
   private validPlacementMaterial: THREE.MeshStandardMaterial;
   private invalidPlacementMaterial: THREE.MeshStandardMaterial;
@@ -35,6 +37,8 @@ export class DomePlacementSystem {
   private instancedRenderer?: InstancedOBJDomeRenderer;
   private useInstancedRendering: boolean = true;
   private skipInitialBatteryCheck: boolean = false;
+  private loadedBatteryModel?: THREE.Object3D;
+  private isModelLoading: boolean = false;
 
   constructor(scene: THREE.Scene, world: CANNON.World) {
     this.scene = scene;
@@ -66,12 +70,63 @@ export class DomePlacementSystem {
       this.instancedRenderer = new InstancedOBJDomeRenderer(this.scene, 50);
     }
 
+    // Load the battery OBJ model for placement preview
+    this.loadBatteryModel();
+
     this.restoreSavedPlacements();
 
     // Ensure at least one battery exists (only if not restoring saved placements)
     if (this.placedDomes.size === 0) {
       setTimeout(() => this.ensureInitialBattery(), 100);
     }
+  }
+
+  private loadBatteryModel(): void {
+    if (this.isModelLoading || this.loadedBatteryModel) {
+      return;
+    }
+
+    this.isModelLoading = true;
+    const loader = new OBJLoader();
+
+    loader.load(
+      '/assets/Battery.obj',
+      object => {
+        // Model loaded successfully
+        debug.log('Battery OBJ model loaded for placement preview');
+
+        // Calculate model bounds to determine proper scale
+        const box = new THREE.Box3().setFromObject(object);
+        const size = box.getSize(new THREE.Vector3());
+
+        // Scale model to appropriate size (matching IronDomeBattery logic)
+        const targetHeight = 4;
+        let scaleFactor = 1;
+        if (size.y < 0.1 || size.y > 100) {
+          scaleFactor = targetHeight / size.y;
+          object.scale.set(scaleFactor, scaleFactor, scaleFactor);
+        }
+
+        // Center the model at origin
+        box.setFromObject(object);
+        const center = box.getCenter(new THREE.Vector3());
+        const minY = box.min.y;
+        object.position.set(-center.x, -minY, -center.z);
+
+        // Store the loaded model
+        this.loadedBatteryModel = object;
+        this.isModelLoading = false;
+      },
+      xhr => {
+        // Progress callback
+        debug.log(`Loading battery model: ${((xhr.loaded / xhr.total) * 100).toFixed(0)}%`);
+      },
+      error => {
+        // Error callback
+        debug.error('Failed to load battery model for preview:', error);
+        this.isModelLoading = false;
+      }
+    );
   }
 
   setSandboxMode(isSandbox: boolean): void {
@@ -134,6 +189,39 @@ export class DomePlacementSystem {
       }
     }
 
+    // Check for building collisions
+    const buildingSystem = (window as any).__buildingSystem;
+    if (buildingSystem) {
+      const batteryRadius = 15; // Battery footprint radius
+      const buildings = buildingSystem.getBuildings();
+
+      for (const building of buildings) {
+        const buildingPos = building.position;
+        const buildingWidth = building.width / 2;
+        const buildingDepth = building.depth / 2;
+
+        // Check if battery circle overlaps with building rectangle
+        // Find closest point on building to battery center
+        const closestX = Math.max(
+          buildingPos.x - buildingWidth,
+          Math.min(position.x, buildingPos.x + buildingWidth)
+        );
+        const closestZ = Math.max(
+          buildingPos.z - buildingDepth,
+          Math.min(position.z, buildingPos.z + buildingDepth)
+        );
+
+        // Check distance from battery center to closest point on building
+        const distX = position.x - closestX;
+        const distZ = position.z - closestZ;
+        const distanceSquared = distX * distX + distZ * distZ;
+
+        if (distanceSquared < batteryRadius * batteryRadius) {
+          return false; // Collision detected
+        }
+      }
+    }
+
     return true;
   }
 
@@ -170,28 +258,42 @@ export class DomePlacementSystem {
 
     this.placementMode = true;
 
-    // Create placement preview that looks like a dome
+    // Create placement preview group
     const previewGroup = new THREE.Group();
 
-    // Base platform
-    const baseGeometry = new THREE.BoxGeometry(6, 1, 6);
-    const baseMesh = new THREE.Mesh(baseGeometry, this.validPlacementMaterial);
-    baseMesh.position.y = 0.5;
-    previewGroup.add(baseMesh);
+    // If OBJ model is loaded, use it
+    if (this.loadedBatteryModel) {
+      // Clone the loaded model
+      const modelClone = this.loadedBatteryModel.clone();
 
-    // Launcher base
-    const launcherBaseGeometry = new THREE.CylinderGeometry(4, 4, 0.5, 8);
-    const launcherBase = new THREE.Mesh(launcherBaseGeometry, this.validPlacementMaterial);
-    launcherBase.position.y = 1.25;
-    previewGroup.add(launcherBase);
+      // Apply placement material to all meshes in the model
+      modelClone.traverse(child => {
+        if (child instanceof THREE.Mesh) {
+          child.material = this.validPlacementMaterial;
+          child.castShadow = false;
+          child.receiveShadow = false;
+        }
+      });
 
-    // Radar dome
-    const domeGeometry = new THREE.SphereGeometry(2, 16, 16, 0, Math.PI * 2, 0, Math.PI / 2);
-    const dome = new THREE.Mesh(domeGeometry, this.validPlacementMaterial);
-    dome.position.y = 3;
-    previewGroup.add(dome);
+      previewGroup.add(modelClone);
+    } else {
+      // Fallback to simple geometry if model hasn't loaded yet
+      // Create a simple placeholder
+      const placeholderGeometry = new THREE.CylinderGeometry(8, 10, 8, 16);
+      const placeholderMesh = new THREE.Mesh(placeholderGeometry, this.validPlacementMaterial);
+      placeholderMesh.position.y = 4;
+      previewGroup.add(placeholderMesh);
 
-    this.placementPreview = previewGroup as any;
+      // Add a simple dome on top
+      const domeGeometry = new THREE.SphereGeometry(4, 16, 8, 0, Math.PI * 2, 0, Math.PI / 2);
+      const domeMesh = new THREE.Mesh(domeGeometry, this.validPlacementMaterial);
+      domeMesh.position.y = 8;
+      previewGroup.add(domeMesh);
+
+      debug.log('Using placeholder geometry - OBJ model not loaded yet');
+    }
+
+    this.placementPreview = previewGroup;
     this.scene.add(this.placementPreview);
 
     // Show range preview
@@ -205,10 +307,22 @@ export class DomePlacementSystem {
 
     if (this.placementPreview) {
       this.scene.remove(this.placementPreview);
-      // Dispose of group children
-      this.placementPreview.traverse((child: any) => {
-        if (child.geometry) child.geometry.dispose();
-        if (child.material) child.material.dispose();
+      // Don't dispose of the OBJ model geometries - they're shared
+      // Only dispose of placeholder geometries
+      this.placementPreview.traverse(child => {
+        if (child instanceof THREE.Mesh) {
+          // Only dispose if it's not part of the loaded OBJ model
+          if (!this.loadedBatteryModel || !this.isChildOfModel(child, this.loadedBatteryModel)) {
+            if (child.geometry) child.geometry.dispose();
+            if (
+              child.material &&
+              child.material !== this.validPlacementMaterial &&
+              child.material !== this.invalidPlacementMaterial
+            ) {
+              child.material.dispose();
+            }
+          }
+        }
       });
       this.placementPreview = undefined;
     }
@@ -217,6 +331,15 @@ export class DomePlacementSystem {
     if (this.rangePreview) {
       this.rangePreview.visible = false;
     }
+  }
+
+  private isChildOfModel(object: THREE.Object3D, model: THREE.Object3D): boolean {
+    let parent = object.parent;
+    while (parent) {
+      if (parent === model) return true;
+      parent = parent.parent;
+    }
+    return false;
   }
 
   private showNearbyDomeRanges(position: THREE.Vector3): void {
@@ -238,7 +361,7 @@ export class DomePlacementSystem {
 
     // Update preview position
     this.placementPreview.position.copy(snappedPosition);
-    this.placementPreview.position.y = 5;
+    this.placementPreview.position.y = 0; // Ground level to match placement
 
     // Update range preview position
     if (this.rangePreview) {
@@ -251,8 +374,8 @@ export class DomePlacementSystem {
     const material = isValid ? this.validPlacementMaterial : this.invalidPlacementMaterial;
 
     // Update all meshes in the preview group
-    this.placementPreview.traverse((child: any) => {
-      if (child.isMesh) {
+    this.placementPreview.traverse(child => {
+      if (child instanceof THREE.Mesh) {
         child.material = material;
       }
     });
@@ -307,9 +430,14 @@ export class DomePlacementSystem {
   }
 
   placeBatteryAt(position: THREE.Vector3, batteryId: string, level: number = 1): void {
+    // Adjust position to raise the battery so legs are visible
+    const adjustedPosition = position.clone();
+    // Place at ground level for now to test
+    adjustedPosition.y = 0; // Ground level
+
     // Create battery with instanced rendering flag - extended range to cover entire city
     const battery = new IronDomeBattery(this.scene, this.world, {
-      position: position.clone(),
+      position: adjustedPosition,
       maxRange: 1000 + (level - 1) * 100, // Extended to cover entire city (900m radius) plus buffer
       minRange: 10,
       reloadTime: 3000 - (level - 1) * 200, // Faster reload with level
@@ -371,9 +499,9 @@ export class DomePlacementSystem {
       this.threatManager.registerBattery(battery);
     }
 
-    // Add to interception system (this will register with coordinator)
+    // Add to interception system with proper ID (this will register with coordinator)
     if (this.interceptionSystem) {
-      this.interceptionSystem.addBattery(battery);
+      this.interceptionSystem.addBattery(battery, batteryId);
     }
 
     // Add range indicator
@@ -400,7 +528,7 @@ export class DomePlacementSystem {
     const ring = new THREE.Mesh(geometry, material);
     ring.rotation.x = -Math.PI / 2;
     ring.position.copy(battery.getPosition());
-    ring.position.y = 0.2;
+    ring.position.y = 0.2; // This is already relative to battery position which is raised
     ring.name = `battery-level-indicator-${level}`;
     this.scene.add(ring);
   }
@@ -418,7 +546,7 @@ export class DomePlacementSystem {
     const ring = new THREE.Mesh(geometry, material);
     ring.rotation.x = -Math.PI / 2;
     ring.position.copy(battery.getPosition());
-    ring.position.y = 0.05;
+    ring.position.y = 0.05; // This is already relative to battery position which is raised
     ring.name = `battery-range-indicator`;
     this.scene.add(ring);
   }
@@ -465,6 +593,11 @@ export class DomePlacementSystem {
     // Unregister from threat manager
     if (this.threatManager) {
       this.threatManager.unregisterBattery(dome.battery);
+    }
+
+    // Remove from interception system and coordinator
+    if (this.interceptionSystem) {
+      this.interceptionSystem.removeBattery(dome.battery, batteryId);
     }
 
     // Remove from scene
@@ -527,6 +660,10 @@ export class DomePlacementSystem {
           this.removeBattery(batteryId, false);
           // Recreate battery with upgraded stats
           this.placeBatteryAt(position, batteryId, updatedPlacement.level);
+
+          // Dispatch event to notify UI of battery upgrade
+          window.dispatchEvent(new CustomEvent('batteryUpgraded', { detail: { batteryId } }));
+
           return true;
         }
       }
@@ -542,6 +679,9 @@ export class DomePlacementSystem {
         this.removeBattery(batteryId, false);
         // Recreate battery with upgraded stats (placement.level is already updated by purchaseDomeUpgrade)
         this.placeBatteryAt(position, batteryId, placement.level);
+
+        // Dispatch event to notify UI of battery upgrade
+        window.dispatchEvent(new CustomEvent('batteryUpgraded', { detail: { batteryId } }));
       }
       return true;
     }
@@ -651,9 +791,9 @@ export class DomePlacementSystem {
   setInterceptionSystem(interceptionSystem: InterceptionSystem): void {
     this.interceptionSystem = interceptionSystem;
 
-    // Add existing batteries
-    for (const dome of this.placedDomes.values()) {
-      interceptionSystem.addBattery(dome.battery);
+    // Add existing batteries with their proper IDs
+    for (const [batteryId, dome] of this.placedDomes) {
+      interceptionSystem.addBattery(dome.battery, batteryId);
     }
   }
 

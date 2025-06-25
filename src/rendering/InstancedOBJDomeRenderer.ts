@@ -50,13 +50,13 @@ export class InstancedOBJDomeRenderer {
       const beforeStats = GeometryOptimizer.analyzeComplexity(object);
       debug.log('Battery OBJ complexity BEFORE optimization:', beforeStats);
 
-      // Optimize the model to reduce triangle count
+      // Optimize the model but preserve important details like legs
       GeometryOptimizer.optimizeObject(object, {
-        simplify: true, // Enable decimation
-        simplifyRatio: 0.05, // Keep only 5% of triangles for instanced rendering
-        mergeByMaterial: true,
-        removeSmallDetails: true,
-        smallDetailThreshold: 3.0, // Remove small details aggressively
+        simplify: false, // Disable simplification to keep all geometry
+        simplifyRatio: 1.0, // Keep 100% of triangles
+        mergeByMaterial: true, // Still merge by material for performance
+        removeSmallDetails: false, // Don't remove any details
+        smallDetailThreshold: 0.1, // Very small threshold
       });
 
       const afterStats = GeometryOptimizer.analyzeComplexity(object);

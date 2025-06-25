@@ -18,11 +18,19 @@ interface Building {
   debrisCreated: boolean;
 }
 
+interface BuildingInfo {
+  position: THREE.Vector3;
+  width: number;
+  height: number;
+  depth: number;
+}
+
 export class OptimizedBuildingSystem {
   private scene: THREE.Scene;
   private buildings = new Map<string, Building>();
   private buildingGroup = new THREE.Group();
   private debrisGroup = new THREE.Group();
+  private buildingInfos: BuildingInfo[] = [];
   
   // Window instancing - separate meshes for lit and unlit windows
   private litWindowMesh: THREE.InstancedMesh;
@@ -118,6 +126,14 @@ export class OptimizedBuildingSystem {
     
     const id = `building_${Date.now()}_${Math.random()}`;
     const floors = Math.floor(height / 4); // Assume 4m per floor
+    
+    // Store building info for collision detection
+    this.buildingInfos.push({
+      position: position.clone(),
+      width,
+      height,
+      depth
+    });
     
     // Create building mesh
     const geometry = geometryFactory.getBox(width, height, depth);
@@ -771,5 +787,12 @@ export class OptimizedBuildingSystem {
     
     console.warn(`Failed to switch window ${windowKey} - no indices available in target pool`);
     return false;
+  }
+  
+  /**
+   * Get all buildings for collision detection
+   */
+  getBuildings(): BuildingInfo[] {
+    return this.buildingInfos;
   }
 }

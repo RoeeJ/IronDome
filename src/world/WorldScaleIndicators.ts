@@ -189,20 +189,20 @@ export class WorldScaleIndicators {
     const materialCache = MaterialCache.getInstance();
     const geometryFactory = GeometryFactory.getInstance();
 
-    // Create denser city with noise-based placement
-    const buildingCount = 80; // Much more buildings for denser city
+    // Create city with better distributed buildings
+    const buildingCount = 60; // Reduced count to prevent overlaps with larger spacing
 
-    // Create city clusters with better distribution
+    // Create city clusters with better distribution and spacing
     const cityZones = [
-      { x: 0, z: 0, radius: 400, minDistanceFromCenter: 80, density: 0.4 }, // Central city - denser
-      { x: 500, z: 0, radius: 250, minDistanceFromCenter: 0, density: 0.3 }, // East district
-      { x: -500, z: 0, radius: 250, minDistanceFromCenter: 0, density: 0.3 }, // West district
-      { x: 0, z: 500, radius: 250, minDistanceFromCenter: 0, density: 0.3 }, // North district
-      { x: 0, z: -500, radius: 250, minDistanceFromCenter: 0, density: 0.3 }, // South district
-      { x: 350, z: 350, radius: 200, minDistanceFromCenter: 0, density: 0.25 }, // NE district
-      { x: -350, z: 350, radius: 200, minDistanceFromCenter: 0, density: 0.25 }, // NW district
-      { x: 350, z: -350, radius: 200, minDistanceFromCenter: 0, density: 0.25 }, // SE district
-      { x: -350, z: -350, radius: 200, minDistanceFromCenter: 0, density: 0.25 }, // SW district
+      { x: 0, z: 0, radius: 350, minDistanceFromCenter: 120, density: 0.3 }, // Central city - less dense
+      { x: 600, z: 0, radius: 200, minDistanceFromCenter: 0, density: 0.25 }, // East district
+      { x: -600, z: 0, radius: 200, minDistanceFromCenter: 0, density: 0.25 }, // West district
+      { x: 0, z: 600, radius: 200, minDistanceFromCenter: 0, density: 0.25 }, // North district
+      { x: 0, z: -600, radius: 200, minDistanceFromCenter: 0, density: 0.25 }, // South district
+      { x: 400, z: 400, radius: 150, minDistanceFromCenter: 0, density: 0.2 }, // NE district
+      { x: -400, z: 400, radius: 150, minDistanceFromCenter: 0, density: 0.2 }, // NW district
+      { x: 400, z: -400, radius: 150, minDistanceFromCenter: 0, density: 0.2 }, // SE district
+      { x: -400, z: -400, radius: 150, minDistanceFromCenter: 0, density: 0.2 }, // SW district
     ];
 
     // Simple noise function for organic placement
@@ -218,7 +218,7 @@ export class WorldScaleIndicators {
 
     let buildingIndex = 0;
     const placedBuildings: THREE.Vector3[] = [];
-    const minBuildingDistance = 35; // Minimum distance between buildings
+    const minBuildingDistance = 50; // Increased minimum distance between buildings to prevent overlaps
 
     cityZones.forEach(zone => {
       const buildingsPerZone = Math.floor(
@@ -230,7 +230,7 @@ export class WorldScaleIndicators {
         const buildingPos = new THREE.Vector3();
         let attempts = 0;
 
-        while (!validPosition && attempts < 20) {
+        while (!validPosition && attempts < 50) { // More attempts for better placement
           // Use noise-based placement for more organic city layout
           const angle = Math.random() * Math.PI * 2;
           const baseDistance =
@@ -247,15 +247,21 @@ export class WorldScaleIndicators {
           const distFromOrigin = Math.sqrt(x * x + z * z);
           let tooClose = false;
 
-          // Check distance from other buildings
+          // Check distance from other buildings - also consider building size
+          const buildingWidth = 12 + Math.random() * 20 + 10; // Estimate building size
+          const buildingDepth = 12 + Math.random() * 20 + 10;
+          const buildingRadius = Math.max(buildingWidth, buildingDepth) / 2;
+
           for (const placed of placedBuildings) {
-            if (placed.distanceTo(new THREE.Vector3(x, 0, z)) < minBuildingDistance) {
+            // Use actual building footprint for distance check
+            const minDistance = minBuildingDistance + buildingRadius;
+            if (placed.distanceTo(new THREE.Vector3(x, 0, z)) < minDistance) {
               tooClose = true;
               break;
             }
           }
 
-          if (distFromOrigin > 60 && !tooClose && Math.abs(x) < 900 && Math.abs(z) < 900) {
+          if (distFromOrigin > 100 && !tooClose && Math.abs(x) < 900 && Math.abs(z) < 900) {
             buildingPos.set(x, 0, z);
             validPosition = true;
           }
@@ -500,7 +506,9 @@ export class WorldScaleIndicators {
   }
 
   update(deltaTime: number, windVector?: THREE.Vector3) {
-    this.time += deltaTime;
+    // Clamp deltaTime to prevent large jumps when tab regains focus
+    const clampedDeltaTime = Math.min(deltaTime, 0.1); // Max 100ms per frame
+    this.time += clampedDeltaTime;
     // Update wind particles
     if (this.windParticles && this.config.showWindParticles) {
       const positions = this.windParticles.geometry.attributes.position.array as Float32Array;
@@ -515,18 +523,18 @@ export class WorldScaleIndicators {
           // Each particle responds differently to wind based on its "weight"
           const particleWeight = 0.3 + (i % 7) * 0.1; // Different particles have different wind response
           
-          positions[i3] += (windVector.x * particleWeight + velocity.x) * deltaTime * 10;
-          positions[i3 + 1] += (windVector.y * 0.1 * particleWeight + velocity.y) * deltaTime * 10;
-          positions[i3 + 2] += (windVector.z * particleWeight + velocity.z) * deltaTime * 10;
+          positions[i3] += (windVector.x * particleWeight + velocity.x) * clampedDeltaTime * 10;
+          positions[i3 + 1] += (windVector.y * 0.1 * particleWeight + velocity.y) * clampedDeltaTime * 10;
+          positions[i3 + 2] += (windVector.z * particleWeight + velocity.z) * clampedDeltaTime * 10;
           
           // Add some swirling motion based on position
           const swirl = Math.sin(positions[i3] * 0.01 + this.time * 0.5) * 0.2;
-          positions[i3 + 2] += swirl * deltaTime * 10;
+          positions[i3 + 2] += swirl * clampedDeltaTime * 10;
         } else {
           // Without wind, particles just drift with their random velocities
-          positions[i3] += velocity.x * deltaTime * 10;
-          positions[i3 + 1] += velocity.y * deltaTime * 10;
-          positions[i3 + 2] += velocity.z * deltaTime * 10;
+          positions[i3] += velocity.x * clampedDeltaTime * 10;
+          positions[i3 + 1] += velocity.y * clampedDeltaTime * 10;
+          positions[i3 + 2] += velocity.z * clampedDeltaTime * 10;
         }
 
         // Wrap around entire terrain area

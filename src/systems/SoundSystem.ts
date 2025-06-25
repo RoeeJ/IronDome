@@ -170,6 +170,12 @@ export class SoundSystem {
       debug.warn(`Sound not found: ${soundName}`);
       return null;
     }
+    
+    // Check if audio has a valid source
+    if (!audio.src || audio.src === '') {
+      // Silently skip playing sounds that aren't loaded yet
+      return null;
+    }
 
     // Clone audio element for multiple simultaneous plays
     const audioClone = audio.cloneNode(true) as HTMLAudioElement;
@@ -205,13 +211,17 @@ export class SoundSystem {
         pannerNode.coneOuterAngle = 0;
         pannerNode.coneOuterGain = 0;
 
-        // Set position
+        // Set position (validate values are finite)
+        const x = isFinite(options.position.x) ? options.position.x : 0;
+        const y = isFinite(options.position.y) ? options.position.y : 0;
+        const z = isFinite(options.position.z) ? options.position.z : 0;
+        
         if (pannerNode.positionX) {
-          pannerNode.positionX.value = options.position.x;
-          pannerNode.positionY.value = options.position.y;
-          pannerNode.positionZ.value = options.position.z;
+          pannerNode.positionX.value = x;
+          pannerNode.positionY.value = y;
+          pannerNode.positionZ.value = z;
         } else if (pannerNode.setPosition) {
-          pannerNode.setPosition(options.position.x, options.position.y, options.position.z);
+          pannerNode.setPosition(x, y, z);
         }
 
         gainNode.connect(pannerNode);

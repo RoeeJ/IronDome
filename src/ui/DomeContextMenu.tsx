@@ -58,9 +58,19 @@ export const DomeContextMenu: React.FC<DomeContextMenuProps> = ({
     const interval = setInterval(updatePlacementInfo, 100);
 
     // Also update on battery upgrade event
-    const handleBatteryUpgraded = () => {
-      updatePlacementInfo();
-      setRefreshKey(prev => prev + 1);
+    const handleBatteryUpgraded = (event: any) => {
+      // Add a small delay to ensure the new battery is fully initialized
+      setTimeout(() => {
+        updatePlacementInfo();
+        setRefreshKey(prev => prev + 1);
+        
+        // Force re-fetch battery reference
+        const newBattery = placementSystem.getBattery(batteryId);
+        if (newBattery) {
+          setBatteryConfig(newBattery.getConfig());
+          setBatteryStats(newBattery.getStats());
+        }
+      }, 100);
     };
     window.addEventListener('batteryUpgraded', handleBatteryUpgraded);
 

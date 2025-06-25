@@ -33,7 +33,6 @@ export class BatteryCoordinator {
       activeEngagements: 0,
       lastFiredTime: 0,
     });
-    debug.module('BatteryCoordinator').log(`Registered battery ${batteryId}`);
   }
 
   unregisterBattery(batteryId: string): void {
@@ -70,15 +69,16 @@ export class BatteryCoordinator {
 
     // Check if threat is already assigned
     const existingAssignment = this.threatAssignments.get(threatId);
-    if (existingAssignment) {
+    if (existingAssignment && existingInterceptors > 0) {
+      // Threat is already assigned and has interceptors in flight
       const assignedBattery = this.batteries.get(existingAssignment.assignedBatteryId);
       if (assignedBattery && assignedBattery.battery.canIntercept(threat)) {
         debug
           .module('BatteryCoordinator')
           .log(
-            `Threat ${threatId} already assigned to battery ${existingAssignment.assignedBatteryId}`
+            `Threat ${threatId} already assigned to battery ${existingAssignment.assignedBatteryId} with ${existingInterceptors} interceptors`
           );
-        return null; // Already being handled
+        return null; // Already being handled sufficiently
       }
     }
 
@@ -107,12 +107,6 @@ export class BatteryCoordinator {
     capableBatteries.sort((a, b) => b.score - a.score);
 
     const selected = capableBatteries[0];
-    debug
-      .module('BatteryCoordinator')
-      .log(
-        `Selected battery ${selected.batteryId} for threat ${threatId} with score ${selected.score.toFixed(2)}`
-      );
-
     return selected.status.battery;
   }
 
@@ -143,21 +137,45 @@ export class BatteryCoordinator {
     score *= rangeFactor;
 
     // 2. Battery load factor (prefer less loaded batteries)
-    const loadFactor =
-      1 - status.activeEngagements / Math.max(1, status.battery.getConfig().launcherCount);
+    const maxEngagements = Math.ceil(status.battery.getConfig().launcherCount / 4); // Can handle multiple threats
+    const loadFactor = Math.max(0.1, 1 - status.activeEngagements / maxEngagements);
     score *= loadFactor;
+    
+    // 3. Available interceptors bonus
+    const availableRatio = status.availableInterceptors / status.battery.getConfig().launcherCount;
+    score *= (0.5 + 0.5 * availableRatio); // 50% base + 50% based on availability
 
-    // 3. Time to impact check (simple pass/fail)
+    // 4. Time to impact check (simple pass/fail)
     const interceptTime = distance / battery.getConfig().interceptorSpeed;
     const threatTimeToImpact = threat.getTimeToImpact();
     if (interceptTime >= threatTimeToImpact) {
       return 0; // Can't intercept in time
     }
+    
+    // 5. Time urgency bonus - prioritize batteries that can intercept sooner
+    const timeRatio = interceptTime / threatTimeToImpact;
+    score *= (2 - timeRatio); // Higher score for faster interception
 
-    // 4. Recent firing penalty (avoid overheating)
+    // 6. Recent firing penalty (reduced - batteries should be able to fire rapidly)
     const timeSinceLastFire = Date.now() - status.lastFiredTime;
-    if (timeSinceLastFire < 500) {
-      score *= 0.8;
+    if (timeSinceLastFire < 200) {
+      score *= 0.9; // Smaller penalty
+    }
+    
+    // 7. CRITICAL: Self-defense bonus - prioritize threats approaching this battery
+    const impactPoint = threat.getImpactPoint();
+    if (impactPoint && distance < 400) {
+      const impactDistanceToBattery = impactPoint.distanceTo(batteryPos);
+      if (impactDistanceToBattery < 50) {
+        // Direct threat to this battery - maximum priority
+        score *= 3.0;
+      } else if (impactDistanceToBattery < 100) {
+        // Near miss to this battery - high priority
+        score *= 2.0;
+      } else if (impactDistanceToBattery < 200) {
+        // Moderate threat to this battery
+        score *= 1.5;
+      }
     }
 
     return score;
@@ -167,12 +185,26 @@ export class BatteryCoordinator {
    * Record a threat assignment
    */
   assignThreatToBattery(threatId: string, batteryId: string, interceptorCount: number): void {
-    this.threatAssignments.set(threatId, {
-      threatId,
-      assignedBatteryId: batteryId,
-      interceptorCount,
-      timeAssigned: Date.now(),
-    });
+    // Update existing assignment or create new one
+    const existingAssignment = this.threatAssignments.get(threatId);
+    
+    if (existingAssignment) {
+      // Update interceptor count
+      existingAssignment.interceptorCount += interceptorCount;
+      debug
+        .module('BatteryCoordinator')
+        .log(
+          `Updated threat ${threatId} assignment: now ${existingAssignment.interceptorCount} total interceptors`
+        );
+    } else {
+      // New assignment
+      this.threatAssignments.set(threatId, {
+        threatId,
+        assignedBatteryId: batteryId,
+        interceptorCount,
+        timeAssigned: Date.now(),
+      });
+    }
 
     const status = this.batteries.get(batteryId);
     if (status) {
@@ -183,7 +215,7 @@ export class BatteryCoordinator {
     debug
       .module('BatteryCoordinator')
       .log(
-        `Assigned threat ${threatId} to battery ${batteryId} with ${interceptorCount} interceptors`
+        `Battery ${batteryId} assigned to threat ${threatId} with ${interceptorCount} interceptors. Total batteries: ${this.batteries.size}`
       );
   }
 

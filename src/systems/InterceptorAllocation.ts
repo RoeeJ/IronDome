@@ -20,7 +20,7 @@ interface BatteryCapability {
 }
 
 interface AllocationResult {
-  allocations: Map<string, { battery: IronDomeBattery; interceptorCount: number }>;
+  allocations: Map<string, { battery: IronDomeBattery; interceptorCount: number; batteryIndex?: number }>;
   unassignedThreats: Threat[];
   efficiency: number;
 }
@@ -28,14 +28,20 @@ interface AllocationResult {
 export class InterceptorAllocation {
   private historicalSuccessRates: Map<string, number> = new Map();
   private readonly defaultSuccessRate = 0.85;
+  private batteries: IronDomeBattery[] = [];
 
   /**
    * Optimize interceptor allocation across multiple batteries and threats
    */
   optimizeAllocation(threats: Threat[], batteries: IronDomeBattery[]): AllocationResult {
-    debug
-      .module('InterceptorAllocation')
-      .log(`Optimizing allocation for ${threats.length} threats and ${batteries.length} batteries`);
+    // Store batteries for threat analysis
+    this.batteries = batteries;
+    
+    // Create a map to track battery indices
+    const batteryIndexMap = new Map<IronDomeBattery, number>();
+    batteries.forEach((battery, index) => {
+      batteryIndexMap.set(battery, index);
+    });
 
     // Step 1: Analyze all threats
     const threatMetrics = threats
@@ -55,7 +61,7 @@ export class InterceptorAllocation {
     );
 
     // Step 3: Use dynamic programming for optimal allocation
-    const allocations = this.dynamicAllocation(threatMetrics, batteryCapabilities);
+    const allocations = this.dynamicAllocation(threatMetrics, batteryCapabilities, batteryIndexMap);
 
     // Step 4: Identify unassigned threats
     const assignedThreatIds = new Set(allocations.keys());
@@ -76,6 +82,7 @@ export class InterceptorAllocation {
   private analyzeThreat(threat: Threat): ThreatMetrics {
     const timeToImpact = threat.getTimeToImpact();
     const velocity = threat.getVelocity().length();
+    const threatPos = threat.getPosition();
 
     // Priority calculation
     let priority = 100;
@@ -101,9 +108,54 @@ export class InterceptorAllocation {
     else if (velocity > 200) priority += 5;
 
     // Altitude factor (0-10 points)
-    const altitude = threat.getPosition().y;
+    const altitude = threatPos.y;
     if (altitude < 500) priority += 10;
     else if (altitude < 1000) priority += 5;
+    
+    // CRITICAL: Battery proximity factor (0-100+ points)
+    // Check if threat is approaching any battery
+    let minDistanceToBattery = Infinity;
+    let closestBattery: IronDomeBattery | null = null;
+    
+    for (const battery of this.batteries) {
+      const batteryPos = battery.getPosition();
+      const distance = threatPos.distanceTo(batteryPos);
+      
+      if (distance < minDistanceToBattery) {
+        minDistanceToBattery = distance;
+        closestBattery = battery;
+      }
+    }
+    
+    // Exponentially increase priority as threat gets closer to batteries
+    if (minDistanceToBattery < 200) {
+      // Critical range - battery in immediate danger
+      priority += 150;
+    } else if (minDistanceToBattery < 300) {
+      // High danger range
+      priority += 80;
+    } else if (minDistanceToBattery < 400) {
+      // Moderate danger range
+      priority += 40;
+    } else if (minDistanceToBattery < 500) {
+      // Low danger range
+      priority += 20;
+    }
+    
+    // Additional priority if threat is on collision course with battery
+    if (closestBattery && minDistanceToBattery < 400) {
+      const impactPoint = threat.getImpactPoint();
+      if (impactPoint) {
+        const impactDistanceToBattery = impactPoint.distanceTo(closestBattery.getPosition());
+        if (impactDistanceToBattery < 50) {
+          // Direct hit trajectory
+          priority += 100;
+        } else if (impactDistanceToBattery < 100) {
+          // Near miss trajectory
+          priority += 50;
+        }
+      }
+    }
 
     // Calculate interception difficulty
     let difficulty = 0;
@@ -120,11 +172,6 @@ export class InterceptorAllocation {
       4 // Cap at 4
     );
 
-    debug
-      .module('InterceptorAllocation')
-      .log(
-        `Threat ${threat.id} analysis: priority=${priority}, difficulty=${difficulty.toFixed(2)}, successRate=${successRate}, required=${requiredInterceptors}`
-      );
 
     return {
       threat,
@@ -137,19 +184,21 @@ export class InterceptorAllocation {
   }
 
   private assessBatteries(batteries: IronDomeBattery[], threats: Threat[]): BatteryCapability[] {
-    return batteries.map(battery => {
+    const batteryCapabilities = batteries.map((battery, index) => {
       const coverage = new Set<string>();
       let totalInterceptTime = 0;
       let coverageCount = 0;
+      const interceptorCount = battery.getInterceptorCount();
 
       // Determine which threats this battery can intercept
       for (const threat of threats) {
-        if (battery.canIntercept(threat)) {
+        const canIntercept = battery.canIntercept(threat);
+        if (canIntercept) {
           coverage.add(threat.id);
 
           // Estimate intercept time
           const distance = threat.getPosition().distanceTo(battery.getPosition());
-          const interceptTime = distance / battery.config.interceptorSpeed;
+          const interceptTime = distance / battery.getConfig().interceptorSpeed;
           totalInterceptTime += interceptTime;
           coverageCount++;
         }
@@ -157,12 +206,14 @@ export class InterceptorAllocation {
 
       return {
         battery,
-        availableInterceptors: battery.getInterceptorCount(),
+        availableInterceptors: interceptorCount,
         coverage,
         averageInterceptTime: coverageCount > 0 ? totalInterceptTime / coverageCount : Infinity,
         successRate: this.getBatterySuccessRate(battery),
       };
     });
+    
+    return batteryCapabilities;
   }
 
   private dynamicAllocation(
@@ -219,9 +270,7 @@ export class InterceptorAllocation {
           current - threatMetric.requiredInterceptors
         );
       } else {
-        debug
-          .module('InterceptorAllocation')
-          .log(`Could not allocate threat ${threatMetric.threat.id}: ${skippedReasons.join(', ')}`);
+        // Could not allocate threat
       }
     }
 
@@ -247,7 +296,9 @@ export class InterceptorAllocation {
     score += timeFactor;
 
     // Resource efficiency (0-20)
-    const resourceEfficiency = availableInterceptors / capability.battery.config.maxInterceptors;
+    const batteryConfig = capability.battery.getConfig();
+    const maxInterceptors = batteryConfig.launcherCount || 20; // Use launcher count as max
+    const resourceEfficiency = availableInterceptors / maxInterceptors;
     score += resourceEfficiency * 20;
 
     // Coverage bonus - batteries that can cover fewer threats should prioritize them

@@ -157,6 +157,45 @@ export class SandboxControls {
       'Surround': AttackPattern.SURROUND
     }).name('Pattern');
     
+    // Launcher direction controls
+    const launcherControls = {
+      north: false,
+      south: false,
+      east: false,
+      west: false,
+      attackPattern: 'distributed',
+      
+      updateLaunchers: () => {
+        // Deactivate all first
+        this.config.threatManager.deactivateLauncherDirection('north');
+        this.config.threatManager.deactivateLauncherDirection('south');
+        this.config.threatManager.deactivateLauncherDirection('east');
+        this.config.threatManager.deactivateLauncherDirection('west');
+        
+        // Activate selected directions
+        if (launcherControls.north) this.config.threatManager.activateLauncherDirection('north');
+        if (launcherControls.south) this.config.threatManager.activateLauncherDirection('south');
+        if (launcherControls.east) this.config.threatManager.activateLauncherDirection('east');
+        if (launcherControls.west) this.config.threatManager.activateLauncherDirection('west');
+      }
+    };
+    
+    const launcherFolder = customFolder.addFolder('Launcher Sites');
+    
+    launcherFolder.add(launcherControls, 'attackPattern', {
+      'Concentrated': 'concentrated',
+      'Distributed': 'distributed',
+      'Sequential': 'sequential',
+      'Random': 'random'
+    }).name('Attack Mode').onChange((value: string) => {
+      this.config.threatManager.setLauncherAttackPattern(value as any);
+    });
+    
+    launcherFolder.add(launcherControls, 'north').name('🔴 North').onChange(() => launcherControls.updateLaunchers());
+    launcherFolder.add(launcherControls, 'south').name('🔴 South').onChange(() => launcherControls.updateLaunchers());
+    launcherFolder.add(launcherControls, 'east').name('🔴 East').onChange(() => launcherControls.updateLaunchers());
+    launcherFolder.add(launcherControls, 'west').name('🔴 West').onChange(() => launcherControls.updateLaunchers());
+    
     customFolder.add(manualControls, 'start').name('▶️ Start Attack');
     customFolder.add(manualControls, 'stop').name('⏹️ Stop Attack');
     

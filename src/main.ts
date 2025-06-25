@@ -253,6 +253,17 @@ worldScaleIndicators.optimizeGeometry();
 // battlefieldZones.initialize()
 const battlefieldZones = null;
 
+// Create invisible ground plane for raycasting
+const groundGeometry = new THREE.PlaneGeometry(4000, 4000);
+const groundMaterial = new THREE.MeshBasicMaterial({ 
+  visible: false,
+  side: THREE.DoubleSide 
+});
+const groundMesh = new THREE.Mesh(groundGeometry, groundMaterial);
+groundMesh.rotation.x = -Math.PI / 2;
+groundMesh.position.y = 0;
+scene.add(groundMesh);
+
 // Threat Manager with extended bounds
 const threatManager = new ThreatManager(scene, world);
 // Set extended spawn bounds for threats
@@ -314,16 +325,19 @@ interceptionSystem.setThreatManager(threatManager);
 (window as any).__interceptionSystem = interceptionSystem;
 (window as any).__instancedProjectileRenderer = instancedProjectileRenderer;
 
+
 // Connect all systems
 domePlacementSystem.setInterceptionSystem(interceptionSystem);
 if (radarNetwork) domePlacementSystem.setRadarNetwork(radarNetwork);
 
-// Add all batteries from placement system to interception system
+// Configure all batteries from placement system
+// Note: batteries are already added to interceptionSystem via setInterceptionSystem
 const batteries = domePlacementSystem.getAllBatteries();
 batteries.forEach(battery => {
   battery.setResourceManagement(true);
   if (radarNetwork) battery.setRadarNetwork(radarNetwork);
-  interceptionSystem.addBattery(battery);
+  // Don't add battery again - already added in setInterceptionSystem with proper ID
+  // interceptionSystem.addBattery(battery); // REMOVED - causes duplicate batteries!
   threatManager.registerBattery(battery);
 
   // Apply auto-repair rate based on saved upgrade level
@@ -702,7 +716,8 @@ renderer.domElement.addEventListener('click', event => {
                       threat.getVelocity()
                     );
 
-                    console.log(
+                    debug.category(
+                      'Combat',
                       `Manual intercept blast: ${damage.damageType} damage, ${(damage.killProbability * 100).toFixed(0)}% kill probability`
                     );
 
@@ -726,7 +741,7 @@ renderer.domElement.addEventListener('click', event => {
                     } else if (wasMarked && !damage.hit) {
                       // Failed to destroy - unmark so other interceptors can try
                       threat.unmarkAsBeingIntercepted();
-                      console.log('Manual intercept failed - unmarking threat');
+                      debug.category('Combat', 'Manual intercept failed - unmarking threat');
                       gameState.recordMiss();
                     }
                   }
@@ -750,7 +765,7 @@ renderer.domElement.addEventListener('click', event => {
                 (interceptionSystem as any).interceptors.push(interceptor);
                 (interceptionSystem as any).totalInterceptorsFired =
                   ((interceptionSystem as any).totalInterceptorsFired || 0) + 1;
-                console.log('Manual intercept fired!');
+                debug.category('Combat', 'Manual intercept fired!');
                 interceptorFired = true;
                 break;
               }
@@ -1321,7 +1336,9 @@ function animate() {
 
   profiler.startSection('Frame');
 
-  const deltaTime = clock.getDelta();
+  const rawDeltaTime = clock.getDelta();
+  // Clamp deltaTime to prevent large jumps when tab regains focus
+  const deltaTime = Math.min(rawDeltaTime, 0.1); // Max 100ms per frame
   const currentTime = clock.getElapsedTime();
   const fps = 1 / deltaTime;
 
@@ -1717,7 +1734,7 @@ const urlParams = new URLSearchParams(window.location.search);
 const inspectorMode = urlParams.has('inspector');
 
 if (inspectorMode) {
-  console.log('Inspector mode enabled');
+  debug.log('Inspector mode enabled');
 
   // Create inspector container
   const inspectorContainer = document.createElement('div');

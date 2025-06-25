@@ -30,6 +30,7 @@ export class InterceptionSystem {
   private scene: THREE.Scene;
   private world: CANNON.World;
   private batteries: IronDomeBattery[] = [];
+  private batteryIdMap: Map<IronDomeBattery, string> = new Map();
   private activeInterceptions: Interception[] = [];
   private interceptors: Projectile[] = [];
   private successfulInterceptions: number = 0;
@@ -71,11 +72,25 @@ export class InterceptionSystem {
     this.threatManager = threatManager;
   }
 
-  addBattery(battery: IronDomeBattery): void {
+  addBattery(battery: IronDomeBattery, batteryId?: string): void {
     this.batteries.push(battery);
-    // Register with coordinator using array index as ID for now
-    const batteryId = `battery_${this.batteries.length - 1}`;
-    this.batteryCoordinator.registerBattery(batteryId, battery);
+    // Use provided ID or generate one based on index
+    const id = batteryId || `battery_${this.batteries.length - 1}`;
+    this.batteryIdMap.set(battery, id);
+    this.batteryCoordinator.registerBattery(id, battery);
+  }
+  
+  removeBattery(battery: IronDomeBattery, batteryId?: string): void {
+    const index = this.batteries.indexOf(battery);
+    if (index !== -1) {
+      this.batteries.splice(index, 1);
+      // Get the actual ID from our map
+      const id = batteryId || this.batteryIdMap.get(battery);
+      if (id) {
+        this.batteryCoordinator.unregisterBattery(id);
+        this.batteryIdMap.delete(battery);
+      }
+    }
   }
 
   setProfiler(profiler: Profiler): void {
@@ -103,10 +118,14 @@ export class InterceptionSystem {
 
     // Update batteries with threat information
     if (this.profiler) this.profiler.startSection('Battery Updates');
-    this.batteries.forEach((battery, index) => {
+    
+    this.batteries.forEach((battery) => {
       battery.update(deltaTime, threats);
-      // Update coordinator with current battery status
-      this.batteryCoordinator.updateBatteryStatus(`battery_${index}`);
+      // Update coordinator with current battery status using the correct ID
+      const batteryId = this.batteryIdMap.get(battery);
+      if (batteryId) {
+        this.batteryCoordinator.updateBatteryStatus(batteryId);
+      }
     });
     if (this.profiler) this.profiler.endSection('Battery Updates');
 
@@ -218,10 +237,6 @@ export class InterceptionSystem {
       return;
     }
 
-    debug
-      .module('Interception')
-      .log(`Evaluating ${threats.length} threats with improved algorithms`);
-
     // Filter out threats that are already sufficiently engaged
     const unassignedThreats = threats.filter(t => {
       if (!t.isActive || t.getTimeToImpact() <= 0) return false;
@@ -229,26 +244,13 @@ export class InterceptionSystem {
       const existingCount = this.getInterceptorCount(t);
       const existingAssignment = this.batteryCoordinator.getAssignedInterceptorCount(t.id);
 
-      if (existingCount > 0 || existingAssignment > 0) {
-        debug
-          .module('Interception')
-          .log(
-            `Skipping threat ${t.id}: existingCount=${existingCount}, existingAssignment=${existingAssignment}`
-          );
-      }
-
       // Only engage if no interceptors are currently assigned or in flight
       return existingCount === 0 && existingAssignment === 0;
     });
 
     if (unassignedThreats.length === 0) {
-      debug.module('Interception').log('No unassigned threats to evaluate');
       return;
     }
-
-    debug
-      .module('Interception')
-      .log(`Found ${unassignedThreats.length} unassigned threats out of ${threats.length} total`);
 
     // Use the improved allocation system
     const allocationResult = this.interceptorAllocation.optimizeAllocation(
@@ -256,14 +258,6 @@ export class InterceptionSystem {
       this.batteries
     );
 
-    debug
-      .module('Interception')
-      .log(
-        `Allocation result: ${allocationResult.allocations.size} threats allocated, ${allocationResult.unassignedThreats.length} unassigned`
-      );
-    debug
-      .module('Interception')
-      .log(`Allocation efficiency: ${(allocationResult.efficiency * 100).toFixed(1)}%`);
 
     // Process allocations
     allocationResult.allocations.forEach((allocation, threatId) => {
@@ -276,8 +270,30 @@ export class InterceptionSystem {
       if (!threat) return;
 
       const battery = allocation.battery;
-      const batteryIndex = this.batteries.indexOf(battery);
-      const batteryId = `battery_${batteryIndex}`;
+      // The allocation system returns batteries from the array we passed
+      // But we need to match them with our ID map
+      let batteryId: string | undefined;
+      let actualBattery: IronDomeBattery = battery;
+      
+      // First try direct lookup
+      batteryId = this.batteryIdMap.get(battery);
+      
+      // If not found, find the battery by matching position
+      if (!batteryId) {
+        for (const [mapBattery, mapId] of this.batteryIdMap.entries()) {
+          if (mapBattery === battery || 
+              (mapBattery.getPosition().equals(battery.getPosition()) && 
+               mapBattery.getInterceptorCount() === battery.getInterceptorCount())) {
+            batteryId = mapId;
+            actualBattery = mapBattery;
+            break;
+          }
+        }
+      }
+      
+      if (!batteryId) {
+        return;
+      }
 
       // Fire interceptors with improved targeting
       let interceptorsFired = 0;
@@ -287,7 +303,7 @@ export class InterceptionSystem {
         const leadPrediction = this.predictiveTargeting.calculateLeadPrediction(
           threat,
           battery.getPosition(),
-          battery.config.interceptorSpeed
+          battery.getConfig().interceptorSpeed
         );
 
         // Don't use setTargetPoint - it creates a static target!
@@ -325,13 +341,6 @@ export class InterceptionSystem {
       // Only record assignment if interceptors were actually fired
       if (interceptorsFired > 0) {
         this.batteryCoordinator.assignThreatToBattery(threat.id, batteryId, interceptorsFired);
-        debug
-          .module('Interception')
-          .log(`Assigned ${interceptorsFired} interceptors to threat ${threat.id}`);
-      } else {
-        debug
-          .module('Interception')
-          .log(`Failed to fire interceptors at threat ${threat.id} - no assignment recorded`);
       }
     });
 
@@ -395,8 +404,12 @@ export class InterceptionSystem {
       if (interceptorsToFire > 0) {
         debug.category('Interception', `Firing ${interceptorsToFire} interceptor(s) at threat`);
 
-        const batteryIndex = this.batteries.indexOf(battery);
-        const batteryId = `battery_${batteryIndex}`;
+        const batteryId = this.batteryIdMap.get(battery);
+        
+        if (!batteryId) {
+          debug.module('Interception').warn(`Could not find battery ID for battery in legacy method`);
+          continue;
+        }
 
         this.batteryCoordinator.assignThreatToBattery(threat.id, batteryId, interceptorsToFire);
 
@@ -818,6 +831,7 @@ export class InterceptionSystem {
   setBatteryCoordination(enabled: boolean): void {
     this.batteryCoordinator.setCoordinationEnabled(enabled);
   }
+
 
   getNearestBattery(threat: Threat): IronDomeBattery | null {
     let nearestBattery: IronDomeBattery | null = null;

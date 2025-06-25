@@ -421,6 +421,19 @@ export class Projectile {
   getVelocity(): THREE.Vector3 {
     return new THREE.Vector3(this.body.velocity.x, this.body.velocity.y, this.body.velocity.z);
   }
+  
+  getRotation(): THREE.Euler {
+    // Calculate rotation from velocity vector
+    const velocity = this.getVelocity();
+    const heading = Math.atan2(-velocity.z, velocity.x);
+    const pitch = Math.atan2(velocity.y, Math.sqrt(velocity.x * velocity.x + velocity.z * velocity.z));
+    
+    return new THREE.Euler(pitch, heading, 0);
+  }
+  
+  getScale(): THREE.Vector3 {
+    return this.mesh.scale.clone();
+  }
 
   retarget(newTarget: THREE.Object3D): void {
     // Change target for an interceptor mid-flight
