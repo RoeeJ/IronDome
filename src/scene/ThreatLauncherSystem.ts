@@ -24,6 +24,8 @@ export interface LauncherSite {
 export class ThreatLauncherSystem {
   private launcherSites: Map<string, LauncherSite> = new Map();
   private activeSites: Set<string> = new Set();
+  private lastGlobalFireTime: number = 0;
+  private globalFireDelay: number = 5000; // Minimum 5s between any site firing
   
   // Predefined launcher positions - farther from the city
   private readonly LAUNCHER_POSITIONS = {
@@ -78,26 +80,26 @@ export class ThreatLauncherSystem {
     const launcherTypes = [
       {
         type: ThreatType.QASSAM_1,
-        count: 3,
-        volleySize: { min: 2, max: 5 },
-        volleyDelay: 500,
-        reloadTime: 15000,
+        count: 2,  // Reduced from 3
+        volleySize: { min: 1, max: 3 },  // Reduced from 2-5
+        volleyDelay: 1200,  // Increased from 500ms
+        reloadTime: 30000,  // Increased from 15s to 30s
         spread: 50,
       },
       {
         type: ThreatType.GRAD_ROCKET,
-        count: 2,
-        volleySize: { min: 3, max: 8 },
-        volleyDelay: 300,
-        reloadTime: 20000,
+        count: 1,  // Reduced from 2
+        volleySize: { min: 2, max: 4 },  // Reduced from 3-8
+        volleyDelay: 800,   // Increased from 300ms
+        reloadTime: 45000,  // Increased from 20s to 45s
         spread: 30,
       },
       {
         type: ThreatType.MORTAR,
-        count: 4,
-        volleySize: { min: 1, max: 3 },
-        volleyDelay: 800,
-        reloadTime: 8000,
+        count: 2,  // Reduced from 4
+        volleySize: { min: 1, max: 2 },  // Reduced from 1-3
+        volleyDelay: 1500,  // Increased from 800ms
+        reloadTime: 20000,  // Increased from 8s to 20s
         spread: 20,
       },
     ];
@@ -167,29 +169,46 @@ export class ThreatLauncherSystem {
   getReadyLaunchers(currentTime: number): Array<{launcher: LauncherConfig, site: LauncherSite}> {
     const readyLaunchers: Array<{launcher: LauncherConfig, site: LauncherSite}> = [];
     
+    // Global throttle - prevent any site from firing too soon after another
+    if (currentTime < this.lastGlobalFireTime + this.globalFireDelay) {
+      return readyLaunchers;
+    }
+    
+    // Find sites ready to fire and pick one
+    const readySites: LauncherSite[] = [];
+    
     this.activeSites.forEach(siteId => {
       const site = this.launcherSites.get(siteId);
       if (!site) return;
       
       // Check if site is ready to fire
       if (currentTime >= site.nextFireTime) {
-        // Select random launchers from this site to fire
-        const activeLaunchers = site.launchers.filter(l => l.active);
-        if (activeLaunchers.length > 0) {
-          // Fire 1-3 launchers from this site
-          const launchersToFire = Math.min(1 + Math.floor(Math.random() * 3), activeLaunchers.length);
-          
-          for (let i = 0; i < launchersToFire; i++) {
-            const launcher = activeLaunchers[Math.floor(Math.random() * activeLaunchers.length)];
-            readyLaunchers.push({ launcher, site });
-          }
-          
-          // Update site fire time
-          site.lastFireTime = currentTime;
-          site.nextFireTime = currentTime + 10000 + Math.random() * 20000; // 10-30 seconds between site volleys
-        }
+        readySites.push(site);
       }
     });
+    
+    // Only allow one site to fire at a time
+    if (readySites.length > 0) {
+      const site = readySites[Math.floor(Math.random() * readySites.length)];
+      // Select random launchers from this site to fire
+      const activeLaunchers = site.launchers.filter(l => l.active);
+      if (activeLaunchers.length > 0) {
+        // Fire only 1 launcher from this site at a time
+        const launchersToFire = 1;
+        
+        for (let i = 0; i < launchersToFire; i++) {
+          const launcher = activeLaunchers[Math.floor(Math.random() * activeLaunchers.length)];
+          readyLaunchers.push({ launcher, site });
+        }
+        
+        // Update site fire time
+        site.lastFireTime = currentTime;
+        site.nextFireTime = currentTime + 20000 + Math.random() * 40000; // 20-60 seconds between site volleys
+        
+        // Update global fire time
+        this.lastGlobalFireTime = currentTime;
+      }
+    }
     
     return readyLaunchers;
   }

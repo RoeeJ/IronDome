@@ -461,14 +461,22 @@ export class ThreatManager extends EventEmitter {
   }
   
   private fireVolleyFromLauncher(launcher: LauncherConfig, site: LauncherSite): void {
-    // Determine volley size
-    const volleySize = launcher.volleySize.min + 
+    // Check threat limit before starting volley
+    const remainingCapacity = 50 - this.threats.length;
+    if (remainingCapacity <= 0) return;
+    
+    // Determine volley size, but limit by remaining capacity
+    const desiredSize = launcher.volleySize.min + 
       Math.floor(Math.random() * (launcher.volleySize.max - launcher.volleySize.min + 1));
+    const volleySize = Math.min(desiredSize, remainingCapacity, 5); // Cap at 5 per volley max
     
     // Fire the volley with staggered timing
     for (let i = 0; i < volleySize; i++) {
       setTimeout(() => {
-        this.spawnThreatFromLauncher(launcher, site);
+        // Double-check limit before each spawn
+        if (this.threats.length < 50) {
+          this.spawnThreatFromLauncher(launcher, site);
+        }
       }, i * launcher.volleyDelay);
     }
   }
@@ -1377,6 +1385,12 @@ export class ThreatManager extends EventEmitter {
 
   // Spawn a salvo of threats
   spawnSalvo(size: number, type: string = 'mixed'): void {
+    // Limit salvo size based on current threat count
+    const maxSalvoSize = Math.max(1, 50 - this.threats.length);
+    const actualSize = Math.min(size, maxSalvoSize, 8); // Cap salvos at 8 max
+    
+    if (actualSize <= 0) return;
+    
     // Performance optimization: batch spawn threats without individual timers
     const startTime = Date.now();
 
@@ -1412,11 +1426,11 @@ export class ThreatManager extends EventEmitter {
 
     // Pre-allocate threat configs
     const salvoThreats: Array<{ type: ThreatType; delay: number }> = [];
-    for (let i = 0; i < size; i++) {
+    for (let i = 0; i < actualSize; i++) {
       const threatType = possibleTypes[Math.floor(Math.random() * possibleTypes.length)];
       salvoThreats.push({
         type: threatType,
-        delay: i * 0.2, // 200ms delay between each
+        delay: i * 0.5, // 500ms delay between each (increased from 200ms)
       });
     }
 

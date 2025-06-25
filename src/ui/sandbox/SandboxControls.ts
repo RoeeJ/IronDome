@@ -73,8 +73,8 @@ export class SandboxControls {
     
     const actions = {
       launchAttack: () => {
-        this.config.threatManager.spawnSalvo(10, 'mixed');
-        this.config.showNotification('Incoming attack! 10 threats launched');
+        this.config.threatManager.spawnSalvo(5, 'mixed');
+        this.config.showNotification('Incoming attack! 5 threats launched');
       },
       
       clearSkies: () => {

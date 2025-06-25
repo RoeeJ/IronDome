@@ -130,11 +130,11 @@ export class AttackParameterConverter {
       case AttackIntensity.LIGHT:
         return { chance: 0.1, minSize: 2, maxSize: 3 };
       case AttackIntensity.MODERATE:
-        return { chance: 0.3, minSize: 3, maxSize: 5 };
+        return { chance: 0.2, minSize: 2, maxSize: 4 };  // Reduced from 3-5
       case AttackIntensity.HEAVY:
-        return { chance: 0.5, minSize: 5, maxSize: 8 };
+        return { chance: 0.3, minSize: 3, maxSize: 5 };   // Reduced from 5-8
       case AttackIntensity.EXTREME:
-        return { chance: 0.7, minSize: 8, maxSize: 15 };
+        return { chance: 0.4, minSize: 4, maxSize: 8 };   // Reduced from 8-15
     }
   }
   
