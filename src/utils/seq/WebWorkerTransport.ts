@@ -254,12 +254,19 @@ export class WebWorkerTransport {
     }
 
     if (this.worker) {
-      // Send to worker for processing
-      const message: WorkerMessage = {
-        type: 'log',
-        events: [seqEvent]
-      };
-      this.worker.postMessage(message);
+      // Send to worker for processing - but batch locally first to avoid too many messages
+      this.logBuffer.push(seqEvent);
+      if (this.logBuffer.length >= this.config.batchSize) {
+        const batch = [...this.logBuffer];
+        this.logBuffer = [];
+        const message: WorkerMessage = {
+          type: 'log',
+          events: batch
+        };
+        this.worker.postMessage(message);
+      } else {
+        this.scheduleBatch();
+      }
     } else {
       // Fallback to main thread batching
       this.logBuffer.push(seqEvent);
@@ -348,7 +355,7 @@ export class WebWorkerTransport {
 
     if (this.worker) {
       const message: WorkerMessage = {
-        type: 'batch',
+        type: 'log', // Use 'log' type for consistency
         events: batch
       };
       this.worker.postMessage(message);

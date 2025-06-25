@@ -32,6 +32,13 @@ export class MobileInputManager {
   private onSwipeCallback?: (direction: THREE.Vector2, velocity: number) => void;
   private onLongPressCallback?: (position: THREE.Vector2) => void;
 
+  // Bound event handlers for proper cleanup
+  private boundOnTouchStart: (event: TouchEvent) => void;
+  private boundOnTouchMove: (event: TouchEvent) => void;
+  private boundOnTouchEnd: (event: TouchEvent) => void;
+  private boundOnTouchCancel: (event: TouchEvent) => void;
+  private boundOnDeviceOrientation: (event: DeviceOrientationEvent) => void;
+
   // Settings
   private tapMaxDuration = 300; // ms
   private tapMaxDistance = 10; // pixels
@@ -48,6 +55,13 @@ export class MobileInputManager {
     this.camera = camera;
     this.controls = controls;
     this.domElement = domElement;
+
+    // Bind event handlers for proper cleanup
+    this.boundOnTouchStart = this.onTouchStart.bind(this);
+    this.boundOnTouchMove = this.onTouchMove.bind(this);
+    this.boundOnTouchEnd = this.onTouchEnd.bind(this);
+    this.boundOnTouchCancel = this.onTouchCancel.bind(this);
+    this.boundOnDeviceOrientation = this.onDeviceOrientation.bind(this);
 
     // Check device capabilities
     this.supportsTouch = 'ontouchstart' in window;
@@ -83,14 +97,14 @@ export class MobileInputManager {
   private setupEventListeners() {
     if (this.supportsTouch) {
       // Touch events
-      this.domElement.addEventListener('touchstart', this.onTouchStart.bind(this), {
+      this.domElement.addEventListener('touchstart', this.boundOnTouchStart, {
         passive: false,
       });
-      this.domElement.addEventListener('touchmove', this.onTouchMove.bind(this), {
+      this.domElement.addEventListener('touchmove', this.boundOnTouchMove, {
         passive: false,
       });
-      this.domElement.addEventListener('touchend', this.onTouchEnd.bind(this), { passive: false });
-      this.domElement.addEventListener('touchcancel', this.onTouchCancel.bind(this), {
+      this.domElement.addEventListener('touchend', this.boundOnTouchEnd, { passive: false });
+      this.domElement.addEventListener('touchcancel', this.boundOnTouchCancel, {
         passive: false,
       });
     }
@@ -299,14 +313,14 @@ export class MobileInputManager {
       return false;
     }
 
-    window.addEventListener('deviceorientation', this.onDeviceOrientation.bind(this));
+    window.addEventListener('deviceorientation', this.boundOnDeviceOrientation);
     this.gyroscopeActive = true;
     debug.log('Gyroscope controls enabled');
     return true;
   }
 
   public disableGyroscope() {
-    window.removeEventListener('deviceorientation', this.onDeviceOrientation.bind(this));
+    window.removeEventListener('deviceorientation', this.boundOnDeviceOrientation);
     this.gyroscopeActive = false;
     debug.log('Gyroscope controls disabled');
   }
@@ -338,14 +352,20 @@ export class MobileInputManager {
 
   public dispose() {
     if (this.supportsTouch) {
-      this.domElement.removeEventListener('touchstart', this.onTouchStart.bind(this));
-      this.domElement.removeEventListener('touchmove', this.onTouchMove.bind(this));
-      this.domElement.removeEventListener('touchend', this.onTouchEnd.bind(this));
-      this.domElement.removeEventListener('touchcancel', this.onTouchCancel.bind(this));
+      this.domElement.removeEventListener('touchstart', this.boundOnTouchStart);
+      this.domElement.removeEventListener('touchmove', this.boundOnTouchMove);
+      this.domElement.removeEventListener('touchend', this.boundOnTouchEnd);
+      this.domElement.removeEventListener('touchcancel', this.boundOnTouchCancel);
     }
 
     if (this.gyroscopeActive) {
       this.disableGyroscope();
     }
+
+    // Clear references to prevent memory leaks
+    this.touches.clear();
+    this.onTapCallback = undefined;
+    this.onSwipeCallback = undefined;
+    this.onLongPressCallback = undefined;
   }
 }

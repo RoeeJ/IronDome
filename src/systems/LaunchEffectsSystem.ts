@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { GeometryFactory } from '@/utils/GeometryFactory';
 import { MaterialCache } from '@/utils/MaterialCache';
+import { TextureCache } from '@/utils/TextureCache';
 // import { debug } from '@/utils/logger'; // Uncomment to enable debug logging
 
 export interface LaunchEffectConfig {
@@ -20,7 +21,7 @@ export class LaunchEffectsSystem {
   private effectCooldown: number = 100; // Increased cooldown to reduce particle creation
   private geometryFactory = GeometryFactory.getInstance();
   private materialCache = MaterialCache.getInstance();
-  private smokeTexture: THREE.Texture | null = null;
+  private textureCache = TextureCache.getInstance();
   private activeScorchMarks: Map<string, { mesh: THREE.Mesh; material: THREE.Material }> =
     new Map();
 
@@ -179,15 +180,16 @@ export class LaunchEffectsSystem {
     geometry.setAttribute('lifetime', new THREE.BufferAttribute(lifetimes, 1));
     geometry.setAttribute('size', new THREE.BufferAttribute(sizes, 1));
 
-    // Create smoke texture only once
-    if (!this.smokeTexture) {
-      this.smokeTexture = this.createSmokeTexture();
-    }
+    // Use cached smoke texture to prevent shader program explosion
+    const smokeTexture = this.textureCache.getParticleTexture(64, {
+      inner: 'rgba(100,100,100,0.8)',
+      outer: 'rgba(100,100,100,0)'
+    });
 
     const material = this.materialCache.getPointsMaterial({
       size: config.smokeCloudSize,
       color: 0x888888,
-      map: this.smokeTexture,
+      map: smokeTexture,
       transparent: true,
       opacity: 0.7,
       depthWrite: false,
@@ -246,14 +248,13 @@ export class LaunchEffectsSystem {
   private createGroundDust(position: THREE.Vector3, config: LaunchEffectConfig): void {
     // Create expanding dust ring using cached geometry
     const ringGeometry = this.geometryFactory.getRing(1, config.dustRadius, 16, 1);
-    // Clone material for independent opacity animation
-    const baseMaterial = this.materialCache.getMeshBasicMaterial({
+    // Use shared material - visual artifacts from shared opacity are acceptable for performance
+    const ringMaterial = this.materialCache.getMeshBasicMaterial({
       color: 0x8b7355,
       opacity: 0.6,
       transparent: true,
       side: THREE.DoubleSide,
     });
-    const ringMaterial = baseMaterial.clone();
 
     const ring = new THREE.Mesh(ringGeometry, ringMaterial);
     ring.rotation.x = -Math.PI / 2;
@@ -303,7 +304,7 @@ export class LaunchEffectsSystem {
         if (elapsed > 1.5) {
           this.scene.remove(ring);
           this.scene.remove(dustPoints);
-          ringMaterial.dispose(); // Dispose cloned material
+          // Don't dispose shared material
           dustGeometry.dispose();
           // debug.category('LaunchEffects', `Removed dust ring from ${position.x.toFixed(1)}, ${position.z.toFixed(1)}`);
           return false;
@@ -336,13 +337,12 @@ export class LaunchEffectsSystem {
 
   private createScorchMark(position: THREE.Vector3, config: LaunchEffectConfig): void {
     const geometry = this.geometryFactory.getCircle(config.scorchMarkRadius, 16);
-    // Clone material for independent opacity animation
-    const baseMaterial = this.materialCache.getMeshBasicMaterial({
+    // Use shared material - visual artifacts from shared opacity are acceptable for performance
+    const material = this.materialCache.getMeshBasicMaterial({
       color: 0x222222,
       opacity: 0.7,
       transparent: true,
     });
-    const material = baseMaterial.clone();
 
     const scorch = new THREE.Mesh(geometry, material);
     scorch.rotation.x = -Math.PI / 2;
@@ -367,7 +367,7 @@ export class LaunchEffectsSystem {
         const elapsed = (Date.now() - startTime) / 1000;
         if (elapsed > 10) {
           this.scene.remove(scorch);
-          material.dispose(); // Dispose cloned material
+          // Don't dispose shared material
           this.activeScorchMarks.delete(scorchId);
           // debug.category('LaunchEffects',
           //   `Removed scorch mark ${scorchId} from ${position.x.toFixed(
@@ -390,24 +390,6 @@ export class LaunchEffectsSystem {
     this.activeEffects.push(effect);
   }
 
-  private createSmokeTexture(): THREE.Texture {
-    const canvas = document.createElement('canvas');
-    canvas.width = 64;
-    canvas.height = 64;
-    const ctx = canvas.getContext('2d')!;
-
-    const gradient = ctx.createRadialGradient(32, 32, 0, 32, 32, 32);
-    gradient.addColorStop(0, 'rgba(100,100,100,0.8)');
-    gradient.addColorStop(0.4, 'rgba(100,100,100,0.4)');
-    gradient.addColorStop(1, 'rgba(100,100,100,0)');
-
-    ctx.fillStyle = gradient;
-    ctx.fillRect(0, 0, 64, 64);
-
-    const texture = new THREE.CanvasTexture(canvas);
-    texture.needsUpdate = true;
-    return texture;
-  }
 
   update(): void {
     // Update all active effects

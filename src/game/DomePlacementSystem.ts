@@ -10,6 +10,7 @@ import { InvisibleRadarSystem } from '../scene/InvisibleRadarSystem';
 import { InstancedOBJDomeRenderer } from '../rendering/InstancedOBJDomeRenderer';
 import { OBJLoader } from 'three/examples/jsm/loaders/OBJLoader.js';
 import { debug } from '../utils/logger';
+import { MaterialCache } from '../utils/MaterialCache';
 
 export interface PlacedDome {
   id: string;
@@ -46,8 +47,8 @@ export class DomePlacementSystem {
     this.gameState = GameState.getInstance();
     this.resourceManager = ResourceManager.getInstance();
 
-    // Create placement materials
-    this.validPlacementMaterial = new THREE.MeshStandardMaterial({
+    // Create placement materials (SHARED)
+    this.validPlacementMaterial = MaterialCache.getInstance().getMeshStandardMaterial({
       color: 0x0038b8,
       transparent: true,
       opacity: 0.5,
@@ -55,7 +56,7 @@ export class DomePlacementSystem {
       emissiveIntensity: 0.3,
     });
 
-    this.invalidPlacementMaterial = new THREE.MeshStandardMaterial({
+    this.invalidPlacementMaterial = MaterialCache.getInstance().getMeshStandardMaterial({
       color: 0xff0000,
       transparent: true,
       opacity: 0.5,
@@ -161,7 +162,7 @@ export class DomePlacementSystem {
   private createRangePreview(): void {
     // Create range indicator ring - updated for city-wide coverage
     const geometry = new THREE.RingGeometry(998, 1002, 64); // 1000m range
-    const material = new THREE.MeshBasicMaterial({
+    const material = MaterialCache.getInstance().getMeshBasicMaterial({
       color: 0x0038b8,
       transparent: true,
       opacity: 0.2,
@@ -518,7 +519,7 @@ export class DomePlacementSystem {
 
   private addLevelIndicator(battery: IronDomeBattery, level: number): void {
     const geometry = new THREE.RingGeometry(15, 18, 32);
-    const material = new THREE.MeshBasicMaterial({
+    const material = MaterialCache.getInstance().getMeshBasicMaterial({
       color: level >= 3 ? 0xffff00 : 0x0095ff,
       transparent: true,
       opacity: 0.5,
@@ -536,7 +537,7 @@ export class DomePlacementSystem {
   private addRangeIndicator(battery: IronDomeBattery): void {
     const config = battery.getConfig();
     const geometry = new THREE.RingGeometry(config.maxRange - 2, config.maxRange, 64);
-    const material = new THREE.MeshBasicMaterial({
+    const material = MaterialCache.getInstance().getMeshBasicMaterial({
       color: 0x0038b8,
       transparent: true,
       opacity: 0.1,

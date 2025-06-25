@@ -39,6 +39,32 @@ export class ThreatManager extends EventEmitter {
   private impactMarkers: THREE.Mesh[] = [];
   private launchEffects: LaunchEffectsSystem;
   private batteries: IronDomeBattery[] = [];
+
+  // Memory management limits to prevent WebGL crashes
+  private static readonly MAX_THREATS = 50;
+  private static readonly MAX_IMPACT_MARKERS = 25;
+
+  private cleanupOldestThreat(): void {
+    if (this.threats.length >= ThreatManager.MAX_THREATS) {
+      const oldestThreat = this.threats.shift();
+      if (oldestThreat) {
+        debug.warn(`[ThreatManager] Removing oldest threat to prevent memory overflow (${this.threats.length} active)`);
+        oldestThreat.destroy(this.scene, this.world);
+      }
+    }
+  }
+
+  private cleanupOldestImpactMarker(): void {
+    if (this.impactMarkers.length >= ThreatManager.MAX_IMPACT_MARKERS) {
+      const oldestMarker = this.impactMarkers.shift();
+      if (oldestMarker) {
+        debug.warn(`[ThreatManager] Removing oldest impact marker to prevent memory overflow (${this.impactMarkers.length} active)`);
+        this.scene.remove(oldestMarker);
+        if (oldestMarker.geometry) oldestMarker.geometry.dispose();
+        // Don't dispose material - it's shared from MaterialCache
+      }
+    }
+  }
   private salvoChance: number = 0.3; // Default 30% chance
   private explosionManager: ExplosionManager;
   private activeCraters: Map<
@@ -535,6 +561,7 @@ export class ThreatManager extends EventEmitter {
       velocity,
       targetPosition,
     });
+    this.cleanupOldestThreat();
     this.threats.push(threat);
     
     // Play launch sound - check if it's a valid threat type for sound
@@ -731,7 +758,8 @@ export class ThreatManager extends EventEmitter {
         targetPosition,
       });
 
-      this.threats.push(threat);
+      this.cleanupOldestThreat();
+    this.threats.push(threat);
       this.addImpactMarker(threat);
 
       // Play threat incoming sound
@@ -804,6 +832,7 @@ export class ThreatManager extends EventEmitter {
     marker.userData = { threat, createdAt: Date.now() };
 
     this.scene.add(marker);
+    this.cleanupOldestImpactMarker();
     this.impactMarkers.push(marker);
   }
 
@@ -1648,5 +1677,49 @@ export class ThreatManager extends EventEmitter {
    */
   deactivateLauncherDirection(direction: 'north' | 'south' | 'east' | 'west'): void {
     this.launcherSystem.deactivateDirection(direction);
+  }
+
+  /**
+   * Emergency cleanup to prevent WebGL crashes
+   * Removes oldest 50% of objects when memory is critical
+   */
+  public emergencyCleanup(): void {
+    debug.warn('[ThreatManager] Emergency cleanup - removing oldest 50% of objects');
+    
+    // Remove oldest 50% of threats
+    const threatsToRemove = Math.floor(this.threats.length * 0.5);
+    for (let i = 0; i < threatsToRemove; i++) {
+      const threat = this.threats.shift();
+      if (threat) {
+        threat.destroy(this.scene, this.world);
+      }
+    }
+
+    // Remove oldest 50% of impact markers
+    const markersToRemove = Math.floor(this.impactMarkers.length * 0.5);
+    for (let i = 0; i < markersToRemove; i++) {
+      const marker = this.impactMarkers.shift();
+      if (marker) {
+        this.scene.remove(marker);
+        if (marker.geometry) marker.geometry.dispose();
+      }
+    }
+
+    // Clear old craters (keep only 5 newest)
+    const craterKeys = Array.from(this.activeCraters.keys());
+    const cratersToRemove = craterKeys.slice(0, -5);
+    cratersToRemove.forEach(key => {
+      const crater = this.activeCraters.get(key);
+      if (crater) {
+        this.scene.remove(crater.mesh);
+        if (crater.timeout) clearTimeout(crater.timeout);
+        if (crater.animationId) cancelAnimationFrame(crater.animationId);
+        if (crater.mesh.geometry) crater.mesh.geometry.dispose();
+        if (crater.material) crater.material.dispose();
+        this.activeCraters.delete(key);
+      }
+    });
+
+    debug.warn(`[ThreatManager] Emergency cleanup complete: ${this.threats.length} threats, ${this.impactMarkers.length} markers, ${this.activeCraters.size} craters remaining`);
   }
 }

@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { IronDomeBattery } from '../entities/IronDomeBattery';
 import * as BufferGeometryUtils from 'three/examples/jsm/utils/BufferGeometryUtils.js';
+import { MaterialCache } from '../utils/MaterialCache';
 
 export class InstancedDomeRenderer {
   private scene: THREE.Scene;
@@ -45,14 +46,15 @@ export class InstancedDomeRenderer {
     tubeGeometries.forEach(g => g.dispose());
     tubeGeo.dispose();
 
-    // Create materials (shared by all instances)
-    const baseMaterial = new THREE.MeshStandardMaterial({
+    // Use cached materials to prevent shader recompilation
+    const materialCache = MaterialCache.getInstance();
+    const baseMaterial = materialCache.getMeshStandardMaterial({
       color: 0x4a5568,
       metalness: 0.7,
       roughness: 0.3,
     });
 
-    const domeMaterial = new THREE.MeshStandardMaterial({
+    const domeMaterial = materialCache.getMeshEmissiveMaterial({
       color: 0x0038b8,
       metalness: 0.3,
       roughness: 0.7,
@@ -67,7 +69,7 @@ export class InstancedDomeRenderer {
 
     this.launcherBaseMesh = new THREE.InstancedMesh(
       launcherBaseGeometry,
-      baseMaterial.clone(),
+      baseMaterial, // Use same material instead of cloning
       maxDomes
     );
     this.launcherBaseMesh.castShadow = true;
@@ -76,7 +78,7 @@ export class InstancedDomeRenderer {
     this.radarDomeMesh.castShadow = true;
 
     // Create instanced launcher tubes
-    const tubesMaterial = new THREE.MeshStandardMaterial({
+    const tubesMaterial = materialCache.getMeshStandardMaterial({
       color: 0x666666,
       metalness: 0.7,
       roughness: 0.3,

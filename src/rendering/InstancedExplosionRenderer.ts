@@ -1,4 +1,6 @@
 import * as THREE from 'three';
+import { MaterialCache } from '../utils/MaterialCache';
+import { TextureCache } from '../utils/TextureCache';
 
 interface ExplosionInstance {
   id: string;
@@ -35,39 +37,39 @@ export class InstancedExplosionRenderer {
   // Launch effect style animations
   private activeEffects: Array<{ update: () => boolean }> = [];
 
-  private cachedSmokeTexture: THREE.Texture | null = null;
+  private textureCache = TextureCache.getInstance();
   constructor(scene: THREE.Scene, maxExplosions: number = 100) {
     this.scene = scene;
     this.maxExplosions = maxExplosions;
 
-    // Create gradient material with emissive glow
-    this.explosionMaterial = new THREE.MeshBasicMaterial({
-      color: 0xffaa00, // Orange base
+    // Use cached materials to prevent shader recompilation
+    const materialCache = MaterialCache.getInstance();
+    
+    this.explosionMaterial = materialCache.getMeshBasicMaterial({
+      color: 0xffaa00,
       transparent: true,
       opacity: 0.9,
       side: THREE.DoubleSide,
       depthWrite: false,
-      blending: THREE.AdditiveBlending, // Additive for bright explosion
-    }) as any;
+      blending: THREE.AdditiveBlending,
+    });
 
-    // Create simple flash material
-    this.flashMaterial = new THREE.MeshBasicMaterial({
+    this.flashMaterial = materialCache.getMeshBasicMaterial({
       color: 0xffffdd,
       transparent: true,
       opacity: 1.0,
       side: THREE.DoubleSide,
       depthWrite: false,
-      blending: THREE.AdditiveBlending, // Additive for bright flash
-    }) as any;
+      blending: THREE.AdditiveBlending,
+    });
 
-    // Simple smoke material
-    this.smokeMaterial = new THREE.MeshBasicMaterial({
-      color: 0x555555, // Medium gray smoke
+    this.smokeMaterial = materialCache.getMeshBasicMaterial({
+      color: 0x555555,
       transparent: true,
       opacity: 0.6,
       depthWrite: false,
       side: THREE.DoubleSide,
-    }) as any;
+    });
 
     // Create geometries with reduced complexity
     const sphereGeometry = new THREE.SphereGeometry(1, 8, 6); // Reduced from 16x8
@@ -348,18 +350,16 @@ export class InstancedExplosionRenderer {
     // Reuse smoke texture if possible
     const smokeTexture = this.getSmokeTexture();
 
-    const material = new THREE.PointsMaterial({
+    const material = MaterialCache.getInstance().getPointsMaterial({
       size: 12,
-      color: 0x444444, // Darker smoke
-      map: smokeTexture,
+      color: 0x444444,
       transparent: true,
-      opacity: 0.4, // Lower initial opacity
+      opacity: 0.4,
       depthWrite: false,
-      depthTest: true,
       blending: THREE.NormalBlending,
       sizeAttenuation: true,
-      vertexColors: false,
     });
+    material.map = smokeTexture; // Set texture after getting from cache
 
     const points = new THREE.Points(geometry, material);
     points.renderOrder = 0; // Render smoke particles behind everything
@@ -418,8 +418,8 @@ export class InstancedExplosionRenderer {
   private createGroundDustRing(position: THREE.Vector3, quality: number): void {
     // Just create expanding dust ring without particles (reduced size)
     const ringGeometry = new THREE.RingGeometry(0.5, 3 + quality * 2, 16, 1);
-    // Clone material so each ring can fade independently
-    const ringMaterial = new THREE.MeshBasicMaterial({
+    // Use cached material - rings will share opacity but that's OK for performance
+    const ringMaterial = MaterialCache.getInstance().getMeshBasicMaterial({
       color: 0x8b7355,
       opacity: 0.4,
       transparent: true,
@@ -463,30 +463,11 @@ export class InstancedExplosionRenderer {
     this.activeEffects.push(effect);
   }
 
-  private createSmokeTexture(): THREE.Texture {
-    const canvas = document.createElement('canvas');
-    canvas.width = 64;
-    canvas.height = 64;
-    const ctx = canvas.getContext('2d')!;
-
-    const gradient = ctx.createRadialGradient(32, 32, 0, 32, 32, 32);
-    gradient.addColorStop(0, 'rgba(100,100,100,0.8)');
-    gradient.addColorStop(0.4, 'rgba(100,100,100,0.4)');
-    gradient.addColorStop(1, 'rgba(100,100,100,0)');
-
-    ctx.fillStyle = gradient;
-    ctx.fillRect(0, 0, 64, 64);
-
-    const texture = new THREE.CanvasTexture(canvas);
-    texture.needsUpdate = true;
-    return texture;
-  }
-
   private getSmokeTexture(): THREE.Texture {
-    if (!this.cachedSmokeTexture) {
-      this.cachedSmokeTexture = this.createSmokeTexture();
-    }
-    return this.cachedSmokeTexture;
+    return this.textureCache.getParticleTexture(64, {
+      inner: 'rgba(100,100,100,0.8)',
+      outer: 'rgba(100,100,100,0)'
+    });
   }
 
   // Debug method to clean up any leftover dust rings

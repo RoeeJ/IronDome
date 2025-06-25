@@ -1,5 +1,7 @@
 import * as THREE from 'three';
 import * as CANNON from 'cannon-es';
+import { GeometryFactory } from '../utils/GeometryFactory';
+import { MaterialCache } from '../utils/MaterialCache';
 
 interface DebrisParticle {
   mesh: THREE.Mesh;
@@ -19,15 +21,15 @@ export class DebrisSystem {
     this.scene = scene;
     this.world = world;
 
-    // Create reusable geometry
-    this.debrisGeometry = new THREE.BoxGeometry(0.3, 0.3, 0.3);
+    // Create reusable geometry (SHARED)
+    this.debrisGeometry = GeometryFactory.getInstance().getBox(0.3, 0.3, 0.3);
 
-    // Create variety of debris materials
+    // Create variety of debris materials (SHARED)
     this.debrisMaterials = [
-      new THREE.MeshStandardMaterial({ color: 0x444444, roughness: 0.9 }),
-      new THREE.MeshStandardMaterial({ color: 0x666666, roughness: 0.8 }),
-      new THREE.MeshStandardMaterial({ color: 0x333333, roughness: 0.95 }),
-      new THREE.MeshStandardMaterial({ color: 0x555555, roughness: 0.85 }),
+      MaterialCache.getInstance().getMeshStandardMaterial({ color: 0x444444, roughness: 0.9 }),
+      MaterialCache.getInstance().getMeshStandardMaterial({ color: 0x666666, roughness: 0.8 }),
+      MaterialCache.getInstance().getMeshStandardMaterial({ color: 0x333333, roughness: 0.95 }),
+      MaterialCache.getInstance().getMeshStandardMaterial({ color: 0x555555, roughness: 0.85 }),
     ];
   }
 

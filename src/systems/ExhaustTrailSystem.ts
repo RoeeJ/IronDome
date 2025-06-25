@@ -1,4 +1,6 @@
 import * as THREE from 'three';
+import { MaterialCache } from '../utils/MaterialCache';
+import { TextureCache } from '../utils/TextureCache';
 
 export interface ExhaustTrailConfig {
   particleCount: number;
@@ -78,69 +80,31 @@ export class ExhaustTrailSystem {
     this.particleGeometry.setAttribute('size', new THREE.BufferAttribute(this.sizes, 1));
     this.particleGeometry.setAttribute('opacity', new THREE.BufferAttribute(this.opacities, 1));
 
-    // Create material with custom vertex colors
-    this.particleMaterial = new THREE.PointsMaterial({
+    // Use cached material instead of creating new one with shader modifications
+    this.particleMaterial = MaterialCache.getInstance().getPointsMaterial({
       size: this.config.particleSize,
+      color: 0xffffff,
       vertexColors: true,
       blending: THREE.AdditiveBlending,
       transparent: true,
       depthWrite: false,
       sizeAttenuation: true,
-      map: this.createParticleTexture(),
     });
 
-    // Custom shader to handle per-particle opacity
-    this.particleMaterial.onBeforeCompile = shader => {
-      shader.vertexShader = shader.vertexShader.replace(
-        '#include <color_pars_vertex>',
-        `#include <color_pars_vertex>
-        attribute float opacity;
-        varying float vOpacity;`
-      );
+    // Set texture from shared cache
+    this.particleMaterial.map = TextureCache.getInstance().getParticleTexture(64, {
+      inner: 'rgba(255,255,255,1)',
+      outer: 'rgba(255,200,100,0)'
+    });
 
-      shader.vertexShader = shader.vertexShader.replace(
-        '#include <color_vertex>',
-        `#include <color_vertex>
-        vOpacity = opacity;`
-      );
-
-      shader.fragmentShader = shader.fragmentShader.replace(
-        '#include <color_pars_fragment>',
-        `#include <color_pars_fragment>
-        varying float vOpacity;`
-      );
-
-      shader.fragmentShader = shader.fragmentShader.replace(
-        'gl_FragColor = vec4( outgoingLight, diffuseColor.a );',
-        'gl_FragColor = vec4( outgoingLight, diffuseColor.a * vOpacity );'
-      );
-    };
+    // NOTE: Removed onBeforeCompile to prevent unique shader creation
+    // Opacity will be handled through vertex colors instead
 
     this.particleSystem = new THREE.Points(this.particleGeometry, this.particleMaterial);
     this.particleSystem.frustumCulled = true; // Enable frustum culling
     this.scene.add(this.particleSystem);
   }
 
-  private createParticleTexture(): THREE.Texture {
-    const canvas = document.createElement('canvas');
-    canvas.width = 64;
-    canvas.height = 64;
-    const context = canvas.getContext('2d')!;
-
-    // Create gradient particle
-    const gradient = context.createRadialGradient(32, 32, 0, 32, 32, 32);
-    gradient.addColorStop(0, 'rgba(255,255,255,1)');
-    gradient.addColorStop(0.2, 'rgba(255,255,255,0.8)');
-    gradient.addColorStop(0.4, 'rgba(255,200,100,0.6)');
-    gradient.addColorStop(1, 'rgba(255,200,100,0)');
-
-    context.fillStyle = gradient;
-    context.fillRect(0, 0, 64, 64);
-
-    const texture = new THREE.CanvasTexture(canvas);
-    texture.needsUpdate = true;
-    return texture;
-  }
 
   emit(
     position: THREE.Vector3,

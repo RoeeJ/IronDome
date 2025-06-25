@@ -446,7 +446,7 @@ export class WorldScaleIndicators {
     geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));
     geometry.setAttribute('size', new THREE.BufferAttribute(sizes, 1));
 
-    const material = new THREE.PointsMaterial({
+    const material = MaterialCache.getInstance().getPointsMaterial({
       size: 2,
       vertexColors: true,
       transparent: true,

@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { TextureCache } from '../utils/TextureCache.ts';
 
 export class RenderingOptimizer {
     constructor(scene, renderer, camera) {
@@ -291,16 +292,12 @@ export class UIBatchRenderer {
     }
     
     createUITexture() {
-        const canvas = document.createElement('canvas');
-        canvas.width = 256;
-        canvas.height = 256;
-        const ctx = canvas.getContext('2d');
-        
-        // Draw health bar template
-        ctx.fillStyle = 'rgba(255, 0, 0, 0.8)';
-        ctx.fillRect(0, 0, 256, 32);
-        
-        return new THREE.CanvasTexture(canvas);
+        // Use shared texture cache to prevent shader program explosion
+        const textureCache = TextureCache.getInstance();
+        return textureCache.getParticleTexture(256, {
+            inner: 'rgba(255, 0, 0, 0.8)',
+            outer: 'rgba(255, 0, 0, 0.4)'
+        });
     }
     
     addHealthBar(entity) {

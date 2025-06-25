@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { MaterialCache } from '../utils/MaterialCache';
 
 interface DebrisInstance {
   id: string;
@@ -29,8 +30,8 @@ export class InstancedDebrisRenderer {
     // Create geometry for debris (small boxes)
     const geometry = new THREE.BoxGeometry(0.3, 0.3, 0.3);
 
-    // Create material
-    const material = new THREE.MeshStandardMaterial({
+    // Use cached material
+    const material = MaterialCache.getInstance().getMeshStandardMaterial({
       color: 0x444444,
       roughness: 0.9,
       metalness: 0.1,

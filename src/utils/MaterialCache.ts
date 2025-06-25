@@ -61,8 +61,9 @@ export class MaterialCache {
     side?: THREE.Side;
     depthWrite?: boolean;
     blending?: THREE.Blending;
+    map?: THREE.Texture;
   }): THREE.MeshBasicMaterial {
-    const key = `basic_${properties.color ?? 0}_${properties.transparent ?? false}_${properties.opacity ?? 1}_${properties.visible ?? true}_${properties.side ?? THREE.FrontSide}_${properties.depthWrite ?? true}_${properties.blending ?? THREE.NormalBlending}`;
+    const key = `basic_${properties.color ?? 0}_${properties.transparent ?? false}_${properties.opacity ?? 1}_${properties.visible ?? true}_${properties.side ?? THREE.FrontSide}_${properties.depthWrite ?? true}_${properties.blending ?? THREE.NormalBlending}_${properties.map ? 'textured' : 'untextured'}`;
 
     let material = this.materials.get(key) as THREE.MeshBasicMaterial;
     if (!material) {

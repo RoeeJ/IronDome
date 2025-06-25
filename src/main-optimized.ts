@@ -18,6 +18,7 @@ import { debug } from './utils/DebugLogger';
 import { MobileInputManager } from './input/MobileInputManager';
 import { DeviceCapabilities } from './utils/DeviceCapabilities';
 import { ResponsiveUI } from './ui/ResponsiveUI';
+import { TextureCache } from './utils/TextureCache';
 
 // New optimization systems
 import { ChunkManager } from './world/ChunkManager';
@@ -39,21 +40,14 @@ debug.log('Device detected:', {
 // Scene setup
 const scene = new THREE.Scene();
 
-// Create gradient background for better visibility
-const canvas = document.createElement('canvas');
-canvas.width = 1;
-canvas.height = 512;
-const context = canvas.getContext('2d')!;
-const gradient = context.createLinearGradient(0, 0, 0, 512);
-gradient.addColorStop(0, '#0a1929'); // Very dark blue at top
-gradient.addColorStop(0.3, '#1e3c72'); // Dark blue
-gradient.addColorStop(0.6, '#2a5298'); // Medium blue
-gradient.addColorStop(1, '#5a7ba6'); // Lighter blue at horizon
-context.fillStyle = gradient;
-context.fillRect(0, 0, 1, 512);
-
-const gradientTexture = new THREE.CanvasTexture(canvas);
-gradientTexture.needsUpdate = true;
+// Create gradient background using shared texture cache to prevent shader program explosion
+const textureCache = TextureCache.getInstance();
+const gradientTexture = textureCache.getGradientTexture(1, 512, [
+  '#0a1929', // Very dark blue at top
+  '#1e3c72', // Dark blue  
+  '#2a5298', // Medium blue
+  '#5a7ba6'  // Lighter blue at horizon
+]);
 
 // Apply gradient as background
 scene.background = gradientTexture;

@@ -1,5 +1,7 @@
 import * as THREE from 'three';
 import { debug } from '../utils/logger';
+import { MaterialCache } from '../utils/MaterialCache';
+import { GeometryFactory } from '../utils/GeometryFactory';
 
 export interface LODConfig {
   levels: LODLevel[];
@@ -101,25 +103,25 @@ export class LODManager {
   createThreatLOD(id: string, position: THREE.Vector3, color: number, radius: number): LODObject {
     const meshes: LODObject['meshes'] = {};
 
-    // High detail - full sphere
-    const highGeometry = new THREE.SphereGeometry(radius, 16, 12);
-    const material = new THREE.MeshStandardMaterial({
+    // High detail - full sphere (SHARED GEOMETRIES)
+    const highGeometry = GeometryFactory.getInstance().getSphere(radius, 16, 12);
+    const material = MaterialCache.getInstance().getMeshStandardMaterial({
       color,
       emissive: color,
       emissiveIntensity: 0.2,
     });
     meshes.high = new THREE.Mesh(highGeometry, material);
 
-    // Medium detail - lower poly sphere
-    const mediumGeometry = new THREE.SphereGeometry(radius, 8, 6);
-    meshes.medium = new THREE.Mesh(mediumGeometry, material.clone());
+    // Medium detail - lower poly sphere (SHARED)
+    const mediumGeometry = GeometryFactory.getInstance().getSphere(radius, 8, 6);
+    meshes.medium = new THREE.Mesh(mediumGeometry, material); // REUSE material
 
-    // Low detail - very low poly
-    const lowGeometry = new THREE.SphereGeometry(radius, 6, 4);
-    meshes.low = new THREE.Mesh(lowGeometry, material.clone());
+    // Low detail - very low poly (SHARED)
+    const lowGeometry = GeometryFactory.getInstance().getSphere(radius, 6, 4);
+    meshes.low = new THREE.Mesh(lowGeometry, material); // REUSE material
 
-    // Billboard - sprite
-    const spriteMaterial = new THREE.SpriteMaterial({
+    // Billboard - sprite (SHARED)
+    const spriteMaterial = MaterialCache.getInstance().getSpriteMaterial({
       color,
       sizeAttenuation: true,
     });
@@ -135,9 +137,9 @@ export class LODManager {
     const color = 0x00ffff;
     const radius = 0.3;
 
-    // High detail - cone
-    const highGeometry = new THREE.ConeGeometry(radius * 0.8, radius * 5, 8);
-    const material = new THREE.MeshStandardMaterial({
+    // High detail - cone (SHARED)
+    const highGeometry = GeometryFactory.getInstance().getCone(radius * 0.8, radius * 5, 8);
+    const material = MaterialCache.getInstance().getMeshStandardMaterial({
       color,
       emissive: color,
       emissiveIntensity: 0.2,
@@ -148,20 +150,20 @@ export class LODManager {
     highMesh.rotation.x = Math.PI / 2;
     meshes.high = highMesh;
 
-    // Medium detail - simpler cone
-    const mediumGeometry = new THREE.ConeGeometry(radius * 0.8, radius * 5, 6);
-    const mediumMesh = new THREE.Mesh(mediumGeometry, material.clone());
+    // Medium detail - simpler cone (SHARED)
+    const mediumGeometry = GeometryFactory.getInstance().getCone(radius * 0.8, radius * 5, 6);
+    const mediumMesh = new THREE.Mesh(mediumGeometry, material); // REUSE material
     mediumMesh.rotation.x = Math.PI / 2;
     meshes.medium = mediumMesh;
 
-    // Low detail - box
-    const lowGeometry = new THREE.BoxGeometry(radius * 1.5, radius * 5, radius * 1.5);
-    const lowMesh = new THREE.Mesh(lowGeometry, material.clone());
+    // Low detail - box (SHARED)
+    const lowGeometry = GeometryFactory.getInstance().getBox(radius * 1.5, radius * 5, radius * 1.5);
+    const lowMesh = new THREE.Mesh(lowGeometry, material); // REUSE material
     lowMesh.rotation.x = Math.PI / 2;
     meshes.low = lowMesh;
 
-    // Billboard
-    const spriteMaterial = new THREE.SpriteMaterial({
+    // Billboard (SHARED)
+    const spriteMaterial = MaterialCache.getInstance().getSpriteMaterial({
       color,
       sizeAttenuation: true,
     });

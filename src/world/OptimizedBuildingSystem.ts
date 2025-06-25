@@ -64,8 +64,8 @@ export class OptimizedBuildingSystem {
     // Create instanced mesh for lit and unlit windows separately
     const windowGeometry = GeometryFactory.getInstance().getPlane(2, 3);
     
-    // Material for lit windows - bright warm glow
-    const litWindowMaterial = new THREE.MeshBasicMaterial({
+    // Material for lit windows - bright warm glow (SHARED)
+    const litWindowMaterial = MaterialCache.getInstance().getMeshBasicMaterial({
       color: 0xffee88, // Brighter warm yellow
       transparent: true,
       opacity: 1.0, // Full opacity for lit windows
@@ -73,8 +73,8 @@ export class OptimizedBuildingSystem {
       renderOrder: 1,
     });
     
-    // Material for unlit windows - much darker
-    const unlitWindowMaterial = new THREE.MeshBasicMaterial({
+    // Material for unlit windows - much darker (SHARED)
+    const unlitWindowMaterial = MaterialCache.getInstance().getMeshBasicMaterial({
       color: 0x050508, // Almost black with slight blue tint
       transparent: true,
       opacity: 0.3, // Lower opacity for unlit windows

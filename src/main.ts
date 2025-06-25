@@ -18,8 +18,10 @@ import { PerformanceMonitor } from './utils/PerformanceMonitor';
 import { Profiler } from './utils/Profiler';
 import { ProfilerDisplay } from './ui/ProfilerDisplay';
 import { RenderProfiler } from './utils/RenderProfiler';
+import { TextureCache } from './utils/TextureCache';
 import { ModelCache } from './utils/ModelCache';
 import { debug } from './utils/logger';  // Using Seq-enabled logger when configured
+import { MemoryMonitor } from './utils/MemoryMonitor';
 import { MobileInputManager } from './input/MobileInputManager';
 import { DeviceCapabilities } from './utils/DeviceCapabilities';
 import { ResponsiveUI } from './ui/ResponsiveUI';
@@ -64,21 +66,14 @@ debug.log('Device detected:', {
 // Scene setup
 const scene = new THREE.Scene();
 
-// Create gradient background for better visibility
-const canvas = document.createElement('canvas');
-canvas.width = 1;
-canvas.height = 512;
-const context = canvas.getContext('2d')!;
-const gradient = context.createLinearGradient(0, 0, 0, 512);
-gradient.addColorStop(0, '#0a1929'); // Very dark blue at top
-gradient.addColorStop(0.3, '#1e3c72'); // Dark blue
-gradient.addColorStop(0.6, '#2a5298'); // Medium blue
-gradient.addColorStop(1, '#5a7ba6'); // Lighter blue at horizon
-context.fillStyle = gradient;
-context.fillRect(0, 0, 1, 512);
-
-const gradientTexture = new THREE.CanvasTexture(canvas);
-gradientTexture.needsUpdate = true;
+// Create gradient background using shared texture cache to prevent shader program explosion
+const textureCache = TextureCache.getInstance();
+const gradientTexture = textureCache.getGradientTexture(1, 512, [
+  '#0a1929', // Very dark blue at top
+  '#1e3c72', // Dark blue  
+  '#2a5298', // Medium blue
+  '#5a7ba6'  // Lighter blue at horizon
+]);
 
 // Apply gradient as background (will be replaced by skybox)
 // scene.background = gradientTexture
@@ -258,7 +253,7 @@ const battlefieldZones = null;
 
 // Create invisible ground plane for raycasting
 const groundGeometry = new THREE.PlaneGeometry(4000, 4000);
-const groundMaterial = new THREE.MeshBasicMaterial({ 
+const groundMaterial = MaterialCache.getInstance().getMeshBasicMaterial({ 
   visible: false,
   side: THREE.DoubleSide 
 });
@@ -1147,6 +1142,21 @@ if (radarNetwork) {
     new THREE.Vector3(Math.sin(radarAngle), 0, -Math.cos(radarAngle))
   );
 }
+
+// Initialize memory monitoring to prevent WebGL crashes
+const memoryMonitor = MemoryMonitor.getInstance();
+memoryMonitor.startMonitoring(5000); // Check every 5 seconds
+
+// Add emergency cleanup handler
+window.addEventListener('emergency-memory-cleanup', () => {
+  debug.error('[EMERGENCY] Cleaning up to prevent crash...');
+  // Force cleanup of old objects
+  threatManager.emergencyCleanup?.();
+  // Force garbage collection if available
+  if ('gc' in window) {
+    (window as any).gc();
+  }
+});
 
 // Start game mode by default
 if (simulationControls.gameMode) {

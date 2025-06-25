@@ -85,25 +85,28 @@ export class SandboxControls {
       },
       
       addDefender: () => {
-        const angle = Math.random() * Math.PI * 2;
-        const distance = 50 + Math.random() * 100;
-        const position = new THREE.Vector3(
-          Math.cos(angle) * distance,
-          0,
-          Math.sin(angle) * distance
-        );
-        
-        if (this.config.domePlacementSystem.isPositionValid(position)) {
-          this.config.domePlacementSystem.placeBatteryAt(
-            position, 
-            `battery_${Date.now()}`, 
-            1
+        // Try up to 10 times to find valid position
+        for (let attempts = 0; attempts < 10; attempts++) {
+          const angle = Math.random() * Math.PI * 2;
+          const distance = 50 + Math.random() * 100;
+          const position = new THREE.Vector3(
+            Math.cos(angle) * distance,
+            0,
+            Math.sin(angle) * distance
           );
-          this.config.showNotification('New defender added');
-        } else {
-          // Try again with different position
-          actions.addDefender();
+          
+          if (this.config.domePlacementSystem.isPositionValid(position)) {
+            this.config.domePlacementSystem.placeBatteryAt(
+              position, 
+              `battery_${Date.now()}`, 
+              1
+            );
+            this.config.showNotification('New defender added');
+            return; // Success, exit
+          }
         }
+        // All attempts failed
+        this.config.showNotification('Could not find valid position for defender');
       }
     };
     
