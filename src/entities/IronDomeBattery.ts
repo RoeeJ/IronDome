@@ -182,7 +182,7 @@ export class IronDomeBattery extends EventEmitter {
           index: i,
           mesh: new THREE.Mesh(), // Dummy mesh for compatibility
           isLoaded: true,
-          lastFiredTime: 0,
+          lastFiredTime: -this.config.reloadTime, // Initialize as "already reloaded" so they're ready immediately
         };
         this.launcherTubes.push(launcherTube);
       }
@@ -211,7 +211,7 @@ export class IronDomeBattery extends EventEmitter {
           index: i,
           mesh: tube,
           isLoaded: true,
-          lastFiredTime: 0,
+          lastFiredTime: -this.config.reloadTime, // Initialize as "already reloaded" so they're ready immediately
         };
 
         // Add visual missile in tube
@@ -505,7 +505,11 @@ export class IronDomeBattery extends EventEmitter {
       }
 
       if (availableCount === 0) {
-        debug.warn('No interceptors in stock!');
+        debug.warn('No interceptors in stock!', {
+          useResources: this.useResources,
+          hasInterceptors: this.resourceManager.hasInterceptors(),
+          interceptorStock: this.resourceManager.getInterceptorStock()
+        });
         return [];
       }
 
@@ -601,6 +605,12 @@ export class IronDomeBattery extends EventEmitter {
     const loadedTube = this.launcherTubes.find(tube => tube.isLoaded);
     if (!loadedTube) {
       debug.log('No loaded tubes available for manual fire');
+      debug.log('Launcher tubes status:', this.launcherTubes.map(t => ({
+        index: t.index,
+        isLoaded: t.isLoaded,
+        lastFiredTime: t.lastFiredTime,
+        timeSinceFire: Date.now() - t.lastFiredTime
+      })));
       return null;
     }
 
@@ -666,8 +676,7 @@ export class IronDomeBattery extends EventEmitter {
 
     // Mark tube as reloading
     loadedTube.isLoaded = false;
-    loadedTube.reloadStartTime = Date.now();
-    this.activeInterceptors++;
+    loadedTube.lastFiredTime = Date.now();
 
     // Visual feedback
     if (loadedTube.missile) {
@@ -774,6 +783,7 @@ export class IronDomeBattery extends EventEmitter {
     // Update tube state
     tube.isLoaded = false;
     tube.lastFiredTime = Date.now();
+    debug.log(`Tube fired, will reload in ${this.config.reloadTime}ms`);
 
     // Remove visual missile from tube
     if (tube.missile) {
@@ -901,7 +911,9 @@ export class IronDomeBattery extends EventEmitter {
       'setResourceManagement called with:',
       enabled,
       'current useResources:',
-      this.useResources
+      this.useResources,
+      'caller:',
+      new Error().stack?.split('\n')[2]
     );
     this.useResources = enabled;
 
@@ -1371,10 +1383,12 @@ export class IronDomeBattery extends EventEmitter {
     this.launcherTubes.forEach(tube => {
       if (!tube.isLoaded) {
         const adjustedReloadTime = this.config.reloadTime * reloadTimeMultiplier;
-        if (currentTime - tube.lastFiredTime >= adjustedReloadTime) {
+        const timeSinceFire = currentTime - tube.lastFiredTime;
+        if (timeSinceFire >= adjustedReloadTime) {
           // Reload this tube
           tube.isLoaded = true;
           this.createMissileInTube(tube, this.launcherGroup);
+          debug.log(`Tube ${tube.index} reloaded after ${timeSinceFire}ms`);
         }
       }
     });

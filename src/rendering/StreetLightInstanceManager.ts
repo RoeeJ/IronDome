@@ -28,8 +28,8 @@ export class StreetLightInstanceManager {
   private availableMajorIndices: number[] = [];
   private nextId = 0;
   
-  private static readonly MAX_LIGHTS = 300;
-  private static readonly MAX_MAJOR_LIGHTS = 100;
+  private static readonly MAX_LIGHTS = 150; // PERFORMANCE: Reduced from 300
+  private static readonly MAX_MAJOR_LIGHTS = 50; // PERFORMANCE: Reduced from 100
   
   constructor(scene: THREE.Scene) {
     this.scene = scene;
@@ -301,6 +301,81 @@ export class StreetLightInstanceManager {
     this.scene.remove(instance.bulbLight);
     instance.bulbLight.dispose();
     instance.bulbLight = undefined;
+  }
+  
+  // Animation method for gradual appearance
+  animateLightAppear(index: number): void {
+    // Find the instance by index
+    let targetMeshes: THREE.InstancedMesh[] = [];
+    let instanceData: StreetLightInstance | null = null;
+    
+    // Check if it's a regular or major light
+    for (const [_, instance] of this.instances) {
+      if (instance.index === index) {
+        instanceData = instance;
+        if (instance.isMajor) {
+          targetMeshes = [this.majorPoleInstancedMesh, this.majorFixtureInstancedMesh, this.majorBulbInstancedMesh];
+        } else {
+          targetMeshes = [this.poleInstancedMesh, this.fixtureInstancedMesh, this.bulbInstancedMesh];
+        }
+        break;
+      }
+    }
+    
+    if (!instanceData || targetMeshes.length === 0) return;
+    
+    // Store original transforms for each component
+    const originalMatrices: THREE.Matrix4[] = [];
+    const positions: THREE.Vector3[] = [];
+    const quaternions: THREE.Quaternion[] = [];
+    
+    targetMeshes.forEach(mesh => {
+      const matrix = new THREE.Matrix4();
+      const pos = new THREE.Vector3();
+      const quat = new THREE.Quaternion();
+      const scale = new THREE.Vector3();
+      
+      mesh.getMatrixAt(index, matrix);
+      matrix.decompose(pos, quat, scale);
+      
+      originalMatrices.push(matrix.clone());
+      positions.push(pos);
+      quaternions.push(quat);
+    });
+    
+    const duration = 300 + Math.random() * 200; // 300-500ms
+    const startTime = Date.now();
+    const startScale = 0.01;
+    
+    const animate = () => {
+      const elapsed = Date.now() - startTime;
+      const progress = Math.min(elapsed / duration, 1);
+      
+      // Bounce easing for a fun pop effect
+      const eased = 1 - Math.pow(1 - progress, 3);
+      const currentScale = startScale + (1 - startScale) * eased;
+      
+      // Apply scale to each component individually to preserve their positions
+      targetMeshes.forEach((mesh, i) => {
+        const scale = new THREE.Vector3(currentScale, currentScale, currentScale);
+        const matrix = new THREE.Matrix4();
+        matrix.compose(positions[i], quaternions[i], scale);
+        
+        mesh.setMatrixAt(index, matrix);
+        mesh.instanceMatrix.needsUpdate = true;
+      });
+      
+      if (progress < 1) {
+        requestAnimationFrame(animate);
+      }
+    };
+    
+    animate();
+  }
+  
+  // Get total instance count for animation
+  getInstanceCount(): number {
+    return this.instances.size;
   }
   
   getStreetLightCount(): number {

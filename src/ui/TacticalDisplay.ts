@@ -8,7 +8,7 @@ export class TacticalDisplay {
   private ctx: CanvasRenderingContext2D;
   private radarCenter: { x: number; y: number };
   private radarRadius: number;
-  private scale: number = 0.5; // World units to pixels
+  private scale: number = 0.1; // World units to pixels - reduced to show more area (1000m radius)
   private threatTracks: Map<
     Threat,
     { id: string; positions: THREE.Vector2[]; firstDetected: number; pinged: boolean }
@@ -35,8 +35,8 @@ export class TacticalDisplay {
     const deviceCaps = DeviceCapabilities.getInstance();
     const deviceInfo = deviceCaps.getDeviceInfo();
 
-    // Adjust size based on device - much smaller for mobile
-    const baseSize = deviceInfo.isMobile ? 120 : deviceInfo.isTablet ? 180 : 300;
+    // Adjust size based on device - smaller to avoid covering controls
+    const baseSize = deviceInfo.isMobile ? 120 : deviceInfo.isTablet ? 150 : 200;
     const scale = deviceInfo.devicePixelRatio > 2 ? 2 : 1;
 
     // Create canvas overlay
@@ -240,16 +240,12 @@ export class TacticalDisplay {
     ctx.stroke();
     ctx.shadowBlur = 0;
 
-    // Draw range labels with better styling
+    // Draw range labels with better styling - only show alternating ones to avoid overlap
     ctx.fillStyle = 'rgba(0, 255, 255, 0.7)';
     ctx.font = '9px "Courier New", monospace';
-    ctx.fillText('50m', this.radarCenter.x + this.radarRadius / 4 - 10, this.radarCenter.y - 5);
-    ctx.fillText('100m', this.radarCenter.x + this.radarRadius / 2 - 15, this.radarCenter.y - 5);
-    ctx.fillText(
-      '150m',
-      this.radarCenter.x + (this.radarRadius * 3) / 4 - 15,
-      this.radarCenter.y - 5
-    );
+    // Show only 500m and 1km labels to avoid crowding
+    ctx.fillText('500m', this.radarCenter.x + this.radarRadius / 2 - 20, this.radarCenter.y - 5);
+    ctx.fillText('1km', this.radarCenter.x + this.radarRadius - 15, this.radarCenter.y - 5);
 
     // Draw rotating sweep with enhanced effect
     this.drawRadarSweep();

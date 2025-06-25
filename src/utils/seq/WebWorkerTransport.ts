@@ -44,7 +44,8 @@ export class WebWorkerTransport {
     this.isEnabled = this.validateConfig();
     
     if (this.isEnabled) {
-      this.initializeWorker();
+      // PERFORMANCE: Defer worker initialization to avoid blocking startup
+      setTimeout(() => this.initializeWorker(), 1000);
     }
   }
 

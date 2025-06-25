@@ -29,6 +29,7 @@ export class BuildingSystem {
   private buildings = new Map<string, Building>();
   private buildingGroup = new THREE.Group();
   private debrisGroup = new THREE.Group();
+  private cityGenerated = false; // Flag to prevent multiple city generations
   private buildingInfos: BuildingInfo[] = [];
   private buildingPositions: { x: number; z: number; width: number; depth: number }[] = [];
   private roadPositions: { start: { x: number; z: number }; end: { x: number; z: number } }[] = [];
@@ -40,7 +41,7 @@ export class BuildingSystem {
   private unlitWindowMesh: THREE.InstancedMesh;
   private windowMatrix = new THREE.Matrix4();
   private windowCount = 0;
-  private maxWindowsPerMesh = 10000; // 10k windows per mesh to handle all city windows
+  private maxWindowsPerMesh = 2000; // PERFORMANCE: Reduced from 10k for faster initialization
   private maxWindowsPerBuilding = 200; // Increased limit since we're using instancing efficiently
   private litWindowPool: number[] = [];
   private unlitWindowPool: number[] = [];
@@ -343,22 +344,197 @@ export class BuildingSystem {
 
   // CHAINSAW OPTIMIZED: Generate complete city with roads and street lights
   generateCity(centerX: number = 0, centerZ: number = 0, radius: number = 800): void {
-    // SUPER SAIYAN 2: CREATE BUILDINGS FIRST TO KNOW WHERE TO PUT ROADS!
+    // Check if city has already been generated
+    if (this.cityGenerated) {
+      debug.warn('City already generated, skipping duplicate generation');
+      return;
+    }
+    
+    // Mark as generated to prevent race conditions
+    this.cityGenerated = true;
+    
+    // Create all the data structures first
     this.createBuildings(centerX, centerZ, radius);
-    // THEN CREATE ROADS BETWEEN BUILDINGS!
     this.createRoadNetwork(centerX, centerZ, radius);
-    // FINALLY ADD STREET LIGHTS ALONG THE ROADS!
     this.createStreetLights(centerX, centerZ, radius);
+    
+    // Now animate them appearing gradually
+    this.animateCityGeneration();
 
-    // SUPER SAIYAN DEBUG!
-    console.log(`🔥 KAMEHAMEHA! City generated:
-      - Buildings: ${this.buildings.size}
-      - Roads visible: ${this.roads.visible}, children: ${this.roads.children.length}
-      - Street lights visible: ${this.streetLights.visible}, children: ${this.streetLights.children.length}
-      - Roads in scene: ${this.scene.getObjectByName('Roads') ? 'YES' : 'NO'}
-      - Lights in scene: ${this.scene.getObjectByName('StreetLights') ? 'YES' : 'NO'}`);
-
-    debug.log(`City generated: ${this.buildings.size} buildings, roads, and street lights`);
+    debug.log(`City generation started: ${this.buildings.size} buildings, roads, and street lights`);
+  }
+  
+  private animateCityGeneration(): void {
+    // Hide all buildings initially
+    this.buildings.forEach(building => {
+      building.mesh.visible = false;
+      building.mesh.scale.y = 0.01; // Start flat
+    });
+    
+    // Hide roads and lights
+    this.roads.visible = false;
+    this.streetLights.visible = false;
+    
+    // Sort buildings by distance from center for ripple effect
+    const buildingArray = Array.from(this.buildings.values()).sort((a, b) => {
+      const distA = Math.sqrt(a.position.x * a.position.x + a.position.z * a.position.z);
+      const distB = Math.sqrt(b.position.x * b.position.x + b.position.z * b.position.z);
+      return distA - distB;
+    });
+    
+    // Track animation completion
+    let allBuildingsStarted = false;
+    let roadsStarted = false;
+    let lightsStarted = false;
+    let allAnimationsComplete = 0;
+    const totalAnimations = 3; // buildings, roads, lights
+    
+    const checkAllComplete = () => {
+      allAnimationsComplete++;
+      if (allAnimationsComplete >= totalAnimations) {
+        // All animations complete - now merge static geometry for performance
+        setTimeout(() => {
+          this.mergeStaticGeometry();
+          debug.log('City generation animations complete, static geometry merged');
+        }, 200);
+      }
+    };
+    
+    // Animate buildings rising from the ground
+    let buildingIndex = 0;
+    const buildingsPerBatch = 3; // How many buildings appear at once
+    
+    const buildingInterval = setInterval(() => {
+      // Process a batch of buildings
+      for (let i = 0; i < buildingsPerBatch && buildingIndex < buildingArray.length; i++) {
+        const building = buildingArray[buildingIndex];
+        building.mesh.visible = true;
+        
+        // Animate the building rising
+        this.animateBuildingRise(building.mesh);
+        
+        buildingIndex++;
+      }
+      
+      // Start roads once we have some buildings (after 25% are started)
+      if (!roadsStarted && buildingIndex >= buildingArray.length * 0.25) {
+        roadsStarted = true;
+        setTimeout(() => {
+          this.animateRoadsAppear(() => checkAllComplete());
+        }, 200);
+      }
+      
+      // Start street lights once we have more buildings (after 50% are started)
+      if (!lightsStarted && buildingIndex >= buildingArray.length * 0.5) {
+        lightsStarted = true;
+        setTimeout(() => {
+          this.animateStreetLightsAppear(() => checkAllComplete());
+        }, 400);
+      }
+      
+      // When all buildings are started
+      if (buildingIndex >= buildingArray.length) {
+        clearInterval(buildingInterval);
+        allBuildingsStarted = true;
+        
+        // Wait for all building animations to complete
+        setTimeout(() => {
+          checkAllComplete();
+        }, 1000); // Max building animation time
+      }
+    }, 50); // 50ms between batches = smooth appearance
+  }
+  
+  private animateBuildingRise(mesh: THREE.Mesh): void {
+    const targetScale = 1; // Buildings should have scale.y = 1
+    const targetY = mesh.position.y;
+    const startY = targetY - 10;
+    
+    // Start below ground
+    mesh.position.y = startY;
+    mesh.scale.y = 0.01;
+    
+    const duration = 600 + Math.random() * 400; // 600-1000ms
+    const startTime = Date.now();
+    
+    const animate = () => {
+      const elapsed = Date.now() - startTime;
+      const progress = Math.min(elapsed / duration, 1);
+      
+      // Easing function for smooth animation
+      const eased = 1 - Math.pow(1 - progress, 3); // Cubic ease-out
+      
+      mesh.scale.y = 0.01 + (targetScale - 0.01) * eased;
+      mesh.position.y = startY + (targetY - startY) * eased;
+      
+      if (progress < 1) {
+        requestAnimationFrame(animate);
+      }
+    };
+    
+    animate();
+  }
+  
+  private animateRoadsAppear(onComplete?: () => void): void {
+    this.roads.visible = true;
+    
+    let completedRoads = 0;
+    const totalRoads = this.roads.children.length;
+    
+    // Fade in roads
+    this.roads.children.forEach((road, index) => {
+      if (road instanceof THREE.Mesh && road.material) {
+        const material = road.material as THREE.MeshBasicMaterial;
+        
+        // Don't animate opacity on basic materials - just show them
+        // MeshBasicMaterial doesn't support transparency well during animation
+        material.visible = true;
+        
+        // Small delay for stagger effect without opacity animation
+        setTimeout(() => {
+          completedRoads++;
+          if (completedRoads >= totalRoads && onComplete) {
+            onComplete();
+          }
+        }, index * 20); // Stagger by 20ms per road segment
+      }
+    });
+    
+    // Fallback in case there are no roads
+    if (totalRoads === 0 && onComplete) {
+      onComplete();
+    }
+  }
+  
+  private animateStreetLightsAppear(onComplete?: () => void): void {
+    this.streetLights.visible = true;
+    
+    // Make lights pop in with a scale animation
+    if (this.streetLightManager) {
+      const count = this.streetLightManager.getInstanceCount();
+      const batchSize = 5;
+      let currentIndex = 0;
+      
+      const lightInterval = setInterval(() => {
+        // Animate a batch of lights
+        for (let i = 0; i < batchSize && currentIndex < count; i++) {
+          this.streetLightManager!.animateLightAppear(currentIndex);
+          currentIndex++;
+        }
+        
+        if (currentIndex >= count) {
+          clearInterval(lightInterval);
+          
+          // All lights animation complete
+          if (onComplete) {
+            setTimeout(onComplete, 300); // Wait for last animations to finish
+          }
+        }
+      }, 30); // 30ms between batches
+    } else if (onComplete) {
+      // No street lights to animate
+      onComplete();
+    }
   }
 
   private createBuildings(centerX: number, centerZ: number, radius: number): void {

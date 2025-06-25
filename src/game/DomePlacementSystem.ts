@@ -450,6 +450,7 @@ export class DomePlacementSystem {
     });
 
     // Configure battery
+    debug.log(`Configuring battery ${batteryId}: isSandboxMode=${this.isSandboxMode}, setting resourceManagement=${!this.isSandboxMode}`);
     battery.setResourceManagement(!this.isSandboxMode);
     battery.setLaunchOffset(new THREE.Vector3(-2, 14.5, -0.1));
     battery.setLaunchDirection(new THREE.Vector3(0.3, 1.5, 0.1).normalize()); // More vertical launch angle

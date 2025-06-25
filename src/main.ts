@@ -38,6 +38,7 @@ import { SoundSystem } from './systems/SoundSystem';
 import { Inspector } from './ui/Inspector';
 import { SandboxControls } from './ui/sandbox/SandboxControls';
 import { DeveloperControls } from './ui/sandbox/DeveloperControls';
+import { ProjectileInstanceManager } from './rendering/ProjectileInstanceManager';
 
 // Essential systems only
 import { CameraController, CameraMode } from './camera/CameraController';
@@ -57,6 +58,9 @@ debug.log('Device detected:', {
   gpu: deviceInfo.gpu,
   targetFPS: perfProfile.targetFPS,
 });
+
+// Update loading status
+updateLoadingStatus('Setting up 3D scene...');
 
 // Scene setup
 const scene = new THREE.Scene();
@@ -112,17 +116,8 @@ document.body.appendChild(renderer.domElement);
 
 // Precompile common materials to prevent shader compilation freezes
 const materialCache = MaterialCache.getInstance();
-// Pre-create commonly used materials
-materialCache.getMeshStandardMaterial({ color: 0x4a4a4a, roughness: 0.8, metalness: 0.3 });
-materialCache.getMeshStandardMaterial({ color: 0x333333, roughness: 0.7, metalness: 0.4 });
-materialCache.getMeshStandardMaterial({ color: 0x666666, roughness: 0.5, metalness: 0.7 });
-materialCache.getMeshStandardMaterial({ color: 0x555555, roughness: 0.6, metalness: 0.5 });
-materialCache.getMeshStandardMaterial({ color: 0xaaaaaa, roughness: 0.4, metalness: 0.9 });
-// Precompile shaders after scene is set up
-setTimeout(() => {
-  materialCache.precompileShaders(renderer, scene, camera);
-  debug.log('Material shaders precompiled');
-}, 100);
+// PERFORMANCE: Defer material precompilation to avoid blocking initial render
+// Will precompile after loading screen is hidden
 
 // Controls
 const controls = new OrbitControls(camera, renderer.domElement);
@@ -214,6 +209,9 @@ const resourceManager = ResourceManager.getInstance();
 // Make resource manager globally available for UI
 (window as any).__resourceManager = resourceManager;
 
+// Update loading status
+updateLoadingStatus('Creating environment...');
+
 // Initialize world systems - STATIC ONLY (no dynamic updates)
 const environmentSystem = new EnvironmentSystem(scene);
 environmentSystem.initialize({
@@ -227,7 +225,7 @@ environmentSystem.initialize({
 const worldScaleIndicators = new WorldScaleIndicators(scene, {
   showGrid: true,
   showDistanceMarkers: false,
-  showReferenceObjects: true, // Keep buildings
+  showReferenceObjects: false, // Disable reference buildings initially
   showWindParticles: false,   // CHAINSAW: Disabled wind particles
   showAltitudeMarkers: false,
   gridSize: 2000,
@@ -240,11 +238,9 @@ worldScaleIndicators.optimizeGeometry();
 const optimizedDayNight = new OptimizedDayNightCycle(scene, ambientLight, directionalLight);
 optimizedDayNight.setTime(14); // Start at 2 PM
 
+// PERFORMANCE: Defer city generation until after loading screen
 const buildingSystem = new BuildingSystem(scene);
-buildingSystem.generateCity(0, 0, 800); // SUPER SAIYAN 2: MASSIVE CITY!
-// PERFORMANCE: Merge static city geometry to reduce draw calls
-// Only merges roads and light poles, preserves buildings for windows
-buildingSystem.mergeStaticGeometry();
+// Don't generate city yet - will do it after loading screen is hidden
 
 // Make globally accessible for SandboxControls and explosion damage
 (window as any).__optimizedDayNight = optimizedDayNight;
@@ -261,9 +257,11 @@ groundMesh.rotation.x = -Math.PI / 2;
 groundMesh.position.y = 0;
 scene.add(groundMesh);
 
+// PERFORMANCE: Initialize projectile instance manager lazily
+let projectileInstanceManager: ProjectileInstanceManager | null = null;
+
 // Threat Manager with extended bounds
 const threatManager = new ThreatManager(scene, world);
-threatManager.setInstanceManager(projectileInstanceManager);
 // Set extended spawn bounds for threats
 (threatManager as any).spawnBounds = {
   minX: -2000,
@@ -275,11 +273,6 @@ threatManager.setInstanceManager(projectileInstanceManager);
 };
 // Make threat manager globally available for explosion system
 (window as any).__threatManager = threatManager;
-
-// PERFORMANCE: Re-enable instanced rendering for projectiles
-import { ProjectileInstanceManager } from './rendering/ProjectileInstanceManager';
-const projectileInstanceManager = new ProjectileInstanceManager(scene);
-(window as any).__projectileInstanceManager = projectileInstanceManager;
 
 // Invisible Radar System - provides detection without visual towers
 import { InvisibleRadarSystem } from './scene/InvisibleRadarSystem';
@@ -303,22 +296,7 @@ interceptionSystem.setThreatManager(threatManager);
 domePlacementSystem.setInterceptionSystem(interceptionSystem);
 if (radarNetwork) domePlacementSystem.setRadarNetwork(radarNetwork);
 
-// Configure all batteries from placement system
-// Note: batteries are already added to interceptionSystem via setInterceptionSystem
-const batteries = domePlacementSystem.getAllBatteries();
-batteries.forEach(battery => {
-  battery.setResourceManagement(true);
-  if (radarNetwork) battery.setRadarNetwork(radarNetwork);
-  battery.setInstanceManager(projectileInstanceManager);
-  // Don't add battery again - already added in setInterceptionSystem with proper ID
-  // interceptionSystem.addBattery(battery); // REMOVED - causes duplicate batteries!
-  threatManager.registerBattery(battery);
-
-  // Apply auto-repair rate based on saved upgrade level
-  const autoRepairLevel = gameState.getAutoRepairLevel();
-  const repairRates = [0, 0.5, 1.0, 2.0]; // Health per second for each level
-  battery.setAutoRepairRate(repairRates[autoRepairLevel]);
-});
+// PERFORMANCE: Defer battery configuration until after loading
 
 // Wave Manager
 const waveManager = new WaveManager(threatManager);
@@ -343,7 +321,7 @@ const savedInterceptMode = localStorage.getItem('ironDome_interceptMode');
 
 // Simulation controls (must be defined before UI)
 const simulationControls = {
-  gameMode: savedGameMode !== null ? savedGameMode === 'true' : true, // Default to true if not saved
+  gameMode: savedGameMode !== null ? savedGameMode === 'true' : false, // Default to false (sandbox mode) if not saved
   autoIntercept: savedInterceptMode !== null ? savedInterceptMode === 'true' : true, // Default to auto-intercept for larger terrain
   pause: false,
   timeScale: 1.0,
@@ -370,6 +348,9 @@ const simulationControls = {
 
 // Expose simulationControls globally for UI components
 (window as any).__simulationControls = simulationControls;
+
+// Update loading status
+updateLoadingStatus('Setting up user interface...');
 
 // Create React UI
 const uiContainer = document.createElement('div');
@@ -1199,13 +1180,116 @@ function onWindowResize() {
 }
 window.addEventListener('resize', onWindowResize);
 
+// Function to update loading status
+function updateLoadingStatus(status: string) {
+  const statusEl = document.querySelector('.loading-status');
+  if (statusEl) {
+    statusEl.textContent = status;
+  }
+}
+
+// Flags to prevent race conditions
+let isHidingLoadingScreen = false;
+let isDeferredInitStarted = false;
+
 // Function to hide loading screen with multiple fallbacks
 function hideLoadingScreen() {
+  // Prevent multiple concurrent calls
+  if (isHidingLoadingScreen) {
+    debug.log('hideLoadingScreen already in progress, skipping');
+    return;
+  }
+  
   const loadingEl = document.getElementById('loading');
   if (loadingEl && loadingEl.style.display !== 'none') {
-    loadingEl.style.display = 'none';
-    debug.log('Loading screen hidden');
+    isHidingLoadingScreen = true;
+    
+    // Fade out the loading screen
+    loadingEl.style.transition = 'opacity 0.3s ease-out';
+    loadingEl.style.opacity = '0';
+    
+    setTimeout(() => {
+      loadingEl.style.display = 'none';
+      debug.log('Loading screen hidden');
+      
+      // PERFORMANCE: Start deferred initialization after loading screen is hidden
+      // Only start if not already started
+      if (!isDeferredInitStarted) {
+        isDeferredInitStarted = true;
+        startDeferredInitialization();
+      } else {
+        debug.log('Deferred initialization already started, skipping');
+      }
+    }, 300);
   }
+}
+
+// Deferred initialization function to run heavy operations after initial render
+async function startDeferredInitialization() {
+  debug.log('Starting deferred initialization...');
+  
+  // Phase 1: Initialize instance managers (50ms delay)
+  setTimeout(() => {
+    // Initialize ProjectileInstanceManager
+    projectileInstanceManager = new ProjectileInstanceManager(scene);
+    (window as any).__projectileInstanceManager = projectileInstanceManager;
+    
+    // Set instance manager on threat manager
+    threatManager.setInstanceManager(projectileInstanceManager);
+    
+    // Configure all batteries
+    const batteries = domePlacementSystem.getAllBatteries();
+    batteries.forEach(battery => {
+      battery.setResourceManagement(true);
+      if (radarNetwork) battery.setRadarNetwork(radarNetwork);
+      battery.setInstanceManager(projectileInstanceManager);
+      threatManager.registerBattery(battery);
+
+      // Apply auto-repair rate based on saved upgrade level
+      const autoRepairLevel = gameState.getAutoRepairLevel();
+      const repairRates = [0, 0.5, 1.0, 2.0]; // Health per second for each level
+      battery.setAutoRepairRate(repairRates[autoRepairLevel]);
+    });
+    
+    debug.log('ProjectileInstanceManager initialized');
+  }, 50);
+  
+  // Phase 2: Generate city (100ms delay)
+  setTimeout(() => {
+    buildingSystem.generateCity(0, 0, 800);
+    // Note: mergeStaticGeometry will be called after animations complete
+    
+    // Re-enable reference objects after city is generated
+    worldScaleIndicators.setVisibility({
+      showReferenceObjects: true
+    });
+    
+    debug.log('City generation started');
+  }, 100);
+  
+  // Phase 3: Precompile materials (500ms delay)
+  setTimeout(() => {
+    // Pre-create commonly used materials
+    materialCache.getMeshStandardMaterial({ color: 0x4a4a4a, roughness: 0.8, metalness: 0.3 });
+    materialCache.getMeshStandardMaterial({ color: 0x333333, roughness: 0.7, metalness: 0.4 });
+    materialCache.getMeshStandardMaterial({ color: 0x666666, roughness: 0.5, metalness: 0.7 });
+    materialCache.getMeshStandardMaterial({ color: 0x555555, roughness: 0.6, metalness: 0.5 });
+    materialCache.getMeshStandardMaterial({ color: 0xaaaaaa, roughness: 0.4, metalness: 0.9 });
+    
+    // Precompile shaders
+    materialCache.precompileShaders(renderer, scene, camera);
+    debug.log('Material shaders precompiled');
+  }, 500);
+  
+  // Phase 4: Start game mode if needed (600ms delay)
+  setTimeout(() => {
+    if (!simulationControls.gameMode) {
+      // Sandbox mode - start spawning threats
+      threatManager.setThreatMix('mixed');
+      threatManager.startSpawning();
+    }
+    debug.log('Initialization complete');
+  }, 600);
 }
 
 // Check if document is already loaded (for iPad/iOS)
@@ -1674,6 +1758,9 @@ if (inspectorMode) {
     })
   );
 }
+
+// Update loading status
+updateLoadingStatus('Ready to launch!');
 
 // Start the animation loop only if not orientation locked
 if (!isLocked) {

@@ -20,7 +20,7 @@ export class ProjectileInstanceManager {
   private instancePools = new Map<string, number[]>();
   
   // Constants
-  private static readonly MAX_INSTANCES_PER_TYPE = 100;
+  private static readonly MAX_INSTANCES_PER_TYPE = 50; // PERFORMANCE: Reduced from 100
   private static readonly INTERCEPTOR_KEY = 'interceptor';
   
   constructor(scene: THREE.Scene) {
