@@ -4,6 +4,7 @@ import { DeviceCapabilities } from '../utils/DeviceCapabilities';
 
 export class TacticalDisplay {
   private canvas: HTMLCanvasElement;
+  private container: HTMLDivElement;
   private ctx: CanvasRenderingContext2D;
   private radarCenter: { x: number; y: number };
   private radarRadius: number;
@@ -27,22 +28,19 @@ export class TacticalDisplay {
   private scanlineOffset: number = 0;
 
   constructor() {
+    this.initialize();
+  }
+
+  private initialize(): void {
     const deviceCaps = DeviceCapabilities.getInstance();
     const deviceInfo = deviceCaps.getDeviceInfo();
 
-    // Adjust size based on device
-    const baseSize = deviceInfo.isMobile ? 200 : deviceInfo.isTablet ? 250 : 300;
+    // Adjust size based on device - much smaller for mobile
+    const baseSize = deviceInfo.isMobile ? 120 : deviceInfo.isTablet ? 180 : 300;
     const scale = deviceInfo.devicePixelRatio > 2 ? 2 : 1;
 
     // Create canvas overlay
     this.canvas = document.createElement('canvas');
-    this.canvas.style.position = 'fixed'; // Use fixed for bottom positioning
-    this.canvas.style.bottom = '10px'; // At the very bottom
-    this.canvas.style.left = '10px';
-    this.canvas.style.width = `${baseSize}px`;
-    this.canvas.style.height = `${baseSize}px`;
-    this.canvas.style.pointerEvents = 'none';
-    this.canvas.style.zIndex = '100'; // Below UI but above game
     this.canvas.width = baseSize * scale;
     this.canvas.height = baseSize * scale;
 
@@ -55,9 +53,31 @@ export class TacticalDisplay {
     // Mobile-specific adjustments
     if (deviceInfo.isMobile) {
       this.canvas.style.opacity = '0.9';
+      // Add a subtle border for better visibility
+      this.canvas.style.border = '1px solid rgba(0, 255, 255, 0.3)';
     }
 
-    document.body.appendChild(this.canvas);
+    // Create a container div to ensure proper layering
+    this.container = document.createElement('div');
+    this.container.style.position = 'fixed';
+    this.container.style.bottom = '10px'; // Lower positioning
+    this.container.style.left = '10px';
+    this.container.style.width = `${baseSize}px`;
+    this.container.style.height = `${baseSize}px`;
+    this.container.style.pointerEvents = 'none';
+    this.container.style.zIndex = '5000'; // Very high z-index to ensure it's on top
+    this.container.style.borderRadius = '50%';
+    this.container.style.overflow = 'hidden';
+    this.container.style.background = 'rgba(0, 0, 0, 0.5)'; // Semi-transparent background
+
+    // Style the canvas
+    this.canvas.style.width = '100%';
+    this.canvas.style.height = '100%';
+    this.canvas.style.display = 'block';
+
+    this.container.appendChild(this.canvas);
+
+    // Don't append yet - let the UI system handle it
     this.ctx = this.canvas.getContext('2d')!;
 
     // Scale context for high DPI
@@ -67,6 +87,13 @@ export class TacticalDisplay {
 
     this.radarCenter = { x: baseSize / 2, y: baseSize / 2 };
     this.radarRadius = baseSize / 2 - 20;
+
+    // Append to document body
+    document.body.appendChild(this.container);
+  }
+
+  public getContainer(): HTMLDivElement {
+    return this.container;
   }
 
   update(

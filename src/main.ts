@@ -98,6 +98,8 @@ renderer.setPixelRatio(Math.min(window.devicePixelRatio, maxPixelRatio));
 renderer.domElement.style.position = 'absolute';
 renderer.domElement.style.top = '0';
 renderer.domElement.style.left = '0';
+renderer.domElement.style.zIndex = '1'; // Ensure it's below UI elements
+// Don't set touchAction here - let OrbitControls handle it
 
 // Shadow settings based on device
 renderer.shadowMap.enabled = deviceCaps.shouldEnableShadows();
@@ -130,12 +132,24 @@ controls.minDistance = 20;
 controls.maxDistance = 1000; // Further increased for extended world
 controls.maxPolarAngle = Math.PI / 2 - 0.1; // Prevent going below ground
 
+// Enable touch controls for mobile
+controls.touches = {
+  ONE: THREE.TOUCH.ROTATE,
+  TWO: THREE.TOUCH.DOLLY_PAN
+};
+controls.enablePan = true;
+controls.enableZoom = true;
+controls.enableRotate = true;
+
 // Store controls globally for UI to disable when needed
 (window as any).__controls = controls;
 
 // Initialize camera controller
 const cameraController = new CameraController(camera, controls);
 (window as any).__cameraController = cameraController;
+
+// Ensure controls are enabled
+controls.enabled = true;
 
 // Lighting
 const ambientLight = new THREE.AmbientLight(0xffffff, 0.6);
@@ -196,6 +210,9 @@ world.addBody(groundBody);
 // Initialize game systems
 const gameState = GameState.getInstance();
 const resourceManager = ResourceManager.getInstance();
+
+// Make resource manager globally available for UI
+(window as any).__resourceManager = resourceManager;
 
 // Initialize world systems - STATIC ONLY (no dynamic updates)
 const environmentSystem = new EnvironmentSystem(scene);
@@ -363,6 +380,7 @@ const uiRoot = createRoot(uiContainer);
 
 // Import RenderStats component
 import { RenderStats } from './ui/RenderStats';
+import { MobileGameUI } from './ui/MobileGameUI';
 
 // Create container for render stats
 const renderStatsContainer = document.createElement('div');
@@ -384,8 +402,11 @@ renderStatsRoot.render(React.createElement(RenderStats, { renderer, visible: sho
 
 // Function to update UI when mode changes
 const updateUIMode = () => {
+  // Use mobile UI for mobile devices
+  const UIComponent = deviceInfo.isMobile || deviceInfo.isTablet ? MobileGameUI : GameUI;
+  
   uiRoot.render(
-    React.createElement(GameUI, {
+    React.createElement(UIComponent, {
       waveManager: waveManager,
       placementSystem: domePlacementSystem,
       isGameMode: simulationControls.gameMode,
@@ -498,8 +519,47 @@ if (simulationControls.gameMode) {
   gui.hide();
 }
 
-// Apply responsive UI
-const responsiveUI = new ResponsiveUI(gui);
+// Make GUI globally accessible for mobile UI
+(window as any).__gui = gui;
+
+// Apply responsive UI only for desktop - mobile uses MobileGameUI
+let responsiveUI: ResponsiveUI | null = null;
+if (!deviceInfo.isMobile && !deviceInfo.isTablet) {
+  responsiveUI = new ResponsiveUI(gui);
+} else {
+  // Style GUI for mobile - smaller and on the left
+  gui.domElement.style.display = 'none';
+  gui.domElement.style.position = 'fixed';
+  gui.domElement.style.left = '10px';
+  gui.domElement.style.top = '60px';
+  gui.domElement.style.transform = 'scale(0.8)';
+  gui.domElement.style.transformOrigin = 'top left';
+  gui.domElement.style.maxHeight = '60vh';
+  gui.domElement.style.overflowY = 'auto';
+  gui.domElement.style.zIndex = '1500';
+  gui.domElement.style.fontSize = '12px';
+  
+  // Add custom styles for mobile
+  const style = document.createElement('style');
+  style.textContent = `
+    @media (max-width: 768px) {
+      .lil-gui {
+        --width: 200px !important;
+        --widget-height: 24px !important;
+        --spacing: 4px !important;
+        --padding: 4px !important;
+        --folder-indent: 12px !important;
+      }
+      .lil-gui .title {
+        font-size: 11px !important;
+      }
+      .lil-gui .controller {
+        font-size: 11px !important;
+      }
+    }
+  `;
+  document.head.appendChild(style);
+}
 
 // Create manual targeting system
 const manualTargetingSystem = {
@@ -800,9 +860,55 @@ renderer.domElement.addEventListener(
   { passive: false }
 );
 
+// Touch end for mobile tap actions
+let touchStartTime = 0;
+let touchStartPos = { x: 0, y: 0 };
+
+// Debug touch events
+renderer.domElement.addEventListener('touchstart', event => {
+  console.log('Touch start:', event.touches.length, 'touches');
+  if (event.touches.length === 1) {
+    touchStartTime = Date.now();
+    touchStartPos = { x: event.touches[0].clientX, y: event.touches[0].clientY };
+  }
+}, { passive: true });
+
+renderer.domElement.addEventListener('touchend', event => {
+  // Check if it was a tap (not a drag)
+  if (event.changedTouches.length === 1) {
+    const touchDuration = Date.now() - touchStartTime;
+    const touch = event.changedTouches[0];
+    const touchDistance = Math.sqrt(
+      Math.pow(touch.clientX - touchStartPos.x, 2) + 
+      Math.pow(touch.clientY - touchStartPos.y, 2)
+    );
+    
+    // Consider it a tap if short duration and small movement
+    if (touchDuration < 300 && touchDistance < 10) {
+      const mouse = new THREE.Vector2(
+        (touch.clientX / window.innerWidth) * 2 - 1,
+        -(touch.clientY / window.innerHeight) * 2 + 1
+      );
+
+      const raycaster = new THREE.Raycaster();
+      raycaster.setFromCamera(mouse, camera);
+
+      // Check if in dome placement mode
+      if (domePlacementSystem.isInPlacementMode()) {
+        const intersects = raycaster.intersectObject(groundMesh);
+        if (intersects.length > 0) {
+          domePlacementSystem.attemptPlacement(intersects[0].point);
+          if ('vibrate' in navigator) navigator.vibrate(20);
+        }
+      }
+    }
+  }
+}, { passive: true });
+
 // Initialize mobile input if on touch device
 let mobileInput: MobileInputManager | null = null;
-if (deviceInfo.hasTouch) {
+// Temporarily disable MobileInputManager to fix touch controls
+if (false && deviceInfo.hasTouch) {
   mobileInput = new MobileInputManager(camera, controls, renderer.domElement);
 
   // Set up tap for dome placement or interceptor launch
@@ -894,45 +1000,7 @@ if (deviceInfo.hasTouch) {
     });
   });
 
-  // Add a fire button for mobile
-  const fireButton = responsiveUI.createMobileButton('🚀 FIRE', () => {
-    // Fire at the highest priority threat
-    const threats = threatManager.getActiveThreats();
-    if (threats.length > 0) {
-      // Sort by time to impact
-      const sortedThreats = threats.sort((a, b) => {
-        const timeA = a.getTimeToImpact();
-        const timeB = b.getTimeToImpact();
-        return timeA - timeB;
-      });
-
-      // Find best battery to intercept
-      const batteries = domePlacementSystem.getAllBatteries();
-      let interceptorFired = false;
-
-      for (const battery of batteries) {
-        if (battery.canIntercept(sortedThreats[0])) {
-          const interceptor = battery.fireInterceptor(sortedThreats[0]);
-          if (interceptor) {
-            responsiveUI.showNotification('Interceptor Launched!', 1500);
-            mobileInput.vibrate(30);
-            interceptorFired = true;
-            break;
-          }
-        }
-      }
-
-      if (!interceptorFired) {
-        responsiveUI.showNotification('No interceptors available', 1500);
-      }
-    } else {
-      responsiveUI.showNotification('No threats detected', 1000);
-    }
-  });
-
-  fireButton.style.bottom = '100px'; // Move up to avoid bottom controls
-  fireButton.style.right = '20px';
-  document.body.appendChild(fireButton);
+  // Fire button removed - mobile UI has its own controls
 }
 
 // Performance info object still needed for updates
@@ -974,6 +1042,12 @@ function showNotification(message: string): void {
     setTimeout(() => document.body.removeChild(notification), 500);
   }, 2000);
 }
+
+// Make notification function globally available
+(window as any).showNotification = showNotification;
+
+// Make THREE globally available for UI components
+(window as any).THREE = THREE;
 
 // Create new sandbox controls  
 const sandboxControls = new SandboxControls(gui, {
@@ -1209,12 +1283,128 @@ renderer.domElement.addEventListener(
   { passive: false }
 );
 
+// WebGL context loss handling for mobile stability
+renderer.domElement.addEventListener('webglcontextlost', (event) => {
+  event.preventDefault();
+  debug.error('WebGL context lost!');
+  
+  // Stop animation loop
+  if (animationId) {
+    cancelAnimationFrame(animationId);
+    animationId = null;
+  }
+  
+  // Pause game
+  simulationControls.pause = true;
+  if (waveManager) waveManager.pauseWave();
+  
+  // Show notification
+  if ((window as any).showNotification) {
+    (window as any).showNotification('Graphics context lost - reloading...');
+  }
+}, false);
+
+renderer.domElement.addEventListener('webglcontextrestored', () => {
+  debug.log('WebGL context restored!');
+  
+  // Reload the page to ensure clean state
+  setTimeout(() => {
+    window.location.reload();
+  }, 1000);
+}, false);
+
+// Memory management for mobile
+let lastMemoryCheck = 0;
+const MEMORY_CHECK_INTERVAL = 10000; // Check every 10 seconds
+
+function checkMemoryPressure() {
+  const now = Date.now();
+  if (now - lastMemoryCheck < MEMORY_CHECK_INTERVAL) return;
+  lastMemoryCheck = now;
+  
+  // Check renderer info
+  const info = renderer.info;
+  if (info.memory.geometries > 1000 || info.memory.textures > 500) {
+    debug.warn('High memory usage detected', {
+      geometries: info.memory.geometries,
+      textures: info.memory.textures
+    });
+    
+    // Force garbage collection if available
+    if ((window as any).gc) {
+      (window as any).gc();
+    }
+  }
+  
+  // On mobile, be more aggressive with cleanup
+  if (deviceInfo.isMobile || deviceInfo.isTablet) {
+    // Limit max threats and projectiles
+    if (threatManager.getActiveThreats().length > 30) {
+      threatManager.clearOldestThreats(10);
+    }
+    
+    if (projectiles.length > 50) {
+      // Remove oldest projectiles
+      const toRemove = projectiles.slice(0, 10);
+      toRemove.forEach(p => {
+        p.destroy(scene, world);
+        const idx = projectiles.indexOf(p);
+        if (idx !== -1) projectiles.splice(idx, 1);
+      });
+    }
+  }
+}
+
+// Cleanup function for proper disposal
+function cleanup() {
+  debug.log('Cleaning up resources...');
+  
+  // Stop animation loop
+  if (animationId) {
+    cancelAnimationFrame(animationId);
+    animationId = null;
+  }
+  
+  // Clean up event listeners
+  window.removeEventListener('resize', onWindowResize);
+  window.removeEventListener('resize', checkOrientation);
+  window.removeEventListener('orientationchange', checkOrientation);
+  
+  // Clean up mobile input
+  if (mobileInput) {
+    mobileInput.dispose();
+    mobileInput = null;
+  }
+  
+  // Clean up projectiles
+  projectiles.forEach(p => p.destroy(scene, world));
+  projectiles = [];
+  
+  // Clean up threats
+  threatManager.clearAll();
+  
+  // Dispose of renderer
+  renderer.dispose();
+  
+  // Clear caches
+  MaterialCache.getInstance().clear();
+}
+
+// Add cleanup on page unload
+window.addEventListener('beforeunload', cleanup);
+window.addEventListener('pagehide', cleanup);
+
 // Render bottleneck tracking
 let frameCount = 0;
 let renderBottleneckLogged = false;
 
 function animate() {
   animationId = requestAnimationFrame(animate);
+  
+  // Check memory pressure on mobile
+  if (deviceInfo.isMobile || deviceInfo.isTablet) {
+    checkMemoryPressure();
+  }
 
   // CHAINSAW: Removed profiler overhead during gameplay
   // Store camera reference for health bar orientation
@@ -1235,7 +1425,11 @@ function animate() {
     // Adjust max interceptors based on performance
     const maxInterceptors = deviceCaps.getMaxSimultaneousInterceptors();
     if (interceptionSystem.getActiveInterceptorCount() >= maxInterceptors) {
-      battery.getConfig().interceptorLimit = maxInterceptors;
+      // Apply interceptor limit to all batteries
+      const allBatteries = domePlacementSystem.getAllBatteries();
+      allBatteries.forEach(battery => {
+        battery.getConfig().interceptorLimit = maxInterceptors;
+      });
     }
   }
 
@@ -1414,6 +1608,9 @@ function checkOrientation() {
   const orientationOverlay = document.getElementById('orientation-overlay');
   if (!orientationOverlay) return false;
 
+  // Disable orientation lock for now to debug touch issues
+  return false;
+  
   // Only check on small mobile devices
   const isSmallMobile = window.innerWidth <= 768 && deviceInfo.isMobile;
   const isPortrait = window.innerHeight > window.innerWidth;
@@ -1485,3 +1682,18 @@ if (!isLocked) {
 
 // Final fallback after animation starts
 setTimeout(hideLoadingScreen, 100);
+
+// Debug: Check what's blocking touch events
+if (deviceInfo.isMobile) {
+  setTimeout(() => {
+    console.log('Canvas element:', renderer.domElement);
+    console.log('Canvas z-index:', renderer.domElement.style.zIndex);
+    console.log('Controls enabled:', controls.enabled);
+    console.log('Controls touch settings:', controls.touches);
+    
+    // Add global touch listener to see if any element is capturing events
+    document.addEventListener('touchstart', (e) => {
+      console.log('Document touch detected on:', e.target);
+    }, { passive: true, capture: true });
+  }, 1000);
+}

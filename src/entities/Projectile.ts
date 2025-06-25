@@ -395,8 +395,9 @@ export class Projectile {
 
       if (shouldDetonate) {
         // Stop exhaust trail
-        if (this.exhaustTrail) {
-          this.exhaustTrail.stop();
+        if (this.exhaustTrailId) {
+          const unifiedTrail = UnifiedTrailSystem.getInstance(this.scene);
+          unifiedTrail.removeTrail(this.exhaustTrailId);
         }
 
         // Trigger detonation
@@ -502,8 +503,9 @@ export class Projectile {
     switch (this.failureMode) {
       case 'motor':
         // Motor failure - stop thrust, let gravity take over
-        if (this.exhaustTrail) {
-          this.exhaustTrail.stop();
+        if (this.exhaustTrailId) {
+          const unifiedTrail = UnifiedTrailSystem.getInstance(this.scene);
+          unifiedTrail.removeTrail(this.exhaustTrailId);
         }
         // Reduce velocity significantly
         this.body.velocity.x *= 0.3;

@@ -53,6 +53,17 @@ export class ThreatManager extends EventEmitter {
       }
     }
   }
+  
+  clearOldestThreats(count: number): void {
+    const toRemove = Math.min(count, this.threats.length);
+    for (let i = 0; i < toRemove; i++) {
+      const threat = this.threats.shift();
+      if (threat) {
+        threat.destroy(this.scene, this.world);
+      }
+    }
+    debug.warn(`[ThreatManager] Cleared ${toRemove} oldest threats for memory management`);
+  }
 
   private cleanupOldestImpactMarker(): void {
     if (this.impactMarkers.length >= ThreatManager.MAX_IMPACT_MARKERS) {

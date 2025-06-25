@@ -116,7 +116,8 @@ export class MobileInputManager {
   }
 
   private onTouchStart(event: TouchEvent) {
-    event.preventDefault();
+    // Don't prevent default for OrbitControls to work
+    // event.preventDefault();
 
     // Track all new touches
     for (let i = 0; i < event.changedTouches.length; i++) {
@@ -151,7 +152,8 @@ export class MobileInputManager {
   }
 
   private onTouchMove(event: TouchEvent) {
-    event.preventDefault();
+    // Don't prevent default for OrbitControls to work
+    // event.preventDefault();
 
     // Update touch positions
     for (let i = 0; i < event.changedTouches.length; i++) {
@@ -193,7 +195,8 @@ export class MobileInputManager {
   }
 
   private onTouchEnd(event: TouchEvent) {
-    event.preventDefault();
+    // Don't prevent default for OrbitControls to work
+    // event.preventDefault();
 
     // Process ended touches
     for (let i = 0; i < event.changedTouches.length; i++) {
