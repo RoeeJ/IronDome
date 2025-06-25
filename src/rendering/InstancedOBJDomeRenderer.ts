@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import { OBJLoader } from 'three/examples/jsm/loaders/OBJLoader.js';
 import * as BufferGeometryUtils from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { IronDomeBattery } from '../entities/IronDomeBattery';
-import { debug } from '../utils/DebugLogger';
+import { debug } from '../utils/logger';
 import { GeometryOptimizer } from '../utils/GeometryOptimizer';
 
 export class InstancedOBJDomeRenderer {

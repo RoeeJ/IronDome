@@ -1,3 +1,6 @@
+// Load configuration first
+import './config/seq-config';
+
 import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import * as CANNON from 'cannon-es';
@@ -16,7 +19,7 @@ import { Profiler } from './utils/Profiler';
 import { ProfilerDisplay } from './ui/ProfilerDisplay';
 import { RenderProfiler } from './utils/RenderProfiler';
 import { ModelCache } from './utils/ModelCache';
-import { debug } from './utils/DebugLogger';
+import { debug } from './utils/logger';  // Using Seq-enabled logger when configured
 import { MobileInputManager } from './input/MobileInputManager';
 import { DeviceCapabilities } from './utils/DeviceCapabilities';
 import { ResponsiveUI } from './ui/ResponsiveUI';

@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { IronDomeBattery } from '../entities/IronDomeBattery';
 import { Threat } from '../entities/Threat';
-import { debug } from '../utils/DebugLogger';
+import { debug } from '../utils/logger';
 
 interface ThreatAssignment {
   threatId: string;

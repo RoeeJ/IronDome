@@ -3,7 +3,7 @@ import * as CANNON from 'cannon-es';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { ProximityFuse } from '../systems/ProximityFuse';
 import { ModelCache } from '../utils/ModelCache';
-import { debug } from '../utils/DebugLogger';
+import { debug } from '../utils/logger';
 import { ThrustVectorControl } from '../systems/ThrustVectorControl';
 import { UnifiedTrailSystem, TrailType } from '../systems/UnifiedTrailSystem';
 import { GeometryFactory } from '../utils/GeometryFactory';
@@ -565,12 +565,13 @@ export class Projectile {
     const minGuidanceDistance = 15; // Don't guide for first 15 meters
     if (distanceTraveled < minGuidanceDistance) {
       // Just orient the missile during launch phase
-      debug.category(
-        'Guidance',
-        `[LAUNCH PHASE] Distance traveled: ${distanceTraveled.toFixed(
-          1
-        )}m < ${minGuidanceDistance}m`
-      );
+      // Too verbose - logs every frame during launch
+      // debug.category(
+      //   'Guidance',
+      //   `[LAUNCH PHASE] Distance traveled: ${distanceTraveled.toFixed(
+      //     1
+      //   )}m < ${minGuidanceDistance}m`
+      // );
       this.orientMissile(currentVelocity);
       return;
     }

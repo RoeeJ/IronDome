@@ -9,7 +9,7 @@ import { StaticRadarNetwork } from '../scene/StaticRadarNetwork';
 import { InvisibleRadarSystem } from '../scene/InvisibleRadarSystem';
 import { InstancedOBJDomeRenderer } from '../rendering/InstancedOBJDomeRenderer';
 import { OBJLoader } from 'three/examples/jsm/loaders/OBJLoader.js';
-import { debug } from '../utils/DebugLogger';
+import { debug } from '../utils/logger';
 
 export interface PlacedDome {
   id: string;

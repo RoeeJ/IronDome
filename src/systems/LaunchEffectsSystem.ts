@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { GeometryFactory } from '@/utils/GeometryFactory';
 import { MaterialCache } from '@/utils/MaterialCache';
+// import { debug } from '@/utils/logger'; // Uncomment to enable debug logging
 
 export interface LaunchEffectConfig {
   smokeCloudSize: number;
@@ -260,7 +261,7 @@ export class LaunchEffectsSystem {
     ring.position.y = 0.005; // Very low to avoid z-fighting with other effects
     this.scene.add(ring);
 
-    console.log(`Created dust ring at ${position.x.toFixed(1)}, ${position.z.toFixed(1)}`);
+    // debug.category('LaunchEffects', `Created dust ring at ${position.x.toFixed(1)}, ${position.z.toFixed(1)}`);
 
     // Create dust particles
     const particleCount = 8; // Further reduced for performance
@@ -304,7 +305,7 @@ export class LaunchEffectsSystem {
           this.scene.remove(dustPoints);
           ringMaterial.dispose(); // Dispose cloned material
           dustGeometry.dispose();
-          console.log(`Removed dust ring from ${position.x.toFixed(1)}, ${position.z.toFixed(1)}`);
+          // debug.category('LaunchEffects', `Removed dust ring from ${position.x.toFixed(1)}, ${position.z.toFixed(1)}`);
           return false;
         }
 
@@ -353,11 +354,11 @@ export class LaunchEffectsSystem {
     const scorchId = `scorch_${Date.now()}_${Math.random()}`;
     this.activeScorchMarks.set(scorchId, { mesh: scorch, material });
 
-    console.log(
-      `Created scorch mark ${scorchId} at ${position.x.toFixed(
-        1
-      )}, ${position.z.toFixed(1)}. Active scorch marks: ${this.activeScorchMarks.size}`
-    );
+    // debug.category('LaunchEffects',
+    //   `Created scorch mark ${scorchId} at ${position.x.toFixed(
+    //     1
+    //   )}, ${position.z.toFixed(1)}. Active scorch marks: ${this.activeScorchMarks.size}`
+    // );
 
     // Fade in then slowly fade out
     const startTime = Date.now();
@@ -368,11 +369,11 @@ export class LaunchEffectsSystem {
           this.scene.remove(scorch);
           material.dispose(); // Dispose cloned material
           this.activeScorchMarks.delete(scorchId);
-          console.log(
-            `Removed scorch mark ${scorchId} from ${position.x.toFixed(
-              1
-            )}, ${position.z.toFixed(1)}. Active scorch marks: ${this.activeScorchMarks.size}`
-          );
+          // debug.category('LaunchEffects',
+          //   `Removed scorch mark ${scorchId} from ${position.x.toFixed(
+          //     1
+          //   )}, ${position.z.toFixed(1)}. Active scorch marks: ${this.activeScorchMarks.size}`
+          // );
           return false;
         }
 
@@ -419,7 +420,7 @@ export class LaunchEffectsSystem {
 
   // Clean up any orphaned scorch marks that might have been missed
   cleanupOrphanedScorchMarks(): void {
-    console.log(`Cleaning up scorch marks. Current count: ${this.activeScorchMarks.size}`);
+    // debug.category('LaunchEffects', `Cleaning up scorch marks. Current count: ${this.activeScorchMarks.size}`);
 
     // Remove all tracked scorch marks
     for (const [id, data] of this.activeScorchMarks) {
@@ -448,7 +449,7 @@ export class LaunchEffectsSystem {
       }
     });
 
-    console.log(`Found ${toRemove.length} potential orphaned scorch marks in scene`);
+    // debug.category('LaunchEffects', `Found ${toRemove.length} potential orphaned scorch marks in scene`);
     toRemove.forEach(mesh => {
       this.scene.remove(mesh);
       if ((mesh as THREE.Mesh).material) {

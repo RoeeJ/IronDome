@@ -3,7 +3,7 @@ import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { Threat } from '../entities/Threat';
 import { Projectile } from '../entities/Projectile';
 import { IronDomeBattery } from '../entities/IronDomeBattery';
-import { debug } from '../utils/DebugLogger';
+import { debug } from '../utils/logger';
 
 export enum CameraMode {
   ORBIT = 'orbit',

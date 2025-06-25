@@ -3,7 +3,7 @@ import * as BufferGeometryUtils from 'three/examples/jsm/utils/BufferGeometryUti
 import { MaterialCache } from '../utils/MaterialCache';
 import { GeometryFactory } from '../utils/GeometryFactory';
 import { ExplosionManager, ExplosionType } from '../systems/ExplosionManager';
-import { debug } from '../utils/DebugLogger';
+import { debug } from '../utils/logger';
 
 interface Building {
   id: string;
@@ -170,7 +170,7 @@ export class OptimizedBuildingSystem {
         const hours = timeObj.hours;
         // Debug first building
         if (this.buildings.size === 0) {
-          console.log('First building window creation, time:', hours);
+          // console.log('First building window creation, time:', hours);
         }
         // Match the time-based percentages
         if (hours >= 11 && hours < 14) {
@@ -219,12 +219,12 @@ export class OptimizedBuildingSystem {
         
         // Debug first few windows
         if (windowIndices.length <= 3) {
-          console.log(`Window ${windowIndices.length - 1} created:`, {
-            isLit,
-            mesh: isLit ? 'lit' : 'unlit',
-            poolIndex,
-            position: this.dummyObject.position
-          });
+          // console.log(`Window ${windowIndices.length - 1} created:`, {
+          //   isLit,
+          //   mesh: isLit ? 'lit' : 'unlit',
+          //   poolIndex,
+          //   position: this.dummyObject.position
+          // });
         }
       }
     };
@@ -280,7 +280,7 @@ export class OptimizedBuildingSystem {
     // Update both window meshes
     this.litWindowMesh.instanceMatrix.needsUpdate = true;
     this.unlitWindowMesh.instanceMatrix.needsUpdate = true;
-    console.log(`Building ${id} created with ${windowIndices.length} windows, total windows: ${this.windowCount + windowIndices.length}`);
+    // debug.category('BuildingSystem', `Building ${id} created with ${windowIndices.length} windows, total windows: ${this.windowCount + windowIndices.length}`);
     this.windowCount += windowIndices.length;
     
     const building: Building = {
@@ -600,7 +600,7 @@ export class OptimizedBuildingSystem {
     if (this.debugCount === undefined) this.debugCount = 0;
     if (this.debugCount++ < 3) {
       const sampleStates = windowStatesArray.slice(0, 10);
-      console.log('Sample window states for debugging:', sampleStates);
+      // console.log('Sample window states for debugging:', sampleStates);
       console.log('First state lit check:', sampleStates[0]?.lit, typeof sampleStates[0]?.lit);
     }
     const targetLitCount = Math.floor(totalWindows * targetLitPercentage);
@@ -618,7 +618,8 @@ export class OptimizedBuildingSystem {
         Pools - lit available: ${this.litWindowPool.length}, unlit available: ${this.unlitWindowPool.length}`);
     }
     
-    console.log(`Time of day update: ${hours.toFixed(1)}h, windows: ${currentLitCount}/${totalWindows} lit (${(currentLitCount/totalWindows*100).toFixed(0)}%) → target: ${targetLitCount} (${(targetLitPercentage * 100).toFixed(0)}%), change: ${difference}, forceUpdate: ${forceUpdate}`);
+    // Commented out - too verbose for Seq
+    // console.log(`Time of day update: ${hours.toFixed(1)}h, windows: ${currentLitCount}/${totalWindows} lit (${(currentLitCount/totalWindows*100).toFixed(0)}%) → target: ${targetLitCount} (${(targetLitPercentage * 100).toFixed(0)}%), change: ${difference}, forceUpdate: ${forceUpdate}`);
     
     // For force updates (time jumps), update all windows at once
     // For gradual updates, limit to avoid performance issues
@@ -629,7 +630,7 @@ export class OptimizedBuildingSystem {
     
     // Collect all window keys
     const windowKeys = Array.from(this.windowStates.keys());
-    console.log(`Total window keys: ${windowKeys.length}, first few keys:`, windowKeys.slice(0, 3));
+    // console.log(`Total window keys: ${windowKeys.length}, first few keys:`, windowKeys.slice(0, 3));
     
     if (difference > 0) {
       // Need to turn on more windows
@@ -650,7 +651,7 @@ export class OptimizedBuildingSystem {
         if (switched) switchedCount++;
       }
       if (forceUpdate) {
-        console.log(`Turned ON ${switchedCount} windows (force update)`);
+        // debug.category('WindowUpdate', `Turned ON ${switchedCount} windows (force update)`);
       }
     } else if (difference < 0) {
       // Need to turn off more windows
@@ -663,7 +664,7 @@ export class OptimizedBuildingSystem {
         console.error('No lit windows found to turn off! Window states might be corrupted.');
         // Debug: check a sample of window states
         const sampleStates = Array.from(this.windowStates.entries()).slice(0, 5);
-        console.log('Sample window states:', sampleStates);
+        // console.log('Sample window states:', sampleStates);
       }
       const toSwitch = Math.min(Math.abs(difference), litWindows.length);
       

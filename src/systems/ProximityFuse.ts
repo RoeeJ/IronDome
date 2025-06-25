@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { debug } from '../utils/DebugLogger';
+import { debug } from '../utils/logger';
 
 export interface ProximityFuseConfig {
   armingDistance: number; // Minimum distance before fuse arms (meters)
@@ -41,10 +41,11 @@ export class ProximityFuse {
 
     // DEBUG: Log distance traveled and current distance to target
     const distanceToTarget = currentPosition.distanceTo(targetPosition);
-    debug.category(
-      'ProximityFuse',
-      `[UPDATE] Distance traveled: ${this.distanceTraveled.toFixed(1)}m, Distance to target: ${distanceToTarget.toFixed(1)}m, Armed: ${this.armed}, Detonated: ${this.detonated}`
-    );
+    // Commented out - too verbose for every frame
+    // debug.category(
+    //   'ProximityFuse',
+    //   `[UPDATE] Distance traveled: ${this.distanceTraveled.toFixed(1)}m, Distance to target: ${distanceToTarget.toFixed(1)}m, Armed: ${this.armed}, Detonated: ${this.detonated}`
+    // );
 
     // Check if fuse should arm
     if (!this.armed && this.distanceTraveled >= this.config.armingDistance) {

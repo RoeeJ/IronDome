@@ -1,4 +1,6 @@
 /**
+ * @deprecated Use `import { debug } from '../utils/logger'` instead
+ * 
  * Debug logger that only outputs when ?debug is in the URL
  */
 export class DebugLogger {
@@ -6,7 +8,7 @@ export class DebugLogger {
   private enabled: boolean;
   private prefix: string = '[IronDome]';
 
-  private constructor() {
+  protected constructor() {
     // Check if debug mode is enabled via query parameter
     const urlParams = new URLSearchParams(window.location.search);
     this.enabled = urlParams.has('debug');

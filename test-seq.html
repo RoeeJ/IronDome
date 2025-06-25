@@ -1,0 +1,211 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Seq Integration Test</title>
+    <style>
+        body {
+            font-family: monospace;
+            padding: 20px;
+            background: #1a1a1a;
+            color: #ddd;
+        }
+        button {
+            padding: 10px 20px;
+            margin: 5px;
+            background: #333;
+            color: #fff;
+            border: 1px solid #666;
+            cursor: pointer;
+        }
+        button:hover {
+            background: #444;
+        }
+        #output {
+            margin-top: 20px;
+            padding: 10px;
+            background: #222;
+            border: 1px solid #444;
+            min-height: 200px;
+            white-space: pre-wrap;
+        }
+        .config {
+            background: #2a2a2a;
+            padding: 10px;
+            margin: 10px 0;
+            border: 1px solid #444;
+        }
+        input {
+            background: #333;
+            color: #fff;
+            border: 1px solid #666;
+            padding: 5px;
+            width: 300px;
+        }
+    </style>
+</head>
+<body>
+    <h1>Seq Integration Test</h1>
+    
+    <div class="config">
+        <h3>Manual Configuration (for testing without .env file)</h3>
+        <div>
+            <label>Endpoint: <input id="endpoint" placeholder="https://your-seq-server.com" /></label>
+        </div>
+        <div>
+            <label>API Key: <input id="apiKey" type="password" placeholder="Your API key" /></label>
+        </div>
+        <button onclick="setManualConfig()">Set Config</button>
+        <button onclick="testDirectConnection()">Test Direct Connection</button>
+    </div>
+
+    <div>
+        <button onclick="checkConfig()">Check Config</button>
+        <button onclick="checkLogger()">Check Logger</button>
+        <button onclick="sendTestLog()">Send Test Log</button>
+        <button onclick="sendBatch()">Send Batch (10 logs)</button>
+        <button onclick="flushLogs()">Force Flush</button>
+        <button onclick="testSeq()">Run Full Test</button>
+    </div>
+
+    <div id="output"></div>
+
+    <script type="module">
+        // For manual testing, we'll set up the environment
+        window.__ENV__ = window.__ENV__ || {};
+        
+        window.log = (msg) => {
+            const output = document.getElementById('output');
+            output.textContent += msg + '\n';
+            console.log(msg);
+        };
+
+        window.checkConfig = async () => {
+            const { getSeqConfig } = await import('./src/utils/logger.ts');
+            const config = getSeqConfig();
+            log('=== Current Seq Config ===');
+            log(JSON.stringify(config, null, 2));
+        };
+
+        window.checkLogger = async () => {
+            const { getLogger } = await import('./src/utils/logger.ts');
+            const logger = getLogger();
+            log('=== Logger Info ===');
+            log(`Logger type: ${logger.constructor.name}`);
+            log(`Has flush: ${typeof (logger as any).flush === 'function'}`);
+            log(`Has structured: ${typeof (logger as any).structured === 'function'}`);
+        };
+
+        window.sendTestLog = async () => {
+            const { debug } = await import('./src/utils/logger.ts');
+            log('Sending test log...');
+            debug.log('Test log from test page', { timestamp: new Date().toISOString() });
+            log('Log sent');
+        };
+
+        window.sendBatch = async () => {
+            const { debug } = await import('./src/utils/logger.ts');
+            log('Sending batch of 10 logs...');
+            for (let i = 0; i < 10; i++) {
+                debug.log(`Batch log ${i + 1}`, { 
+                    index: i, 
+                    timestamp: new Date().toISOString(),
+                    testRun: 'batch-test'
+                });
+            }
+            log('Batch sent');
+        };
+
+        window.flushLogs = async () => {
+            const { getLogger } = await import('./src/utils/logger.ts');
+            const logger = getLogger() as any;
+            if (logger.flush) {
+                log('Flushing logs...');
+                await logger.flush();
+                log('Flush complete');
+            } else {
+                log('Logger does not support flush');
+            }
+        };
+
+        window.testSeq = async () => {
+            const { testSeq } = await import('./src/utils/logger.ts');
+            await testSeq();
+        };
+
+        window.setManualConfig = () => {
+            const endpoint = document.getElementById('endpoint').value;
+            const apiKey = document.getElementById('apiKey').value;
+            
+            if (!endpoint || !apiKey) {
+                log('Please enter both endpoint and API key');
+                return;
+            }
+            
+            // Set environment variables
+            window.__ENV__.SEQ_ENABLED = 'true';
+            window.__ENV__.SEQ_ENDPOINT = endpoint;
+            window.__ENV__.SEQ_API_KEY = apiKey;
+            window.__ENV__.SEQ_USE_PROXY = 'false';
+            
+            log('Manual config set. Reload the page to apply.');
+        };
+
+        window.testDirectConnection = async () => {
+            const endpoint = document.getElementById('endpoint').value;
+            const apiKey = document.getElementById('apiKey').value;
+            
+            if (!endpoint || !apiKey) {
+                log('Please enter both endpoint and API key');
+                return;
+            }
+            
+            log('Testing direct connection to Seq...');
+            
+            try {
+                const testEvent = {
+                    '@t': new Date().toISOString(),
+                    '@mt': 'Test connection from Iron Dome',
+                    '@l': 'Information',
+                    'Application': 'IronDome-Test',
+                    'Environment': 'browser'
+                };
+                
+                const response = await fetch(`${endpoint}/api/events/raw`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/vnd.serilog.clef',
+                        'X-Seq-ApiKey': apiKey
+                    },
+                    body: JSON.stringify(testEvent)
+                });
+                
+                log(`Response status: ${response.status}`);
+                log(`Response status text: ${response.statusText}`);
+                
+                if (!response.ok) {
+                    const text = await response.text();
+                    log(`Response body: ${text}`);
+                }
+                
+                if (response.ok) {
+                    log('✓ Connection successful! Check your Seq dashboard.');
+                } else {
+                    log('✗ Connection failed. Check endpoint and API key.');
+                }
+                
+            } catch (error) {
+                log(`Error: ${error.message}`);
+                log('This might be a CORS issue. Check browser console for details.');
+            }
+        };
+
+        // Initial check
+        window.onload = () => {
+            log('Test page loaded. Use the buttons above to test Seq integration.');
+            log('Check browser console for additional debug information.');
+        };
+    </script>
+</body>
+</html>

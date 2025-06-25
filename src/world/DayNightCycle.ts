@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { EnvironmentSystem } from './EnvironmentSystem';
-import { debug } from '../utils/DebugLogger';
+import { debug } from '../utils/logger';
 
 export interface TimeOfDay {
   hours: number;

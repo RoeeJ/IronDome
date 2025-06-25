@@ -10,7 +10,7 @@ import { InvisibleRadarSystem } from '../scene/InvisibleRadarSystem';
 import { LaunchEffectsSystem } from '../systems/LaunchEffectsSystem';
 import { GeometryOptimizer } from '../utils/GeometryOptimizer';
 import { GeometryConfig } from '../config/GeometryConfig';
-import { debug } from '../utils/DebugLogger';
+import { debug } from '../utils/logger';
 import { ResourceManager } from '../game/ResourceManager';
 import { MaterialCache } from '../utils/MaterialCache';
 import { GeometryFactory } from '../utils/GeometryFactory';

@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { OBJLoader } from 'three/examples/jsm/loaders/OBJLoader.js';
-import { debug } from '../utils/DebugLogger';
+import { debug } from '../utils/logger';
 import { GeometryFactory } from '../utils/GeometryFactory';
 import { MaterialCache } from '../utils/MaterialCache';
 

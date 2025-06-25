@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { MaterialCache } from '../utils/MaterialCache';
 import { GeometryFactory } from '../utils/GeometryFactory';
-import { debug } from '../utils/DebugLogger';
+import { debug } from '../utils/logger';
 
 export enum ZoneType {
   SAFE = 'safe',

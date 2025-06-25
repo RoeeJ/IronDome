@@ -18,6 +18,7 @@ import {
   ScenarioManager 
 } from '../game/scenarios/AttackScenarios';
 import { ThreatLauncherSystem, LauncherConfig, LauncherSite } from './ThreatLauncherSystem';
+import { debug } from '../utils/logger';
 
 export interface ThreatSpawnConfig {
   type: ThreatType;

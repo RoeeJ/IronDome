@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import { Sky } from 'three/examples/jsm/objects/Sky.js';
 import { MaterialCache } from '../utils/MaterialCache';
 import { GeometryFactory } from '../utils/GeometryFactory';
-import { debug } from '../utils/DebugLogger';
+import { debug } from '../utils/logger';
 
 export interface EnvironmentConfig {
   fogEnabled: boolean;

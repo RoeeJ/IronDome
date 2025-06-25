@@ -1,6 +1,6 @@
 import GUI from 'lil-gui';
 import { DeviceCapabilities } from '../utils/DeviceCapabilities';
-import { debug } from '../utils/DebugLogger';
+import { debug } from '../utils/logger';
 
 export interface UILayout {
   position: 'top-left' | 'top-right' | 'bottom-left' | 'bottom-right';

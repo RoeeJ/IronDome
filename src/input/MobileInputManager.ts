@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
-import { debug } from '../utils/DebugLogger';
+import { debug } from '../utils/logger';
 
 interface TouchState {
   active: boolean;

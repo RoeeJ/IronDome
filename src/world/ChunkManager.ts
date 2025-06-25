@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { debug } from '../utils/DebugLogger';
+import { debug } from '../utils/logger';
 
 export interface ChunkConfig {
   chunkSize: number; // Size of each chunk in world units

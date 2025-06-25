@@ -6,7 +6,7 @@ import { Projectile } from '../entities/Projectile';
 import { FragmentationSystem } from '../systems/FragmentationSystem';
 import { DebrisSystem } from '../systems/DebrisSystem';
 import { Profiler } from '../utils/Profiler';
-import { debug } from '../utils/DebugLogger';
+import { debug } from '../utils/logger';
 import { ResourceManager } from '../game/ResourceManager';
 import { GameState } from '../game/GameState';
 import { ThreatManager } from './ThreatManager';

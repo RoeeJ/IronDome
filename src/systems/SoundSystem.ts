@@ -1,4 +1,4 @@
-import { debug } from '../utils/DebugLogger';
+import { debug } from '../utils/logger';
 
 interface SoundOptions {
   volume?: number;

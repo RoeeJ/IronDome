@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import { InstancedExplosionRenderer } from '../rendering/InstancedExplosionRenderer';
 import { MaterialCache } from '../utils/MaterialCache';
 import { GeometryFactory } from '../utils/GeometryFactory';
-import { debug } from '../utils/DebugLogger';
+import { debug } from '../utils/logger';
 import { LightPool } from './LightPool';
 
 export enum ExplosionType {
