@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { debug } from '../utils/logger';
+import { MaterialCache } from '../utils/MaterialCache';
 
 export interface ChunkConfig {
   chunkSize: number; // Size of each chunk in world units
@@ -67,7 +68,7 @@ export class ChunkManager {
     const groundGeometry = new THREE.PlaneGeometry(this.config.chunkSize, this.config.chunkSize);
     const groundMaterial =
       this.config.groundMaterial ||
-      new THREE.MeshStandardMaterial({
+      MaterialCache.getInstance().getMeshStandardMaterial({
         color: 0x3a5f3a,
         roughness: 0.8,
         metalness: 0.2,

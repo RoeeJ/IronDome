@@ -355,8 +355,8 @@ export class ExplosionManager {
 
     // Now create the actual shockwave
     const geometry = GeometryFactory.getInstance().getRing(0, radius * 2, 32, 1);
-    // Clone material to allow independent opacity animation
-    const baseMaterial = MaterialCache.getInstance().getMeshBasicMaterial({
+    // Create unique material for this shockwave (needed for opacity animation)
+    const material = new THREE.MeshBasicMaterial({
       color: 0xffffff,
       transparent: true,
       opacity: 0.5,
@@ -364,7 +364,6 @@ export class ExplosionManager {
       blending: THREE.AdditiveBlending,
       depthWrite: false,
     });
-    const material = baseMaterial.clone();
 
     const shockwave = new THREE.Mesh(geometry, material);
     shockwave.position.copy(position);

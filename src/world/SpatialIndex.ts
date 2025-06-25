@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { debug } from '../utils/logger';
+import { MaterialCache } from '../utils/MaterialCache';
 
 export interface SpatialObject {
   id: string;
@@ -267,7 +268,7 @@ export class SpatialIndex {
     ];
 
     const geometry = new THREE.BufferGeometry().setFromPoints(points);
-    const material = new THREE.LineBasicMaterial({
+    const material = MaterialCache.getInstance().getLineBasicMaterial({
       color: node.depth === 0 ? 0xff0000 : 0x00ff00,
       opacity: 1 - node.depth * 0.2,
       transparent: true,

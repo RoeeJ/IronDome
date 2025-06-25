@@ -3,7 +3,6 @@ import * as THREE from 'three';
 import { ThreatManager } from '../../scene/ThreatManager';
 import { DomePlacementSystem } from '../../game/DomePlacementSystem';
 import { CameraController, CameraMode } from '../../camera/CameraController';
-import { DayNightCycle } from '../../world/DayNightCycle';
 import { WorldScaleIndicators } from '../../world/WorldScaleIndicators';
 import { SoundSystem } from '../../systems/SoundSystem';
 import { 
@@ -16,7 +15,6 @@ export interface SandboxControlsConfig {
   threatManager: ThreatManager;
   domePlacementSystem: DomePlacementSystem;
   cameraController: CameraController;
-  dayNightCycle: DayNightCycle;
   worldScaleIndicators: WorldScaleIndicators;
   projectiles: any[];
   simulationControls: any;
@@ -226,72 +224,71 @@ export class SandboxControls {
   }
   
   private setupTimeControls(): void {
-    this.timeFolder = this.gui.addFolder('🌅 Time & Weather');
+    this.timeFolder = this.gui.addFolder('⏰ Time & Lighting');
+    
+    const optimizedDayNight = (window as any).__optimizedDayNight;
+    if (!optimizedDayNight) return;
     
     const timeControls = {
-      currentTime: '',
-      speed: 1,
+      currentTime: optimizedDayNight.getTime().hours,
+      timeSpeed: 1,
       
-      // Preset times
-      dawn: () => {
-        this.config.dayNightCycle.setDawn();
-        this.config.showNotification('Time set to dawn');
+      setMorning: () => {
+        optimizedDayNight.setTime(8);
+        timeControls.currentTime = 8;
+        // Force building system update
+        const buildingSystem = (window as any).__buildingSystem;
+        if (buildingSystem) buildingSystem.updateTimeOfDay(8, true);
+        this.config.showNotification('🌅 Morning - 8:00 AM');
       },
       
-      day: () => {
-        this.config.dayNightCycle.setNoon();
-        this.config.showNotification('Time set to noon');
+      setNoon: () => {
+        optimizedDayNight.setTime(12);
+        timeControls.currentTime = 12;
+        const buildingSystem = (window as any).__buildingSystem;
+        if (buildingSystem) buildingSystem.updateTimeOfDay(12, true);
+        this.config.showNotification('☀️ Noon - 12:00 PM');
       },
       
-      dusk: () => {
-        this.config.dayNightCycle.setDusk();
-        this.config.showNotification('Time set to dusk');
+      setEvening: () => {
+        optimizedDayNight.setTime(18);
+        timeControls.currentTime = 18;
+        const buildingSystem = (window as any).__buildingSystem;
+        if (buildingSystem) buildingSystem.updateTimeOfDay(18, true);
+        this.config.showNotification('🌆 Evening - 6:00 PM');
       },
       
-      night: () => {
-        this.config.dayNightCycle.setMidnight();
-        this.config.showNotification('Time set to midnight');
+      setNight: () => {
+        optimizedDayNight.setTime(22);
+        timeControls.currentTime = 22;
+        const buildingSystem = (window as any).__buildingSystem;
+        if (buildingSystem) buildingSystem.updateTimeOfDay(22, true);
+        this.config.showNotification('🌙 Night - 10:00 PM');
       }
     };
     
-    // Time display (read-only)
-    const timeDisplay = this.timeFolder.add(timeControls, 'currentTime')
-      .name('⏰ Current Time')
-      .disable()
-      .listen();
+    // Time of day slider with force update
+    this.timeFolder.add(timeControls, 'currentTime', 0, 24, 0.5)
+      .name('Time of Day')
+      .onChange((value: number) => {
+        optimizedDayNight.setTime(value);
+        // Force building system update on manual slider change
+        const buildingSystem = (window as any).__buildingSystem;
+        if (buildingSystem) buildingSystem.updateTimeOfDay(value, true);
+      });
     
-    // Speed control with preset buttons
-    const speedFolder = this.timeFolder.addFolder('Time Speed');
-    speedFolder.add({
-      normal: () => {
-        this.config.dayNightCycle.setTimeSpeed(1);
-        timeControls.speed = 1;
-      }
-    }, 'normal').name('1x Normal');
+    // Quick time buttons
+    this.timeFolder.add(timeControls, 'setMorning').name('🌅 Morning');
+    this.timeFolder.add(timeControls, 'setNoon').name('☀️ Noon');
+    this.timeFolder.add(timeControls, 'setEvening').name('🌆 Evening');
+    this.timeFolder.add(timeControls, 'setNight').name('🌙 Night');
     
-    speedFolder.add({
-      fast: () => {
-        this.config.dayNightCycle.setTimeSpeed(10);
-        timeControls.speed = 10;
-      }
-    }, 'fast').name('10x Fast');
-    
-    speedFolder.add({
-      veryFast: () => {
-        this.config.dayNightCycle.setTimeSpeed(30);
-        timeControls.speed = 30;
-      }
-    }, 'veryFast').name('30x Very Fast');
-    
-    // Time presets in a row
-    const presetsFolder = this.timeFolder.addFolder('Quick Time');
-    presetsFolder.add(timeControls, 'dawn').name('🌅 Dawn');
-    presetsFolder.add(timeControls, 'day').name('☀️ Day');
-    presetsFolder.add(timeControls, 'dusk').name('🌇 Dusk');
-    presetsFolder.add(timeControls, 'night').name('🌙 Night');
-    
-    // Store controls for updates
-    (this.timeFolder as any).controls = timeControls;
+    // Time speed control
+    this.timeFolder.add(timeControls, 'timeSpeed', 0, 10, 0.5)
+      .name('Time Speed')
+      .onChange((value: number) => {
+        optimizedDayNight.setTimeSpeed(value);
+      });
   }
   
   private setupViewControls(): void {
@@ -373,7 +370,7 @@ export class SandboxControls {
   private updateVisuals(controls: any): void {
     this.config.worldScaleIndicators.updateVisibility({
       showGrid: controls.showGrid,
-      showWindParticles: controls.showWind,
+      showWindParticles: false, // Keep disabled for performance
       showReferenceObjects: controls.showBuildings,
       showDistanceMarkers: false,
       showAltitudeMarkers: false
@@ -390,18 +387,15 @@ export class SandboxControls {
   }
   
   private startTimeUpdates(): void {
-    const updateTime = () => {
-      const timeFolder = this.timeFolder as any;
-      if (timeFolder.controls) {
-        timeFolder.controls.currentTime = this.config.dayNightCycle.formatTime();
+    // Update time display every 5 seconds (matches optimized system interval)
+    this.timeUpdateInterval = window.setInterval(() => {
+      const optimizedDayNight = (window as any).__optimizedDayNight;
+      if (optimizedDayNight && this.timeFolder) {
+        // Update folder title with current time
+        const currentTime = optimizedDayNight.formatTime();
+        this.timeFolder.title(`⏰ Time & Lighting (${currentTime})`);
       }
-    };
-    
-    // Update immediately
-    updateTime();
-    
-    // Update every second
-    this.timeUpdateInterval = window.setInterval(updateTime, 1000);
+    }, 5000);
   }
   
   destroy(): void {

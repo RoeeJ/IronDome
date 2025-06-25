@@ -1,5 +1,4 @@
-// Load configuration first
-import './config/seq-config';
+// CHAINSAW: Removed seq-config overhead
 
 import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
@@ -18,10 +17,9 @@ import { PerformanceMonitor } from './utils/PerformanceMonitor';
 import { Profiler } from './utils/Profiler';
 import { ProfilerDisplay } from './ui/ProfilerDisplay';
 import { RenderProfiler } from './utils/RenderProfiler';
-import { TextureCache } from './utils/TextureCache';
-import { ModelCache } from './utils/ModelCache';
+// CHAINSAW: Removed excess cache systems - keeping only MaterialCache
 import { debug } from './utils/logger';  // Using Seq-enabled logger when configured
-import { MemoryMonitor } from './utils/MemoryMonitor';
+// CHAINSAW: Removed memory monitoring overhead
 import { MobileInputManager } from './input/MobileInputManager';
 import { DeviceCapabilities } from './utils/DeviceCapabilities';
 import { ResponsiveUI } from './ui/ResponsiveUI';
@@ -30,27 +28,24 @@ import { WaveManager } from './game/WaveManager';
 import { ResourceManager } from './game/ResourceManager';
 import { DomePlacementSystem } from './game/DomePlacementSystem';
 import { GameUI } from './ui/GameUI';
-import { InstancedProjectileRenderer } from './rendering/InstancedProjectileRenderer';
-import { InstancedThreatRenderer } from './rendering/InstancedThreatRenderer';
-import { LODInstancedThreatRenderer } from './rendering/LODInstancedThreatRenderer';
-import { StatsDisplay } from './ui/StatsDisplay';
-import { ExtendedStatsDisplay } from './ui/ExtendedStatsDisplay';
+// CHAINSAW: Removed instanced renderer imports
+// CHAINSAW: Removed heavy stats monitoring systems
 import { BlastPhysics } from './systems/BlastPhysics';
-import { ExplosionManager, ExplosionType } from './systems/ExplosionManager';
-import { UnifiedTrailSystem } from './systems/UnifiedTrailSystem';
-import { GeometryFactory } from './utils/GeometryFactory';
+// CHAINSAW: Removed heavy explosion and trail systems
+// CHAINSAW: Removed geometry factory overhead
 import { MaterialCache } from './utils/MaterialCache';
 import { SoundSystem } from './systems/SoundSystem';
 import { Inspector } from './ui/Inspector';
 import { SandboxControls } from './ui/sandbox/SandboxControls';
 import { DeveloperControls } from './ui/sandbox/DeveloperControls';
 
-// Import new world systems
+// Essential systems only
 import { CameraController, CameraMode } from './camera/CameraController';
 import { EnvironmentSystem } from './world/EnvironmentSystem';
-import { DayNightCycle } from './world/DayNightCycle';
 import { WorldScaleIndicators } from './world/WorldScaleIndicators';
-import { BattlefieldZones } from './world/BattlefieldZones';
+// CHAINSAW OPTIMIZED: Time-sliced systems for visual polish without performance cost
+import { OptimizedDayNightCycle } from './world/OptimizedDayNightCycle';
+import { BuildingSystem } from './world/BuildingSystem';
 
 // Initialize device capabilities
 const deviceCaps = DeviceCapabilities.getInstance();
@@ -66,18 +61,8 @@ debug.log('Device detected:', {
 // Scene setup
 const scene = new THREE.Scene();
 
-// Create gradient background using shared texture cache to prevent shader program explosion
-const textureCache = TextureCache.getInstance();
-const gradientTexture = textureCache.getGradientTexture(1, 512, [
-  '#0a1929', // Very dark blue at top
-  '#1e3c72', // Dark blue  
-  '#2a5298', // Medium blue
-  '#5a7ba6'  // Lighter blue at horizon
-]);
-
-// Apply gradient as background (will be replaced by skybox)
-// scene.background = gradientTexture
-// scene.fog = new THREE.Fog(0x2a5298, 200, 1000) // Darker fog for atmosphere
+// CHAINSAW: Simple solid color background instead of gradient texture
+scene.background = new THREE.Color(0x2a5298);
 
 // Camera setup
 const camera = new THREE.PerspectiveCamera(
@@ -124,7 +109,6 @@ if (renderer.shadowMap.enabled) {
 document.body.appendChild(renderer.domElement);
 
 // Precompile common materials to prevent shader compilation freezes
-import { MaterialCache } from './utils/MaterialCache';
 const materialCache = MaterialCache.getInstance();
 // Pre-create commonly used materials
 materialCache.getMeshStandardMaterial({ color: 0x4a4a4a, roughness: 0.8, metalness: 0.3 });
@@ -213,43 +197,38 @@ world.addBody(groundBody);
 const gameState = GameState.getInstance();
 const resourceManager = ResourceManager.getInstance();
 
-// Initialize world systems
+// Initialize world systems - STATIC ONLY (no dynamic updates)
 const environmentSystem = new EnvironmentSystem(scene);
 environmentSystem.initialize({
   fogEnabled: true,
   skyboxEnabled: true,
   terrainEnabled: true,
-  cloudsEnabled: false, // Removed clouds
-  atmosphericScattering: true,
+  cloudsEnabled: false,
+  atmosphericScattering: false, // CHAINSAW: Disabled expensive atmosphere
 });
-
-const dayNightCycle = new DayNightCycle(scene, ambientLight, directionalLight);
-dayNightCycle.setEnvironmentSystem(environmentSystem);
-dayNightCycle.setTime(14, 0, 0); // Start at 2 PM
-// Set time speed to make full day/night cycle take 20 minutes (like Minecraft)
-// 24 hours in 20 minutes = 24 hours in 1200 seconds = 72x speed
-dayNightCycle.setTimeSpeed(72);
-
-// Make dayNightCycle globally available for building window system
-(window as any).__dayNightCycle = dayNightCycle;
 
 const worldScaleIndicators = new WorldScaleIndicators(scene, {
   showGrid: true,
-  showDistanceMarkers: false, // Disabled - removes red poles
-  showReferenceObjects: true, // Keep buildings only
-  showWindParticles: true, // Re-enabled wind particles
-  showAltitudeMarkers: false, // Disabled - removes cone indicators
+  showDistanceMarkers: false,
+  showReferenceObjects: true, // Keep buildings
+  showWindParticles: false,   // CHAINSAW: Disabled wind particles
+  showAltitudeMarkers: false,
   gridSize: 2000,
   gridDivisions: 100,
 });
 worldScaleIndicators.initialize();
-// Optimize static world geometry to reduce draw calls
 worldScaleIndicators.optimizeGeometry();
 
-// Disabled battlefield zones to remove tube corridors and border markers
-// const battlefieldZones = new BattlefieldZones(scene)
-// battlefieldZones.initialize()
-const battlefieldZones = null;
+// CHAINSAW OPTIMIZED: Initialize time-sliced polish systems
+const optimizedDayNight = new OptimizedDayNightCycle(scene, ambientLight, directionalLight);
+optimizedDayNight.setTime(14); // Start at 2 PM
+
+const buildingSystem = new BuildingSystem(scene);
+buildingSystem.generateCity(0, 0, 800); // SUPER SAIYAN 2: MASSIVE CITY!
+
+// Make globally accessible for SandboxControls and explosion damage
+(window as any).__optimizedDayNight = optimizedDayNight;
+(window as any).__buildingSystem = buildingSystem;
 
 // Create invisible ground plane for raycasting
 const groundGeometry = new THREE.PlaneGeometry(4000, 4000);
@@ -276,34 +255,7 @@ const threatManager = new ThreatManager(scene, world);
 // Make threat manager globally available for explosion system
 (window as any).__threatManager = threatManager;
 
-// Hook into threat lifecycle for instanced rendering
-threatManager.on('threatSpawned', (threat: Threat) => {
-  if (useInstancedRendering) {
-    if (useLODRendering) {
-      lodInstancedThreatRenderer.addThreat(threat);
-    } else {
-      instancedThreatRenderer.addThreat(threat);
-    }
-    // Add trail to batched renderer
-    const trailColor = threat.type === 'drone' ? new THREE.Color(0.5, 0.5, 0.5) : new THREE.Color(1, 0.3, 0);
-    instancedTrailRenderer.addTrail(threat, trailColor);
-  }
-});
-
-threatManager.on('threatDestroyed', (threatId: string) => {
-  if (useInstancedRendering) {
-    if (useLODRendering) {
-      lodInstancedThreatRenderer.removeThreat(threatId);
-    } else {
-      instancedThreatRenderer.removeThreat(threatId);
-    }
-    // Remove trail from batched renderer
-    const threat = threatManager.threats.find(t => t.id === threatId);
-    if (threat) {
-      instancedTrailRenderer.removeTrail(threat);
-    }
-  }
-});
+// CHAINSAW: Removed instanced rendering hooks - using standard meshes
 
 // Invisible Radar System - provides detection without visual towers
 import { InvisibleRadarSystem } from './scene/InvisibleRadarSystem';
@@ -321,7 +273,6 @@ interceptionSystem.setThreatManager(threatManager);
 
 // Export interception system for global access
 (window as any).__interceptionSystem = interceptionSystem;
-(window as any).__instancedProjectileRenderer = instancedProjectileRenderer;
 
 
 // Connect all systems
@@ -356,31 +307,9 @@ tacticalDisplay.update([], new THREE.Vector3(0, 0, 0), 20, 0.95, 20);
 // Projectile management
 let projectiles: Projectile[] = [];
 
-// Instanced renderers for performance
-const instancedProjectileRenderer = new InstancedProjectileRenderer(scene);
-const instancedThreatRenderer = new InstancedThreatRenderer(scene);
-const lodInstancedThreatRenderer = new LODInstancedThreatRenderer(scene, camera);
-const useInstancedRendering = true;
-const useLODRendering = true;
-
-// Import and create batched trail renderer
-import { InstancedTrailRenderer } from './rendering/OptimizedInstancedRenderer';
-const instancedTrailRenderer = new InstancedTrailRenderer(500, 30); // 500 trails, 30 points each
-scene.add(instancedTrailRenderer.mesh);
-// Make it globally available
-(window as any).__instancedTrailRenderer = instancedTrailRenderer;
-
-// Import and create instanced debris renderer
-import { InstancedDebrisRenderer } from './rendering/InstancedDebrisRenderer';
-const instancedDebrisRenderer = new InstancedDebrisRenderer(scene, 500);
-// Make it globally available for the debris system
-(window as any).__instancedDebrisRenderer = instancedDebrisRenderer;
-
-// Import and create instanced explosion renderer
-import { InstancedExplosionRenderer } from './rendering/InstancedExplosionRenderer';
-const instancedExplosionRenderer = new InstancedExplosionRenderer(scene, 30);
-// Make it globally available
-(window as any).__instancedExplosionRenderer = instancedExplosionRenderer;
+// CHAINSAW: Removed all instanced renderers - using standard Three.js meshes only
+const useInstancedRendering = false;
+const useLODRendering = false;
 
 // Load saved preferences from localStorage
 const savedGameMode = localStorage.getItem('ironDome_gameMode');
@@ -1038,12 +967,11 @@ function showNotification(message: string): void {
   }, 2000);
 }
 
-// Create new sandbox controls
+// Create new sandbox controls  
 const sandboxControls = new SandboxControls(gui, {
   threatManager,
   domePlacementSystem,
   cameraController,
-  dayNightCycle,
   worldScaleIndicators,
   projectiles,
   simulationControls,
@@ -1143,20 +1071,7 @@ if (radarNetwork) {
   );
 }
 
-// Initialize memory monitoring to prevent WebGL crashes
-const memoryMonitor = MemoryMonitor.getInstance();
-memoryMonitor.startMonitoring(5000); // Check every 5 seconds
-
-// Add emergency cleanup handler
-window.addEventListener('emergency-memory-cleanup', () => {
-  debug.error('[EMERGENCY] Cleaning up to prevent crash...');
-  // Force cleanup of old objects
-  threatManager.emergencyCleanup?.();
-  // Force garbage collection if available
-  if ('gc' in window) {
-    (window as any).gc();
-  }
-});
+// CHAINSAW: Removed memory monitoring overhead
 
 // Start game mode by default
 if (simulationControls.gameMode) {
@@ -1227,17 +1142,7 @@ window.addEventListener('load', async () => {
   // Set initial model quality preference
   (window as any).__interceptorModelQuality = simulationControls.interceptorModel;
 
-  try {
-    // Preload the optimized Tamir models
-    const modelCache = ModelCache.getInstance();
-    await modelCache.preloadModels([
-      'assets/tamir/scene_ultra_simple.glb',
-      'assets/tamir/scene_simple.glb',
-    ]);
-    debug.log('Models preloaded successfully');
-  } catch (error) {
-    debug.error('Failed to preload models:', error);
-  }
+  // CHAINSAW: Removed model preloading overhead - load on demand
 
   // Hide loading screen
   hideLoadingScreen();
@@ -1251,49 +1156,11 @@ setTimeout(hideLoadingScreen, 3000); // 3 second fallback
 const clock = new THREE.Clock();
 let previousTime = 0;
 
-// Performance monitoring
-const performanceMonitor = new PerformanceMonitor();
-const profiler = new Profiler();
-const profilerDisplay = new ProfilerDisplay(profiler);
-const renderProfiler = new RenderProfiler(renderer);
-renderProfiler.setProfiler(profiler);
-
-// Apply saved profiler visibility
-if (savedProfilerVisible === 'true') {
-  profilerDisplay.show();
-}
-
-// Initialize stats.js displays
-const statsDisplay = new StatsDisplay();
-const extendedStatsDisplay = new ExtendedStatsDisplay();
-
-// Connect systems to stats displays
-statsDisplay.setInterceptionSystem(interceptionSystem);
-statsDisplay.setThreatManager(threatManager);
-extendedStatsDisplay.setInterceptionSystem(interceptionSystem);
-extendedStatsDisplay.setThreatManager(threatManager);
-
-// Hide stats.js if profiler is not visible
-if (!profilerDisplay.isVisible()) {
-  statsDisplay.hide();
-}
+// CHAINSAW: Removed all performance monitoring systems
 
 // Keyboard event handlers
 window.addEventListener('keydown', e => {
-  // S key toggles extended stats
-  if (e.key === 's' || e.key === 'S') {
-    extendedStatsDisplay.toggleVisibility();
-  }
-
-  // P key toggles profiler AND stats.js
-  if (e.key === 'p' || e.key === 'P') {
-    const profilerVisible = profilerDisplay.isVisible();
-    if (profilerVisible) {
-      statsDisplay.show();
-    } else {
-      statsDisplay.hide();
-    }
-  }
+  // CHAINSAW: Removed stats display keyboard handlers
 
   // Camera mode shortcuts
   if (e.key === '1') cameraController.setMode(CameraMode.ORBIT);
@@ -1341,13 +1208,9 @@ let renderBottleneckLogged = false;
 function animate() {
   animationId = requestAnimationFrame(animate);
 
-  // Begin stats.js frame tracking
-  statsDisplay.beginFrame();
-
-  // Store camera reference for LOD optimizations and health bar orientation
+  // CHAINSAW: Removed profiler overhead during gameplay
+  // Store camera reference for health bar orientation
   (scene as any).__camera = camera;
-
-  profiler.startSection('Frame');
 
   const rawDeltaTime = clock.getDelta();
   // Clamp deltaTime to prevent large jumps when tab regains focus
@@ -1355,17 +1218,7 @@ function animate() {
   const currentTime = clock.getElapsedTime();
   const fps = 1 / deltaTime;
 
-  // Update performance monitor
-  profiler.startSection('Performance Monitor');
-  performanceMonitor.update(fps);
-  const perfStats = performanceMonitor.getStats();
-  profiler.endSection('Performance Monitor');
-
-  // Adjust quality based on performance
-  if (perfStats.isCritical) {
-    // Skip tactical display updates in critical performance situations
-    // Will be handled by reducing update frequency
-  }
+  // CHAINSAW: Removed performance monitoring overhead
 
   // Mobile-specific dynamic quality adjustment
   if (deviceInfo.isMobile || deviceInfo.isTablet) {
@@ -1382,49 +1235,30 @@ function animate() {
   const activeThreats = threatManager.getActiveThreats();
 
   // Update world systems
-  profiler.startSection('World Systems');
 
-  // Update environment
-  environmentSystem.update(deltaTime);
+  // CHAINSAW OPTIMIZED: Update time-sliced systems (minimal performance impact)
+  optimizedDayNight.update(deltaTime);
+  buildingSystem.updateTimeOfDay(optimizedDayNight.getTime().hours);
 
-  // Update day/night cycle
-  if (!simulationControls.pause) {
-    dayNightCycle.update(deltaTime);
-  }
+  // Keep visuals but NO dynamic updates during gameplay for performance
 
-  // Update world scale indicators with wind
-  const windVector = environmentSystem.getWindAt(new THREE.Vector3(0, 50, 0));
-  worldScaleIndicators.update(deltaTime, windVector);
-  
-  // Update building window lighting based on time of day
-  // Do this even when paused so sandbox time controls work
-  const currentHour = dayNightCycle.getTime().hours;
-  worldScaleIndicators.updateTimeOfDay(currentHour);
-
-  // Update battlefield zones
-  if (battlefieldZones) battlefieldZones.update(deltaTime);
+  // CHAINSAW: Removed battlefield zones update
 
   // Update camera controller with all interceptors
   const allInterceptors = [...projectiles, ...interceptionSystem.getActiveInterceptors()];
   cameraController.update(deltaTime, activeThreats, allInterceptors);
 
-  profiler.endSection('World Systems');
 
   // Update game systems only when not paused
   if (!simulationControls.pause) {
     // Update physics with time scale
-    profiler.startSection('Physics');
     const scaledDelta = deltaTime * simulationControls.timeScale;
     world.step(1 / 60, scaledDelta, 3);
-    profiler.endSection('Physics');
 
     // Update threat manager
-    profiler.startSection('Threat Manager');
     threatManager.update();
-    profiler.endSection('Threat Manager');
 
     // Update all batteries (includes health bar orientation and reloading)
-    profiler.startSection('Batteries Update');
     const allBatteries = domePlacementSystem.getAllBatteries();
 
     // Apply auto-repair based on upgrade level
@@ -1435,35 +1269,26 @@ function animate() {
       battery.setAutoRepairRate(repairRates[autoRepairLevel]);
       battery.update(deltaTime, activeThreats);
     });
-    profiler.endSection('Batteries Update');
 
     // Update radar network - pass threats directly instead of mapping
     if (activeThreats.length > 0) {
-      profiler.startSection('Radar Network');
       if (radarNetwork) radarNetwork.update(activeThreats);
-      profiler.endSection('Radar Network');
     }
 
     // Update projectiles
-    profiler.startSection('Projectiles');
     const projectileCount = projectiles.length;
     if (projectileCount > 0) {
-      profiler.startSection(`Update ${projectileCount} projectiles`);
       for (let i = projectiles.length - 1; i >= 0; i--) {
         const projectile = projectiles[i];
         projectile.update();
 
         // Remove projectiles that fall below ground
         if (projectile.body.position.y < -10) {
-          // Remove from trail renderer
-          instancedTrailRenderer.removeTrail(projectile);
           projectile.destroy(scene, world);
           projectiles.splice(i, 1);
         }
       }
-      profiler.endSection(`Update ${projectileCount} projectiles`);
     }
-    profiler.endSection('Projectiles');
   }
 
   // Update interception system and other systems
@@ -1471,60 +1296,18 @@ function animate() {
 
   if (!simulationControls.pause) {
     if (simulationControls.autoIntercept) {
-      profiler.startSection('Interception System');
-      interceptionSystem.setProfiler(profiler); // Pass profiler for detailed tracking
+      // CHAINSAW: Removed profiler
       systemInterceptors = interceptionSystem.update(activeThreats);
-      profiler.endSection('Interception System');
     }
 
     // Update dome placement system (for instanced rendering)
-    profiler.startSection('Dome Placement Update');
     domePlacementSystem.update();
-    profiler.endSection('Dome Placement Update');
 
-    // Update instanced renderers (visual updates should continue when paused for smooth rendering)
-    if (useInstancedRendering) {
-      profiler.startSection('Instanced Rendering Update');
-
-      // Update threats
-      if (useLODRendering) {
-        lodInstancedThreatRenderer.updateThreats(activeThreats, currentTime * 1000);
-      } else {
-        instancedThreatRenderer.updateThreats(activeThreats);
-      }
-
-      // Update interceptors (combine all projectiles)
-      const allInterceptors = [...projectiles, ...systemInterceptors];
-      instancedProjectileRenderer.updateProjectiles(allInterceptors);
-
-      // Update debris
-      instancedDebrisRenderer.update(deltaTime);
-
-      // Update explosions
-      instancedExplosionRenderer.update();
-      
-      // Update batched trails
-      instancedTrailRenderer.update();
-
-      profiler.endSection('Instanced Rendering Update');
-    }
-  } else {
-    // When paused, still update visual positions for rendering
-    if (useInstancedRendering) {
-      if (useLODRendering) {
-        lodInstancedThreatRenderer.updateThreats(activeThreats, currentTime * 1000);
-      } else {
-        instancedThreatRenderer.updateThreats(activeThreats);
-      }
-
-      const allInterceptors = [...projectiles, ...systemInterceptors];
-      instancedProjectileRenderer.updateProjectiles(allInterceptors);
-    }
+    // CHAINSAW: Removed instanced rendering update - using standard meshes
   }
 
   // Update GUI at 30 Hz (33ms) for smooth tactical display
   if (currentTime - previousTime > 0.033) {
-    profiler.startSection('GUI Update');
     const stats = interceptionSystem.getStats();
     const allProjectiles = [...projectiles, ...systemInterceptors];
 
@@ -1549,36 +1332,25 @@ function animate() {
 
     // Battery info is now displayed in the UI, not in debug controls
 
-    // Update tactical display only if performance allows
-    if (!perfStats.isCritical) {
-      profiler.startSection('Tactical Display');
-      const displayPosition =
-        allBatteries.length > 0 ? allBatteries[0].getPosition() : new THREE.Vector3(0, 0, 0);
+    // Update tactical display
+    const displayPosition =
+      allBatteries.length > 0 ? allBatteries[0].getPosition() : new THREE.Vector3(0, 0, 0);
 
-      tacticalDisplay.update(
-        activeThreats,
-        displayPosition,
-        totalLoaded,
-        0.95, // Default success rate
-        totalCapacity // Total launcher capacity
-      );
-      profiler.endSection('Tactical Display');
-    }
+    tacticalDisplay.update(
+      activeThreats,
+      displayPosition,
+      totalLoaded,
+      0.95, // Default success rate
+      totalCapacity // Total launcher capacity
+    );
 
-    // Check for performance warnings
-    const perfCheck = performanceMonitor.checkPerformance();
-    if (perfCheck.warning) {
-      debug.warn(perfCheck.message);
-    }
+    // CHAINSAW: Removed performance warnings
 
-    profiler.endSection('GUI Update');
     previousTime = currentTime;
   }
 
   // Update controls
-  profiler.startSection('Controls');
   controls.update();
-  profiler.endSection('Controls');
 
   // Update sound system listener position
   const soundSystem = SoundSystem.getInstance();
@@ -1596,80 +1368,13 @@ function animate() {
     { x: camera.up.x, y: camera.up.y, z: camera.up.z }
   );
 
-  // Update centralized systems
-  profiler.startSection('Centralized Systems');
+  // CHAINSAW: Removed heavy trail/explosion systems causing frame drops and interception lag
 
-  // Update explosion manager
-  ExplosionManager.getInstance(scene).update(deltaTime);
-
-  // Update unified trail system
-  UnifiedTrailSystem.getInstance(scene).update(deltaTime, camera);
-
-  profiler.endSection('Centralized Systems');
 
   // Render
-  profiler.startSection('Render');
-  renderProfiler.profiledRender(scene, camera);
-  profiler.endSection('Render');
+  renderer.render(scene, camera);
 
-  // Update profiler display
-  profiler.endSection('Frame');
-  profilerDisplay.setRenderStats(renderProfiler.getLastStats());
-  profilerDisplay.update();
-
-  // End stats.js frame and update extended stats
-  statsDisplay.endFrame();
-  extendedStatsDisplay.update();
-
-  // Log render bottleneck analysis periodically
-  frameCount++;
-  if (!renderBottleneckLogged && frameCount > 120 && frameCount % 60 === 0) {
-    const averages = profiler.getAverages();
-    const renderTime = averages.get('Render') || 0;
-    const frameTime = averages.get('Frame') || 0;
-
-    if (renderTime > 5 && renderTime / frameTime > 0.8) {
-      renderBottleneckLogged = true;
-      debug.log('=== RENDER BOTTLENECK ANALYSIS ===');
-      debug.performance('Render time', renderTime);
-      debug.log(`Render is ${((renderTime / frameTime) * 100).toFixed(0)}% of frame time`);
-
-      // Count active effects
-      let exhaustTrailCount = 0;
-      let particleSystemCount = 0;
-      let meshCount = 0;
-      let transparentCount = 0;
-
-      scene.traverse(obj => {
-        if (obj instanceof THREE.Mesh) {
-          meshCount++;
-          if (obj.material && (obj.material as any).transparent) transparentCount++;
-        } else if (obj instanceof THREE.Points) {
-          particleSystemCount++;
-        }
-      });
-
-      // Count exhaust trails
-      const allProjectiles = [...projectiles, ...systemInterceptors];
-      allProjectiles.forEach(p => {
-        if (p.exhaustTrail) exhaustTrailCount++;
-      });
-
-      debug.category('Scene', 'Contents:', {
-        meshes: meshCount,
-        particleSystems: particleSystemCount,
-        transparentObjects: transparentCount,
-        exhaustTrails: exhaustTrailCount,
-        threats: activeThreats.length,
-        interceptors: systemInterceptors.length,
-      });
-
-      debug.log('Check profiler (P key) for detailed breakdown');
-      debug.log('================================');
-    }
-  }
-
-  profiler.endFrame();
+  // CHAINSAW: Removed all profiler calls
 }
 
 // Add debug mode indicator

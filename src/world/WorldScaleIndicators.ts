@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import { MaterialCache } from '../utils/MaterialCache';
 import { GeometryFactory } from '../utils/GeometryFactory';
 import { debug } from '../utils/logger';
-import { OptimizedBuildingSystem } from './OptimizedBuildingSystem';
+// CHAINSAW: Removed duplicate BuildingSystem import
 import { WorldGeometryOptimizer } from '../rendering/WorldGeometryOptimizer';
 
 export interface ScaleIndicatorConfig {
@@ -21,7 +21,7 @@ export class WorldScaleIndicators {
   private windParticles: THREE.Points | null = null;
   private windParticleVelocities: THREE.Vector3[] = [];
   private config: ScaleIndicatorConfig;
-  private buildingSystem: OptimizedBuildingSystem;
+  // CHAINSAW: Removed duplicate buildingSystem - using global one
   private grid: THREE.GridHelper | null = null;
   private time: number = 0;
 
@@ -51,16 +51,11 @@ export class WorldScaleIndicators {
       ...config,
     };
 
-    // Initialize building system
-    this.buildingSystem = new OptimizedBuildingSystem(scene);
-    // Make it globally available for explosion damage
-    (window as any).__buildingSystem = this.buildingSystem;
+    // CHAINSAW: Using global buildingSystem from main.ts - no duplicate creation
   }
 
   initialize() {
-    if (this.config.showGrid) {
-      this.createEnhancedGrid();
-    }
+    // CHAINSAW: Removed duplicate grid - main.ts already has terrain with grid
 
     if (this.config.showDistanceMarkers) {
       this.createDistanceMarkers();
@@ -275,17 +270,15 @@ export class WorldScaleIndicators {
           const height = 20 + Math.random() * 50 + (1 - distFactor) * 30; // Taller buildings in center
           const depth = 12 + Math.random() * 20 + distFactor * 10;
 
-          // Use BuildingSystem to create the building
-          this.buildingSystem.createBuilding(buildingPos, width, height, depth);
+          // CHAINSAW: Buildings created by main.ts BuildingSystem - skip duplicate creation
           placedBuildings.push(buildingPos.clone());
           buildingIndex++;
         }
       }
     });
     
-    // Merge all buildings into a single mesh for massive draw call reduction
-    debug.log('Merging building geometries for optimization...');
-    this.buildingSystem.mergeBuildingGeometries();
+    // CHAINSAW: No geometry merging - keeping individual buildings for collision detection
+    debug.log('Buildings created - no merging needed for optimized system');
 
     // Skip trees and vehicles - focusing only on buildings
 
@@ -646,8 +639,10 @@ export class WorldScaleIndicators {
   
   // Update building window lighting based on time of day
   updateTimeOfDay(hours: number) {
-    if (this.buildingSystem) {
-      this.buildingSystem.updateTimeOfDay(hours);
+    // CHAINSAW: Using global buildingSystem from main.ts
+    const buildingSystem = (window as any).__buildingSystem;
+    if (buildingSystem) {
+      buildingSystem.updateTimeOfDay(hours);
     }
   }
 }

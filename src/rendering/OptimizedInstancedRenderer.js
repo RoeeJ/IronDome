@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { MaterialCache } from '../utils/MaterialCache.ts';
 
 export class OptimizedInstancedRenderer {
     constructor(geometry, material, maxInstances = 1000) {
@@ -174,8 +175,8 @@ export class InstancedTrailRenderer extends THREE.EventDispatcher {
         this.geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));
         this.geometry.setAttribute('size', new THREE.BufferAttribute(sizes, 1));
         
-        // Use point cloud material for performance
-        this.material = new THREE.PointsMaterial({
+        // Use point cloud material for performance (SHARED)
+        this.material = MaterialCache.getInstance().getPointsMaterial({
             vertexColors: true,
             size: 2,
             sizeAttenuation: true,

@@ -385,6 +385,12 @@ export class ThreatManager extends EventEmitter {
             }
           });
 
+          // Apply shockwave damage to buildings  
+          const buildingSystem = (window as any).__buildingSystem;
+          if (buildingSystem) {
+            buildingSystem.checkExplosionDamage(impactPosition, shockwaveRadius);
+          }
+
           // Create explosion at impact point
           this.explosionManager.createExplosion({
             type: ExplosionType.GROUND_IMPACT,
@@ -813,6 +819,12 @@ export class ThreatManager extends EventEmitter {
   }
 
   private addImpactMarker(threat: Threat): void {
+    // Safety check - ensure threat has getImpactPoint method
+    if (!threat || typeof threat.getImpactPoint !== 'function') {
+      debug.error('[ThreatManager] addImpactMarker called with invalid threat object', { threat });
+      return;
+    }
+    
     const impactPoint = threat.getImpactPoint();
     if (!impactPoint) return;
 
@@ -1049,10 +1061,7 @@ export class ThreatManager extends EventEmitter {
       this.scene.remove(craterData.mesh);
     }
 
-    // Dispose material
-    if (craterData.material) {
-      craterData.material.dispose();
-    }
+    // Don't dispose material - it's shared from MaterialCache
 
     console.log(`Removed crater ${craterId}. Active craters: ${this.activeCraters.size}`);
   }
@@ -1078,13 +1087,12 @@ export class ThreatManager extends EventEmitter {
 
     // Add crater decal (simple dark circle on ground)
     const craterGeometry = GeometryFactory.getInstance().getCircle(3, 32);
-    // Clone material to avoid affecting other craters
-    const baseMaterial = MaterialCache.getInstance().getMeshBasicMaterial({
+    // Use shared material - no need to clone
+    const craterMaterial = MaterialCache.getInstance().getMeshBasicMaterial({
       color: 0x222222,
       opacity: 0.7,
       transparent: true,
     });
-    const craterMaterial = baseMaterial.clone();
 
     const crater = new THREE.Mesh(craterGeometry, craterMaterial);
     crater.rotation.x = -Math.PI / 2;
@@ -1715,7 +1723,7 @@ export class ThreatManager extends EventEmitter {
         if (crater.timeout) clearTimeout(crater.timeout);
         if (crater.animationId) cancelAnimationFrame(crater.animationId);
         if (crater.mesh.geometry) crater.mesh.geometry.dispose();
-        if (crater.material) crater.material.dispose();
+        // Don't dispose material - it's shared from MaterialCache
         this.activeCraters.delete(key);
       }
     });

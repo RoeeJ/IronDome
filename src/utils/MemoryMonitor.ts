@@ -33,9 +33,9 @@ export class MemoryMonitor {
   private webglInfo?: WebGLInfo;
   private consecutiveHighMemoryWarnings = 0;
 
-  // Critical thresholds
-  private static readonly MEMORY_WARNING_THRESHOLD = 0.75; // 75%
-  private static readonly MEMORY_CRITICAL_THRESHOLD = 0.90; // 90%
+  // Critical thresholds (as percentages)
+  private static readonly MEMORY_WARNING_THRESHOLD = 75; // 75%
+  private static readonly MEMORY_CRITICAL_THRESHOLD = 90; // 90%
   private static readonly MAX_CONSECUTIVE_WARNINGS = 5;
 
   static getInstance(): MemoryMonitor {

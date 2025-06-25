@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import { InstancedThreatRenderer, MeshCategory } from './InstancedThreatRenderer';
 import { LODSystem } from './LODSystem';
 import type { Threat } from '../threats/ThreatTypes';
+import { MaterialCache } from '../utils/MaterialCache';
 
 interface LODMeshSet {
   high: THREE.InstancedMesh;
@@ -38,26 +39,26 @@ export class LODInstancedThreatRenderer extends InstancedThreatRenderer {
   private createLODMeshes() {
     const threatLODs = LODSystem.createThreatLODs();
 
-    // Materials for each threat type
+    // Materials for each threat type (SHARED)
     const materials = {
-      rocket: new THREE.MeshStandardMaterial({
+      rocket: MaterialCache.getInstance().getMeshStandardMaterial({
         color: 0xff0000,
         emissive: 0xff0000,
         emissiveIntensity: 0.2,
         roughness: 0.4,
         metalness: 0.6,
       }),
-      mortar: new THREE.MeshStandardMaterial({
+      mortar: MaterialCache.getInstance().getMeshStandardMaterial({
         color: 0x444444,
         roughness: 0.8,
         metalness: 0.2,
       }),
-      drone: new THREE.MeshStandardMaterial({
+      drone: MaterialCache.getInstance().getMeshStandardMaterial({
         color: 0x222222,
         roughness: 0.9,
         metalness: 0.1,
       }),
-      ballistic: new THREE.MeshStandardMaterial({
+      ballistic: MaterialCache.getInstance().getMeshStandardMaterial({
         color: 0xffaa00,
         emissive: 0xffaa00,
         emissiveIntensity: 0.3,

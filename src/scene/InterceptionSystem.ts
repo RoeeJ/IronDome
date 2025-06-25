@@ -700,14 +700,24 @@ export class InterceptionSystem {
   }
 
   public createExplosion(position: THREE.Vector3, quality: number = 1.0): void {
-    // Use centralized explosion manager
-    const radius = 10 + quality * 5;
-    ExplosionManager.getInstance(this.scene).createExplosion({
-      type: position.y > 5 ? ExplosionType.AIR_INTERCEPTION : ExplosionType.GROUND_IMPACT,
-      position: position,
-      radius: radius,
-      intensity: quality,
+    // CHAINSAW: Simple immediate explosion sphere instead of complex particle system
+    const radius = 5 + quality * 3;
+    const geometry = new THREE.SphereGeometry(radius, 8, 8);
+    const material = new THREE.MeshBasicMaterial({ 
+      color: 0xff4400, 
+      transparent: true, 
+      opacity: 0.8 
     });
+    const explosionSphere = new THREE.Mesh(geometry, material);
+    explosionSphere.position.copy(position);
+    this.scene.add(explosionSphere);
+    
+    // Remove explosion after 0.5 seconds
+    setTimeout(() => {
+      this.scene.remove(explosionSphere);
+      geometry.dispose();
+      material.dispose();
+    }, 500);
   }
 
   private createSmokeRing(position: THREE.Vector3): void {

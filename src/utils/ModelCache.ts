@@ -123,8 +123,32 @@ export class ModelCache {
     // Ensure model is loaded
     const originalModel = await this.loadModel(url);
 
-    // For now, just return a clone until we debug the instance creation
-    return originalModel.clone();
+    // Create instance that reuses materials to prevent shader explosion
+    const instance = new THREE.Group();
+    
+    originalModel.traverse((child) => {
+      if (child instanceof THREE.Mesh) {
+        // Create new mesh with same geometry but REUSE material
+        const newMesh = new THREE.Mesh(child.geometry, child.material);
+        newMesh.name = child.name;
+        newMesh.position.copy(child.position);
+        newMesh.rotation.copy(child.rotation);
+        newMesh.scale.copy(child.scale);
+        newMesh.castShadow = child.castShadow;
+        newMesh.receiveShadow = child.receiveShadow;
+        instance.add(newMesh);
+      } else if (child instanceof THREE.Group) {
+        // Clone groups but reuse their materials
+        const newGroup = new THREE.Group();
+        newGroup.name = child.name;
+        newGroup.position.copy(child.position);
+        newGroup.rotation.copy(child.rotation);
+        newGroup.scale.copy(child.scale);
+        instance.add(newGroup);
+      }
+    });
+    
+    return instance;
 
     /* Instance creation code - temporarily disabled for debugging
     const instance = new THREE.Group()
