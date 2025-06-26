@@ -55,6 +55,12 @@ export class Projectile {
   private useInstancing: boolean = false;
   private instanceManager?: any;
   private instanceId?: number;
+  
+  // Re-engagement tracking
+  private minDistanceToTarget: number = Infinity;
+  private isReEngaging: boolean = false;
+  private reEngagementAttempts: number = 0;
+  private lastTargetDistance: number = Infinity;
 
   // Physics scaling factor for simulator world
   private static readonly WORLD_SCALE = 0.3; // 30% of real-world values
@@ -63,20 +69,20 @@ export class Projectile {
   private static modelForwardVector = new THREE.Vector3(0, 1, 0); // Default: +Y for interceptor model
   private static modelRotationAdjustment = new THREE.Euler(0, 0, 0); // No rotation needed
 
-  // Proximity fuse settings - CRITICAL: These values are finely tuned and SHOULD NOT be changed!
-  // These settings ensure reliable interception at realistic engagement ranges
+  // Proximity fuse settings - Aligned with blast physics for optimal effectiveness
+  // These settings ensure detonation occurs within the severe damage zone (6m)
   private static readonly PROXIMITY_FUSE_SETTINGS = {
     initial: {
-      armingDistance: 15, // Arms after 20m
-      detonationRadius: 9, // Detonate within 12m (optimized for ~95% success rate)
-      optimalRadius: 2, // Best at 6m (half of detonation radius)
-      scanRate: 1, // Check every 4 frames
+      armingDistance: 15, // Arms after 15m
+      detonationRadius: 8, // Detonate within 8m (ensures severe damage zone)
+      optimalRadius: 4, // Best at 4m (lethal to severe damage transition)
+      scanRate: 1, // Check every frame for better accuracy
     },
     retarget: {
       armingDistance: 10, // Shorter arming distance since already in flight
-      detonationRadius: 9, // Detonate within 12m
-      optimalRadius: 2, // Best at 6m
-      scanRate: 1, // Check every 4 frames
+      detonationRadius: 8, // Detonate within 8m
+      optimalRadius: 4, // Best at 4m
+      scanRate: 1, // Check every frame
     },
   };
 
@@ -609,15 +615,8 @@ export class Projectile {
     // Check minimum travel distance before guidance kicks in
     const distanceTraveled = this.proximityFuse?.getDistanceTraveled() || 0;
     const minGuidanceDistance = 15; // Don't guide for first 15 meters
-    if (distanceTraveled < minGuidanceDistance) {
+    if (distanceTraveled < minGuidanceDistance && !this.isReEngaging) {
       // Just orient the missile during launch phase
-      // Too verbose - logs every frame during launch
-      // debug.category(
-      //   'Guidance',
-      //   `[LAUNCH PHASE] Distance traveled: ${distanceTraveled.toFixed(
-      //     1
-      //   )}m < ${minGuidanceDistance}m`
-      // );
       this.orientMissile(currentVelocity);
       return;
     }
@@ -632,6 +631,31 @@ export class Projectile {
     // Proportional navigation
     const toTarget = targetPos.clone().sub(myPos);
     const distance = toTarget.length();
+    
+    // Track minimum distance for re-engagement detection
+    if (distance < this.minDistanceToTarget) {
+      this.minDistanceToTarget = distance;
+    }
+    
+    // Check for re-engagement opportunity
+    if (!this.isReEngaging && 
+        this.minDistanceToTarget < 15 && // Got close but missed
+        distance > this.lastTargetDistance && // Moving away from target
+        distance > 10 && // Far enough to need re-engagement
+        this.reEngagementAttempts < 1 && // Only try once
+        currentSpeed > 50) { // Still have enough energy
+      
+      debug.category('Guidance', 
+        `[RE-ENGAGE] Missed target! Min dist: ${this.minDistanceToTarget.toFixed(1)}m, ` +
+        `Current: ${distance.toFixed(1)}m, Attempting turnaround`
+      );
+      
+      this.isReEngaging = true;
+      this.reEngagementAttempts++;
+      this.minDistanceToTarget = Infinity; // Reset for new approach
+    }
+    
+    this.lastTargetDistance = distance;
 
     // DEBUG: Log basic guidance info
     debug.category(
@@ -686,10 +710,25 @@ export class Projectile {
     }
 
     // Apply correction force
-    const correctionForce = velocityError.multiplyScalar(this.body.mass * 2); // P gain of 2
+    let correctionGain = this.body.mass * 2; // Default P gain
+    let maxGForce = 40; // Default max G-force
+    
+    // More aggressive control for re-engagement
+    if (this.isReEngaging) {
+      correctionGain = this.body.mass * 4; // Double the gain for faster turn
+      maxGForce = 60; // Allow higher G-forces for turnaround
+      
+      // Add additional turning force perpendicular to current velocity
+      const turnAxis = currentVelocity.clone().cross(los).normalize();
+      const turnForce = turnAxis.multiplyScalar(this.body.mass * 100);
+      velocityError.add(turnForce);
+      
+      debug.category('Guidance', '[RE-ENGAGE] Using aggressive turn parameters');
+    }
+    
+    const correctionForce = velocityError.multiplyScalar(correctionGain);
 
     // Realistic missile constraints scaled for simulator
-    const maxGForce = 40; // Higher G-force for better maneuverability
     const gravity = 9.81;
     const maxAcceleration = maxGForce * gravity;
     const maxForce = this.body.mass * maxAcceleration;
@@ -719,7 +758,7 @@ export class Projectile {
 
     // Add forward thrust to maintain speed
     const thrustDirection = currentVelocity.clone().normalize();
-    const targetSpeed = 150; // Target speed for interceptors
+    const targetSpeed = this.isReEngaging ? 180 : 150; // Higher speed for re-engagement
     const speedError = targetSpeed - currentSpeed;
     const thrustForce = Math.max(0, speedError * this.body.mass * 0.5);
 
@@ -738,6 +777,22 @@ export class Projectile {
         ),
         new CANNON.Vec3(0, 0, 0)
       );
+    }
+    
+    // Check if re-engagement is complete (heading back toward target)
+    if (this.isReEngaging && distance < 20) {
+      const closingVelocity = -toTarget.normalize().dot(currentVelocity);
+      if (closingVelocity > 0) {
+        debug.category('Guidance', '[RE-ENGAGE] Successfully re-acquired target!');
+        this.isReEngaging = false;
+        // Reset proximity fuse for new approach
+        if (this.proximityFuse) {
+          this.proximityFuse = new ProximityFuse(
+            this.mesh.position,
+            Projectile.PROXIMITY_FUSE_SETTINGS.retarget
+          );
+        }
+      }
     }
 
     // Orient the missile model

@@ -36,7 +36,8 @@ export class BlastPhysics {
     blastPosition: THREE.Vector3,
     targetPosition: THREE.Vector3,
     targetVelocity: THREE.Vector3,
-    config: BlastConfig = BlastPhysics.TAMIR_CONFIG
+    config: BlastConfig = BlastPhysics.TAMIR_CONFIG,
+    interceptorVelocity?: THREE.Vector3
   ): {
     hit: boolean;
     damage: number;
@@ -49,12 +50,38 @@ export class BlastPhysics {
     const relativeSpeed = targetVelocity.length();
     const crossingFactor = Math.min(1, 300 / (relativeSpeed + 100)); // Penalty for fast targets
 
+    // Calculate directional damage bonus for head-on intercepts
+    let directionalMultiplier = 1.0;
+    if (interceptorVelocity && interceptorVelocity.length() > 0 && targetVelocity.length() > 0) {
+      // Get normalized velocities
+      const interceptorDir = interceptorVelocity.clone().normalize();
+      const targetDir = targetVelocity.clone().normalize();
+      
+      // Calculate angle between trajectories (0 = head-on, 180 = tail-chase)
+      const dotProduct = -interceptorDir.dot(targetDir); // Negative because opposite directions = head-on
+      const angle = Math.acos(Math.max(-1, Math.min(1, dotProduct))) * (180 / Math.PI);
+      
+      // Apply directional multiplier: 1.5x for head-on (< 30°), scaling down to 1.0x at 90°
+      if (angle < 30) {
+        directionalMultiplier = 1.5;
+      } else if (angle < 60) {
+        directionalMultiplier = 1.3;
+      } else if (angle < 90) {
+        directionalMultiplier = 1.1;
+      }
+      
+      debug.category(
+        'BlastPhysics',
+        `Directional analysis: angle=${angle.toFixed(1)}°, multiplier=${directionalMultiplier}x`
+      );
+    }
+
     let killProbability = 0;
     let damageType: 'direct' | 'severe' | 'moderate' | 'light' | 'none' = 'none';
 
     if (distance <= config.lethalRadius) {
       // Direct hit zone - fragments + blast
-      killProbability = 0.95 * crossingFactor;
+      killProbability = 0.95 * crossingFactor * directionalMultiplier;
       damageType = 'direct';
     } else if (distance <= config.severeRadius) {
       // High fragment density zone
@@ -62,7 +89,7 @@ export class BlastPhysics {
       const factor =
         1 -
         Math.pow((distance - config.lethalRadius) / (config.severeRadius - config.lethalRadius), 2);
-      killProbability = (0.8 + factor * 0.15) * crossingFactor;
+      killProbability = (0.8 + factor * 0.15) * crossingFactor * directionalMultiplier;
       damageType = 'severe';
     } else if (distance <= config.moderateRadius) {
       // Medium fragment density
@@ -72,7 +99,7 @@ export class BlastPhysics {
           (distance - config.severeRadius) / (config.moderateRadius - config.severeRadius),
           2
         );
-      killProbability = (0.3 + factor * 0.5) * crossingFactor;
+      killProbability = (0.3 + factor * 0.5) * crossingFactor * directionalMultiplier;
       damageType = 'moderate';
     } else if (distance <= config.lightRadius) {
       // Low fragment density - only lucky hits
@@ -82,7 +109,7 @@ export class BlastPhysics {
           (distance - config.moderateRadius) / (config.lightRadius - config.moderateRadius),
           2
         );
-      killProbability = factor * 0.3 * crossingFactor;
+      killProbability = factor * 0.3 * crossingFactor * directionalMultiplier;
       damageType = 'light';
     }
 

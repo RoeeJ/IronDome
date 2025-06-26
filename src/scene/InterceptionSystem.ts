@@ -508,11 +508,13 @@ export class InterceptionSystem {
     // Try to mark threat as being intercepted (atomic operation)
     const wasMarked = threat.markAsBeingIntercepted();
 
-    // Use physics-based blast damage calculation
+    // Use physics-based blast damage calculation with directional bonus
     const damage = BlastPhysics.calculateDamage(
       position,
       threat.getPosition(),
-      threat.getVelocity()
+      threat.getVelocity(),
+      BlastPhysics.TAMIR_CONFIG,
+      interceptor.getVelocity()
     );
 
     debug.category(
@@ -700,24 +702,40 @@ export class InterceptionSystem {
   }
 
   public createExplosion(position: THREE.Vector3, quality: number = 1.0): void {
-    // CHAINSAW: Simple immediate explosion sphere instead of complex particle system
-    const radius = 5 + quality * 3;
-    const geometry = new THREE.SphereGeometry(radius, 8, 8);
+    // Visual explosion sphere sized to match effective blast radius
+    // Base radius of 6m (severe damage zone) + quality scaling up to 10m
+    const radius = 6 + quality * 4;
+    const geometry = new THREE.SphereGeometry(radius, 12, 8);
     const material = new THREE.MeshBasicMaterial({ 
       color: 0xff4400, 
       transparent: true, 
-      opacity: 0.8 
+      opacity: 0.9,
+      emissive: 0xff2200,
+      emissiveIntensity: 0.5
     });
     const explosionSphere = new THREE.Mesh(geometry, material);
     explosionSphere.position.copy(position);
     this.scene.add(explosionSphere);
     
-    // Remove explosion after 0.5 seconds
-    setTimeout(() => {
-      this.scene.remove(explosionSphere);
-      geometry.dispose();
-      material.dispose();
-    }, 500);
+    // Animate expansion and fade
+    const startTime = Date.now();
+    const animate = () => {
+      const elapsed = (Date.now() - startTime) / 1000;
+      if (elapsed > 0.5) {
+        this.scene.remove(explosionSphere);
+        geometry.dispose();
+        material.dispose();
+        return;
+      }
+      
+      // Expand and fade
+      const scale = 1 + elapsed * 0.5;
+      explosionSphere.scale.set(scale, scale, scale);
+      material.opacity = 0.9 * (1 - elapsed * 2);
+      
+      requestAnimationFrame(animate);
+    };
+    animate();
   }
 
   private createSmokeRing(position: THREE.Vector3): void {
