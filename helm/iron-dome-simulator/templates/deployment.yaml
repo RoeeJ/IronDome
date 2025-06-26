@@ -14,9 +14,11 @@ spec:
   template:
     metadata:
       annotations:
+        keel.sh/force: "true"
+        keel.sh/match-tag: "true"
         keel.sh/policy: force
-        keel.sh/trigger: poll
         keel.sh/pollSchedule: "@every 1m"
+        keel.sh/trigger: poll
         {{- with .Values.podAnnotations }}
         {{- toYaml . | nindent 8 }}
         {{- end }}
