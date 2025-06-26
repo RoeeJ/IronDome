@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import * as BufferGeometryUtils from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { debug } from '../utils/logger';
+import { MaterialCache } from '../utils/MaterialCache';
 
 export class WorldGeometryOptimizer {
   /**
@@ -148,8 +149,8 @@ export class WorldGeometryOptimizer {
     
     const mergedGeometry = BufferGeometryUtils.mergeGeometries(geometries, false);
     
-    // Use a basic material
-    const material = new THREE.MeshStandardMaterial({
+    // Use cached material
+    const material = MaterialCache.getInstance().getMeshStandardMaterial({
       color: 0x888888,
       roughness: 0.8,
       metalness: 0.2

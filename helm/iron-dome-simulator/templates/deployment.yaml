@@ -2,6 +2,12 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: {{ include "iron-dome-simulator.fullname" . }}
+  annotations:
+    keel.sh/force: "true"
+    keel.sh/match-tag: "true"
+    keel.sh/policy: force
+    keel.sh/pollSchedule: "@every 1m"
+    keel.sh/trigger: poll
   labels:
     {{- include "iron-dome-simulator.labels" . | nindent 4 }}
 spec:

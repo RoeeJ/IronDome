@@ -755,8 +755,7 @@ export class InterceptionSystem {
       const elapsed = (Date.now() - startTime) / 1000;
       if (elapsed > 2) {
         this.scene.remove(ring);
-        ring.geometry.dispose();
-        ringMaterial.dispose();
+        // Don't dispose cached geometry and materials
         return;
       }
 
@@ -781,7 +780,7 @@ export class InterceptionSystem {
     ];
 
     const geometry = new THREE.BufferGeometry().setFromPoints(points);
-    const material = new THREE.LineBasicMaterial({
+    const material = MaterialCache.getInstance().getLineMaterial({
       color: 0x00ffff,
       opacity: 0.5,
       transparent: true,
@@ -793,8 +792,8 @@ export class InterceptionSystem {
     // Remove after 2 seconds
     setTimeout(() => {
       this.scene.remove(line);
-      geometry.dispose();
-      material.dispose();
+      geometry.dispose(); // Still dispose of unique geometry
+      // Don't dispose cached material
     }, 2000);
   }
 

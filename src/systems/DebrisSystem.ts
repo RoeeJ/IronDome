@@ -169,8 +169,8 @@ export class DebrisSystem {
 
   private createImpactEffect(position: CANNON.Vec3): void {
     // Small dust puff when debris hits ground
-    const geometry = new THREE.CircleGeometry(0.5, 8);
-    const material = new THREE.MeshBasicMaterial({
+    const geometry = GeometryFactory.getInstance().getCircle(0.5, 8);
+    const material = MaterialCache.getInstance().getMeshBasicMaterial({
       color: 0x8b7355,
       opacity: 0.5,
       transparent: true,
@@ -186,8 +186,7 @@ export class DebrisSystem {
       const elapsed = (Date.now() - startTime) / 1000;
       if (elapsed > 0.5) {
         this.scene.remove(impact);
-        geometry.dispose();
-        material.dispose();
+        // Don't dispose cached geometry and materials
         return;
       }
 

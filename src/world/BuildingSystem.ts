@@ -3,6 +3,7 @@ import { MaterialCache } from '../utils/MaterialCache';
 import { debug } from '../utils/logger';
 import { StaticGeometryMerger } from '../utils/StaticGeometryMerger';
 import { StreetLightInstanceManager } from '../rendering/StreetLightInstanceManager';
+import { InstancedBuildingRenderer } from '../rendering/InstancedBuildingRenderer';
 
 interface Building {
   id: string;
@@ -67,7 +68,11 @@ export class BuildingSystem {
     lights?: THREE.Mesh;
   } = {};
 
-  constructor(scene: THREE.Scene) {
+  // Instanced building renderer (optional optimization)
+  private instancedRenderer?: InstancedBuildingRenderer;
+  private useInstancedBuildings = true; // Enable by default for better performance
+
+  constructor(scene: THREE.Scene, useInstancedBuildings = true) {
     this.scene = scene;
     this.buildingGroup.name = 'Buildings';
     this.debrisGroup.name = 'BuildingDebris';
@@ -80,7 +85,16 @@ export class BuildingSystem {
     this.scene.add(this.streetLights);
     this.scene.add(this.roads);
 
-    this.initializeWindowInstancing();
+    this.useInstancedBuildings = useInstancedBuildings;
+
+    if (this.useInstancedBuildings) {
+      // Use instanced building renderer for better performance
+      this.instancedRenderer = new InstancedBuildingRenderer(scene);
+      debug.log('BuildingSystem: Using instanced building renderer for improved performance');
+    } else {
+      // Fall back to old window instancing system
+      this.initializeWindowInstancing();
+    }
 
     // Initialize street light instance manager
     this.streetLightManager = new StreetLightInstanceManager(scene);
@@ -147,14 +161,6 @@ export class BuildingSystem {
   }
 
   createBuilding(position: THREE.Vector3, width: number, height: number, depth: number): string {
-    const materialCache = MaterialCache.getInstance();
-
-    const id = `building_${Date.now()}_${Math.random()}`;
-    const floors = Math.floor(height / 4); // Assume 4m per floor
-
-    // UNIFORM WINDOWS: Calculate windows based on building surface area, not location
-    const windowDensity = 0.85; // 85% chance of window per possible slot (increased from 70%)
-
     // Store building info for collision detection
     this.buildingInfos.push({
       position: position.clone(),
@@ -162,6 +168,19 @@ export class BuildingSystem {
       height,
       depth,
     });
+
+    // Use instanced renderer if available
+    if (this.useInstancedBuildings && this.instancedRenderer) {
+      return this.instancedRenderer.createBuilding(position, width, height, depth);
+    }
+
+    // Legacy non-instanced building creation
+    const materialCache = MaterialCache.getInstance();
+    const id = `building_${Date.now()}_${Math.random()}`;
+    const floors = Math.floor(height / 4); // Assume 4m per floor
+
+    // UNIFORM WINDOWS: Calculate windows based on building surface area, not location
+    const windowDensity = 0.85; // 85% chance of window per possible slot (increased from 70%)
 
     // Create building mesh - CHAINSAW: Use standard geometry
     const geometry = new THREE.BoxGeometry(width, height, depth);
@@ -1365,6 +1384,14 @@ export class BuildingSystem {
 
   // CHAINSAW OPTIMIZED: Time-sliced lighting updates every 10 seconds (but force on manual time changes)
   updateTimeOfDay(hours: number, forceUpdate: boolean = false): void {
+    // Use instanced renderer if available
+    if (this.useInstancedBuildings && this.instancedRenderer) {
+      this.instancedRenderer.updateWindowLighting(hours);
+      this.updateStreetLights(hours);
+      return;
+    }
+
+    // Legacy lighting update
     const now = Date.now();
     const currentHour = Math.floor(hours);
 
