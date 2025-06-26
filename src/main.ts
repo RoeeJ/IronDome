@@ -248,9 +248,9 @@ const buildingSystem = new BuildingSystem(scene);
 
 // Create invisible ground plane for raycasting
 const groundGeometry = new THREE.PlaneGeometry(8000, 8000); // Expanded to match terrain
-const groundMaterial = MaterialCache.getInstance().getMeshBasicMaterial({ 
+const groundMaterial = MaterialCache.getInstance().getMeshBasicMaterial({
   visible: false,
-  side: THREE.DoubleSide 
+  side: THREE.DoubleSide
 });
 const groundMesh = new THREE.Mesh(groundGeometry, groundMaterial);
 groundMesh.rotation.x = -Math.PI / 2;
@@ -385,7 +385,7 @@ renderStatsRoot.render(React.createElement(RenderStats, { renderer, visible: sho
 const updateUIMode = () => {
   // Use mobile UI for mobile devices
   const UIComponent = deviceInfo.isMobile || deviceInfo.isTablet ? MobileGameUI : GameUI;
-  
+
   uiRoot.render(
     React.createElement(UIComponent, {
       waveManager: waveManager,
@@ -519,7 +519,7 @@ if (!deviceInfo.isMobile && !deviceInfo.isTablet) {
   gui.domElement.style.overflowY = 'auto';
   gui.domElement.style.zIndex = '1500';
   gui.domElement.style.fontSize = '12px';
-  
+
   // Add custom styles for mobile
   const style = document.createElement('style');
   style.textContent = `
@@ -860,10 +860,10 @@ renderer.domElement.addEventListener('touchend', event => {
     const touchDuration = Date.now() - touchStartTime;
     const touch = event.changedTouches[0];
     const touchDistance = Math.sqrt(
-      Math.pow(touch.clientX - touchStartPos.x, 2) + 
+      Math.pow(touch.clientX - touchStartPos.x, 2) +
       Math.pow(touch.clientY - touchStartPos.y, 2)
     );
-    
+
     // Consider it a tap if short duration and small movement
     if (touchDuration < 300 && touchDistance < 10) {
       const mouse = new THREE.Vector2(
@@ -1199,19 +1199,19 @@ function hideLoadingScreen() {
     debug.log('hideLoadingScreen already in progress, skipping');
     return;
   }
-  
+
   const loadingEl = document.getElementById('loading');
   if (loadingEl && loadingEl.style.display !== 'none') {
     isHidingLoadingScreen = true;
-    
+
     // Fade out the loading screen
     loadingEl.style.transition = 'opacity 0.3s ease-out';
     loadingEl.style.opacity = '0';
-    
+
     setTimeout(() => {
       loadingEl.style.display = 'none';
       debug.log('Loading screen hidden');
-      
+
       // PERFORMANCE: Start deferred initialization after loading screen is hidden
       // Only start if not already started
       if (!isDeferredInitStarted) {
@@ -1227,20 +1227,20 @@ function hideLoadingScreen() {
 // Deferred initialization function to run heavy operations after initial render
 async function startDeferredInitialization() {
   debug.log('Starting deferred initialization...');
-  
+
   // Phase 1: Initialize instance managers (50ms delay)
   setTimeout(() => {
     // Initialize ProjectileInstanceManager
     projectileInstanceManager = new ProjectileInstanceManager(scene);
     (window as any).__projectileInstanceManager = projectileInstanceManager;
-    
+
     // Set instance manager on threat manager
     threatManager.setInstanceManager(projectileInstanceManager);
-    
+
     // Configure all batteries
     const batteries = domePlacementSystem.getAllBatteries();
     batteries.forEach(battery => {
-      battery.setResourceManagement(true);
+      battery.setResourceManagement(simulationControls.gameMode);
       if (radarNetwork) battery.setRadarNetwork(radarNetwork);
       battery.setInstanceManager(projectileInstanceManager);
       threatManager.registerBattery(battery);
@@ -1250,23 +1250,23 @@ async function startDeferredInitialization() {
       const repairRates = [0, 0.5, 1.0, 2.0]; // Health per second for each level
       battery.setAutoRepairRate(repairRates[autoRepairLevel]);
     });
-    
+
     debug.log('ProjectileInstanceManager initialized');
   }, 50);
-  
+
   // Phase 2: Generate city (100ms delay)
   setTimeout(() => {
     buildingSystem.generateCity(0, 0, 800);
     // Note: mergeStaticGeometry will be called after animations complete
-    
+
     // Re-enable reference objects after city is generated
     worldScaleIndicators.setVisibility({
       showReferenceObjects: true
     });
-    
+
     debug.log('City generation started');
   }, 100);
-  
+
   // Phase 3: Precompile materials (500ms delay)
   setTimeout(() => {
     // Pre-create commonly used materials
@@ -1275,12 +1275,12 @@ async function startDeferredInitialization() {
     materialCache.getMeshStandardMaterial({ color: 0x666666, roughness: 0.5, metalness: 0.7 });
     materialCache.getMeshStandardMaterial({ color: 0x555555, roughness: 0.6, metalness: 0.5 });
     materialCache.getMeshStandardMaterial({ color: 0xaaaaaa, roughness: 0.4, metalness: 0.9 });
-    
+
     // Precompile shaders
     materialCache.precompileShaders(renderer, scene, camera);
     debug.log('Material shaders precompiled');
   }, 500);
-  
+
   // Phase 4: Start game mode if needed (600ms delay)
   setTimeout(() => {
     if (!simulationControls.gameMode) {
@@ -1348,7 +1348,7 @@ window.addEventListener('keydown', e => {
   // Mouse wheel zoom
   if (e.key === '+' || e.key === '=') cameraController.zoom(-5);
   if (e.key === '-' || e.key === '_') cameraController.zoom(5);
-  
+
   // R key toggles render stats
   if (e.key === 'r' || e.key === 'R') {
     (window as any).toggleRenderStats();
@@ -1371,17 +1371,17 @@ renderer.domElement.addEventListener(
 renderer.domElement.addEventListener('webglcontextlost', (event) => {
   event.preventDefault();
   debug.error('WebGL context lost!');
-  
+
   // Stop animation loop
   if (animationId) {
     cancelAnimationFrame(animationId);
     animationId = null;
   }
-  
+
   // Pause game
   simulationControls.pause = true;
   if (waveManager) waveManager.pauseWave();
-  
+
   // Show notification
   if ((window as any).showNotification) {
     (window as any).showNotification('Graphics context lost - reloading...');
@@ -1390,7 +1390,7 @@ renderer.domElement.addEventListener('webglcontextlost', (event) => {
 
 renderer.domElement.addEventListener('webglcontextrestored', () => {
   debug.log('WebGL context restored!');
-  
+
   // Reload the page to ensure clean state
   setTimeout(() => {
     window.location.reload();
@@ -1405,7 +1405,7 @@ function checkMemoryPressure() {
   const now = Date.now();
   if (now - lastMemoryCheck < MEMORY_CHECK_INTERVAL) return;
   lastMemoryCheck = now;
-  
+
   // Check renderer info
   const info = renderer.info;
   if (info.memory.geometries > 1000 || info.memory.textures > 500) {
@@ -1413,20 +1413,20 @@ function checkMemoryPressure() {
       geometries: info.memory.geometries,
       textures: info.memory.textures
     });
-    
+
     // Force garbage collection if available
     if ((window as any).gc) {
       (window as any).gc();
     }
   }
-  
+
   // On mobile, be more aggressive with cleanup
   if (deviceInfo.isMobile || deviceInfo.isTablet) {
     // Limit max threats and projectiles
     if (threatManager.getActiveThreats().length > 30) {
       threatManager.clearOldestThreats(10);
     }
-    
+
     if (projectiles.length > 50) {
       // Remove oldest projectiles
       const toRemove = projectiles.slice(0, 10);
@@ -1442,34 +1442,34 @@ function checkMemoryPressure() {
 // Cleanup function for proper disposal
 function cleanup() {
   debug.log('Cleaning up resources...');
-  
+
   // Stop animation loop
   if (animationId) {
     cancelAnimationFrame(animationId);
     animationId = null;
   }
-  
+
   // Clean up event listeners
   window.removeEventListener('resize', onWindowResize);
   window.removeEventListener('resize', checkOrientation);
   window.removeEventListener('orientationchange', checkOrientation);
-  
+
   // Clean up mobile input
   if (mobileInput) {
     mobileInput.dispose();
     mobileInput = null;
   }
-  
+
   // Clean up projectiles
   projectiles.forEach(p => p.destroy(scene, world));
   projectiles = [];
-  
+
   // Clean up threats
   threatManager.clearAll();
-  
+
   // Dispose of renderer
   renderer.dispose();
-  
+
   // Clear caches
   MaterialCache.getInstance().clear();
 }
@@ -1484,7 +1484,7 @@ let renderBottleneckLogged = false;
 
 function animate() {
   animationId = requestAnimationFrame(animate);
-  
+
   // Check memory pressure on mobile
   if (deviceInfo.isMobile || deviceInfo.isTablet) {
     checkMemoryPressure();
@@ -1694,7 +1694,7 @@ function checkOrientation() {
 
   // Disable orientation lock for now to debug touch issues
   return false;
-  
+
   // Only check on small mobile devices
   const isSmallMobile = window.innerWidth <= 768 && deviceInfo.isMobile;
   const isPortrait = window.innerHeight > window.innerWidth;
@@ -1777,7 +1777,7 @@ if (deviceInfo.isMobile) {
     debug.category('Input', 'Canvas z-index:', renderer.domElement.style.zIndex);
     debug.category('Input', 'Controls enabled:', controls.enabled);
     debug.category('Input', 'Controls touch settings:', controls.touches);
-    
+
     // Add global touch listener to see if any element is capturing events
     document.addEventListener('touchstart', (e) => {
       debug.category('Input', 'Document touch detected on:', e.target);
