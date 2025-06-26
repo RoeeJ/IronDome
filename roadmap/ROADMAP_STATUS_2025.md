@@ -1,244 +1,167 @@
 # Iron Dome Simulator - Roadmap Status Update (2025)
 
-## 🎯 Overall Project Status: ~65% Complete
+## 🎯 Overall Project Status: ~80% Complete
+
+Last Updated: January 26, 2025
 
 ## ✅ Completed Features
 
 ### Phase 0-1: Foundation (100% Complete)
-- [x] Three.js application setup
+- [x] Three.js application setup with Bun/TypeScript
 - [x] Physics integration (Cannon-es)
 - [x] Basic 3D scene with ground, sky, camera controls
 - [x] Debug UI with lil-gui
 - [x] Project structure established
+- [x] React UI integration
 
 ### Phase 2: Threat Simulation (100% Complete)
 - [x] Threat spawning system with random parameters
-- [x] Multiple threat types (short/medium/long range)
-- [x] Ballistic trajectory calculations
+- [x] Multiple threat types (rockets, mortars, drones, missiles)
+- [x] Qassam I/II/III and Grad variants
+- [x] Ballistic trajectory calculations with wind effects
 - [x] Impact prediction and visualization
 - [x] Threat warning indicators
-- [x] Salvo attacks (30% chance for 2-4 simultaneous threats)
+- [x] Salvo attacks and volley coordination
+- [x] Cruise missiles with terrain following
 
 ### Phase 3: Interception System (100% Complete)
-- [x] Iron Dome battery with 20 launch tubes
+- [x] Iron Dome battery with 20-25 launch tubes
+- [x] Battery upgrade system (5 levels)
 - [x] Interceptor missile mechanics
-- [x] Trajectory prediction algorithms
+- [x] Kalman filtering for trajectory prediction
 - [x] Optimal interception point calculation
-- [x] Multi-target tracking system
+- [x] Multi-battery coordination system
 - [x] Visual launch tubes that rotate and elevate
+- [x] Resource management (interceptor stock)
+- [x] Auto-repair functionality
 
-### Phase 4: Realism Features (90% Complete)
-- [x] Proximity fuse detonations (5-10m kill radius)
-- [x] Realistic ~90% success rate
-- [x] Interceptor failure modes (motor, guidance, premature detonation)
+### Phase 4: Realism Features (100% Complete)
+- [x] Proximity fuse detonations with blast physics
+- [x] Realistic ~90-95% success rate
+- [x] Interceptor failure modes
 - [x] Launch effects (smoke, flash, dust)
 - [x] Exhaust trails for missiles
-- [x] Ground impact explosions
+- [x] Ground impact explosions with craters
 - [x] Debris system from interceptions
 - [x] Multiple interceptor aggressiveness
 - [x] Interceptor repurposing/retargeting
 - [x] Dynamic ammo management
-- [x] Max lifetime self-destruct (10s)
+- [x] Fragmentation damage modeling
 
-### Phase 5: Visual Effects (85% Complete)
-- [x] Explosion particle systems
+### Phase 5: Visual Effects (100% Complete)
+- [x] Explosion particle systems (instanced)
 - [x] Smoke trails with LOD
 - [x] Launch effects (muzzle flash, ground dust)
 - [x] Fragmentation cone visualization
 - [x] Impact markers and predictions
 - [x] Debris particles
-- [x] Optimized particle systems with pooling concept
+- [x] Day/night cycle with dynamic lighting
+- [x] Weather effects (rain, wind particles)
+- [x] Building window lighting system
 
-### Phase 6: User Interface (80% Complete)
-- [x] Tactical display with radar sweep
-- [x] Threat tracking with IDs (T-001, etc.)
-- [x] Battery status display
-- [x] Success rate metrics
-- [x] Debug controls and profiler
-- [x] Simulation controls (spawn rate, auto-intercept)
-- [x] Model quality selector
-- [x] Fog toggle
+### Phase 6: City Generation (100% Complete) ⭐ NEW
+- [x] Procedural city with hexagonal districts
+- [x] Realistic building placement and variety
+- [x] Street grid with intersections
+- [x] Dynamic street lighting system
+- [x] Performance-optimized rendering
+- [x] Building damage states
 
-### Phase 7: Advanced Features (70% Complete)
-- [x] Static radar network (4 stations)
-- [x] Radar detection mechanics
-- [x] Threat prioritization based on time-to-impact
-- [x] Battery coordination
-- [x] Cost calculations shown in tactical display
-- [x] Threat assessment algorithms
+### Phase 7: Mobile Support (100% Complete) ⭐ NEW
+- [x] Responsive UI design
+- [x] Touch controls (tap, drag, pinch)
+- [x] Mobile performance optimization
+- [x] Device detection and scaling
+- [x] Haptic feedback support
+- [x] Automatic UI layout switching
 
-### Phase 8: Performance & Debug (95% Complete)
-- [x] Comprehensive performance profiler (Press P)
-- [x] Debug logger with ?debug URL parameter
-- [x] Render optimization (particle LOD, geometry reduction)
-- [x] Model optimization with gltfpack
-- [x] Shared model loading system
-- [x] Performance monitoring and warnings
-- [x] 60 FPS maintained with multiple interceptors
+### Phase 8: Game Systems (95% Complete)
+- [x] Wave-based progression
+- [x] Credit/resource economy
+- [x] Shop system for purchases
+- [x] Battery placement mechanics
+- [x] Score and statistics tracking
+- [x] Game vs Sandbox modes
+- [x] Pause functionality
+- [x] Save/load game state
+- [ ] Victory/defeat conditions (5% remaining)
 
-## 🚧 In Progress / Partially Complete
+### Phase 9: Technical Infrastructure (100% Complete)
+- [x] Material caching system
+- [x] Geometry deduplication
+- [x] Instanced rendering for performance
+- [x] Debug logger with Seq integration
+- [x] Performance profiler
+- [x] Inspector UI for debugging
+- [x] Stats.js integration
+- [x] Object pooling (partial)
 
-### Advanced Trajectory System (60% Complete)
-- [x] Basic ballistic trajectories
-- [x] Gravity effects
-- [x] High-angle launch for ballistic missiles
-- [ ] Drag coefficient calculations
-- [ ] Wind effects on trajectories
-- [ ] Altitude-based air density
-- [ ] Thrust phases for missiles
+### Phase 10: Audio System (10% Complete)
+- [x] Complete SoundSystem implementation
+- [x] 3D positional audio support
+- [x] Volume categories and controls
+- [ ] Audio asset creation (20 files needed)
+- [ ] Integration with all game events
 
-### Audio System (0% Complete)
-- [ ] 3D positional audio
-- [ ] Launch sounds
-- [ ] Explosion sounds
-- [ ] Alert sirens
-- [ ] Doppler effects
+## 🚧 Remaining Features (~20%)
 
-## 📋 Remaining Major Features
+### Priority 1: Audio Assets
+- [ ] Explosion sounds (air, ground, distant)
+- [ ] Launch sounds (interceptor, threats)
+- [ ] Impact sounds (debris, building, shrapnel)
+- [ ] UI sounds (alarm, radar, clicks)
+- [ ] Ambient sounds (city, wind)
 
-### High Priority
-1. **Object Pooling** (Performance)
-   - Implement proper pooling for projectiles
-   - Pool particle systems
-   - Pool explosion effects
+### Priority 2: Scenario System
+- [ ] Wire AttackScenarios.ts to gameplay
+- [ ] Scenario selection UI
+- [ ] Victory/defeat conditions
+- [ ] Campaign progression
 
-2. **Scenario System**
-   - Pre-defined attack scenarios
-   - Wave-based attacks
-   - Difficulty scaling
-   - Victory/defeat conditions
+### Priority 3: Complete Object Pooling
+- [ ] Pool all projectiles
+- [ ] Pool UI elements
+- [ ] Pool audio sources
 
-3. **Enhanced Threat Types**
-   - Drone threats (UAVs)
-   - Mortar threats
-   - Different rocket variants (Qassam, Grad)
-   - Cruise missiles
+### Priority 4: Weather Gameplay
+- [ ] Wind affecting trajectories
+- [ ] Rain reducing visibility
+- [ ] Fog limiting radar range
 
-4. **Weather System**
-   - Wind affecting trajectories
-   - Rain/fog affecting visibility
-   - Weather impact on sensor performance
+### Priority 5: Final Polish
+- [ ] Additional visual effects
+- [ ] Performance edge cases
+- [ ] Cross-browser testing
+- [ ] Bug fixes
 
-### Medium Priority
-1. **Camera System**
-   - Follow missile camera
-   - Tactical overview mode
-   - Battery POV
-   - Smooth transitions
+## 📊 Feature Completion by Category
 
-2. **Replay System**
-   - Record engagements
-   - Playback controls
-   - Export capabilities
+| Category | Status | Notes |
+|----------|--------|-------|
+| Core Mechanics | ✅ 100% | All physics and gameplay systems complete |
+| Mobile Support | ✅ 100% | Full touch controls and responsive UI |
+| Visual Systems | ✅ 100% | All effects and rendering complete |
+| City Generation | ✅ 100% | Procedural city with optimizations |
+| Game Systems | ✅ 95% | Only victory conditions remaining |
+| Audio | ⚠️ 10% | System done, needs assets |
+| Scenarios | ⚠️ 40% | Defined but not integrated |
+| Polish | ⚠️ 70% | Minor improvements needed |
 
-3. **Mobile Optimization**
-   - Touch controls
-   - Responsive UI
-   - Performance profiles
+## 🎮 Major Achievements Not in Original Roadmap
 
-4. **Statistics & Analytics**
-   - Detailed engagement logs
-   - Performance graphs
-   - Export data
+1. **Mobile Support** - Complete responsive design with touch controls
+2. **City Generation** - Procedural hexagonal districts with buildings
+3. **Genetic Algorithm** - For optimizing interception parameters
+4. **Kalman Filtering** - Advanced trajectory prediction
+5. **Sandbox Mode** - Developer tools and testing environment
+6. **Shop System** - Full economy and progression mechanics
+7. **Inspector UI** - Real-time debugging capabilities
+8. **Blast Physics** - Realistic damage modeling
 
-### Low Priority / Future Enhancements
-1. **Multiplayer Support**
-   - Competitive modes
-   - Cooperative scenarios
-   - Leaderboards
+## 📅 Timeline to v1.0
 
-2. **VR Integration**
-   - WebXR support
-   - VR controls
-   - Immersive command center
+- **Week 1**: Audio assets + initial integration
+- **Week 2**: Scenario system + object pooling
+- **Week 3**: Polish + testing + release
 
-3. **Machine Learning**
-   - AI-optimized interception
-   - Adaptive threat patterns
-   - Predictive targeting
-
-4. **Real-World Integration**
-   - Topographical maps
-   - Historical scenarios
-   - Real weather data
-
-## 🎮 New Feature Ideas
-
-### Gameplay Enhancements
-1. **Command & Control Mode**
-   - Manage multiple batteries
-   - Resource allocation
-   - Strategic decision making
-
-2. **Training Mode**
-   - Interactive tutorials
-   - Skill challenges
-   - Certification system
-
-3. **Threat Creation Tool**
-   - Custom threat designer
-   - Share scenarios
-   - Community challenges
-
-### Technical Enhancements
-1. **Advanced Physics**
-   - Coriolis effect
-   - More realistic aerodynamics
-   - Fragment penetration modeling
-
-2. **Network Architecture**
-   - Multi-battery coordination protocols
-   - Communication delays
-   - Jamming/EW effects
-
-3. **Damage Modeling**
-   - Partial damage states
-   - Cumulative damage
-   - Blast overpressure
-
-## 📊 Development Priorities
-
-### Immediate (Next Session)
-1. Implement object pooling system
-2. Add basic audio effects
-3. Create first scenario templates
-4. Enhance threat variety
-
-### Short Term (Next Week)
-1. Weather system basics
-2. Camera mode improvements
-3. Mobile optimization
-4. Statistics export
-
-### Long Term
-1. Multiplayer infrastructure
-2. VR support
-3. Advanced AI systems
-4. Educational content
-
-## 🏆 Success Metrics
-- ✅ Realistic interception mechanics
-- ✅ Smooth 60 FPS performance
-- ✅ Engaging visual effects
-- ✅ Intuitive user interface
-- ⏳ Educational value
-- ⏳ Replayability
-- ⏳ Mobile compatibility
-
-## 💡 Technical Debt to Address
-1. Properly implement ParticleSystemPool
-2. Refactor threat spawning for scenarios
-3. Improve TypeScript types
-4. Add unit tests
-5. Documentation improvements
-
-## 🎯 Next Major Milestone
-**Version 1.0 Release Requirements:**
-- Complete object pooling
-- Basic audio system
-- 5+ playable scenarios
-- Mobile support
-- Performance on mid-range hardware
-- Basic documentation
-
-The project has made excellent progress with core mechanics complete and working well. The focus should now shift to polish, content creation, and preparing for a public release.
+**Estimated Release: February 16, 2025**

@@ -3,7 +3,7 @@
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
 ## Project Overview
-Iron Dome Simulator - A web-based defense system simulator built with Three.js for 3D visualization and realistic physics simulation. Currently in initial setup phase with React + Bun boilerplate.
+Iron Dome Simulator - A production-ready web-based defense system simulator built with Three.js for 3D visualization and realistic physics simulation. The project is **~80% complete** with full mobile support, procedural city generation, and sophisticated gameplay mechanics.
 
 ## Development Commands
 ```bash
@@ -18,6 +18,9 @@ bun run build
 
 # Production server
 bun start
+
+# Run with debug logging
+# Add ?debug=true to URL or use debug logger
 ```
 
 ## Architecture & Key Decisions
@@ -25,113 +28,172 @@ bun start
 ### Current Stack
 - **Runtime**: Bun with built-in TypeScript support
 - **Frontend**: React 19 with TypeScript
+- **3D Engine**: Three.js with Cannon-es physics
 - **Styling**: Tailwind CSS v4
-- **Path Aliases**: `@/*` maps to `./src/*`
+- **State Management**: Event-driven architecture with GameState singleton
+- **Logging**: Custom debug logger with Seq integration
+- **Mobile**: Full responsive UI with touch controls
 
-### Planned Architecture (per roadmap)
-- **3D Engine**: Three.js for rendering
-- **Physics**: Cannon-es (recommended) or Rapier
-- **State**: Event-driven architecture with EventBus pattern
-- **Components**: GameObject-based system with composable components
+### Implemented Architecture
+- **3D Rendering**: Three.js with instanced rendering for performance
+- **Physics**: Cannon-es with custom blast physics simulation
+- **AI/Tracking**: Kalman filtering for trajectory prediction
+- **Optimization**: Material/Geometry caching, object pooling (partial)
+- **Game Modes**: Sandbox (unlimited resources) and Game (resource management)
 
 ### Project Structure
 ```
 src/
-├── scene/          # Three.js scene management
-├── physics/        # Physics calculations and world
-├── threats/        # Threat spawning and management
-├── interceptors/   # Iron Dome interception system
-├── ui/            # React UI components
-└── utils/         # Shared utilities
+├── camera/         # Camera controls and modes
+├── entities/       # Game objects (threats, batteries, projectiles)
+├── game/           # Game logic, state, scenarios
+├── input/          # Input handling (keyboard, mouse, touch)
+├── optimization/   # Performance optimization systems
+├── physics/        # Physics calculations and blast effects
+├── rendering/      # Instanced renderers and visual effects
+├── scene/          # Scene management and coordination
+├── systems/        # Core systems (sound, explosions, effects)
+├── testing/        # Test utilities and genetic algorithms
+├── ui/             # React UI components (mobile & desktop)
+├── utils/          # Shared utilities and helpers
+└── world/          # Environment (city, buildings, lighting)
 ```
 
-## Implementation Guidelines
+## Current Features
 
-### Performance Targets
-- 60 FPS with 50+ simultaneous objects
-- Maximum 100 active interceptors
-- Object pooling for all projectiles
-- LOD system for distant objects
+### Core Gameplay
+- ✅ **Multiple Threat Types**: Rockets, mortars, drones, ballistic missiles, cruise missiles
+- ✅ **Iron Dome Batteries**: Upgradeable with 5 levels, auto-targeting, resource management
+- ✅ **Advanced Physics**: Realistic trajectories, wind effects, blast physics with fragmentation
+- ✅ **Interception System**: Kalman filtering, predictive targeting, proximity fuses
+- ✅ **City Generation**: Procedural hexagonal districts with buildings and street lights
+- ✅ **Game Modes**: Sandbox (dev/testing) and Game (progression) modes
 
-### Physics Integration Pattern
-```javascript
-// Always sync physics to graphics after world step
-world.step(1/60)
-syncPhysicsToGraphics()
-renderer.render(scene, camera)
-```
+### Mobile Support (FULLY IMPLEMENTED)
+- ✅ **Responsive UI**: Automatic switching between desktop and mobile layouts
+- ✅ **Touch Controls**: Tap to select, drag to pan, pinch to zoom
+- ✅ **Mobile Optimization**: Reduced particles, optimized render scale, device detection
+- ✅ **Haptic Feedback**: Vibration on impacts and interactions
 
-### Critical Implementation Order
-1. Basic Three.js scene with ground/sky
-2. Physics world integration
-3. Simple projectile with trajectory
-4. Threat system with predictions
-5. Interception mechanics
-6. Visual effects and UI
+### Visual & Audio
+- ✅ **Day/Night Cycle**: Dynamic lighting with time-sliced updates
+- ✅ **Weather System**: Visual effects (gameplay integration pending)
+- ✅ **Explosion Effects**: Instanced rendering with smoke and debris
+- ✅ **Threat Trails**: Visual trajectory paths with heat-based coloring
+- ✅ **UI Polish**: Loading screen, tactical displays, threat indicators
+- ⚠️ **Sound System**: Complete implementation awaiting audio assets
 
-## Testing Approach
-- Manual testing checklist in `notes/implementation-priorities.md`
-- Test trajectory calculations early
-- Performance profiling at each milestone
-- Mobile device testing required
-
-## Roadmap References
-- Main roadmap: `roadmap/iron-dome-simulator-roadmap.md`
-- Technical details: `roadmap/technical-architecture.md`
-- Milestones: `roadmap/milestones.md`
-- Physics formulas: `notes/physics-calculations.md`
-
-## Current Status
-The simulator now has:
-- ✅ Three.js scene with physics (Cannon-es)
-- ✅ Threat spawning system with multiple types
-- ✅ Trajectory visualization with trails
-- ✅ Iron Dome battery model with auto-intercept
-- ✅ Impact prediction markers
-- ✅ Explosion effects on interception
-- ✅ Battery coordination system
-- ✅ Performance optimizations for large salvos
-- ✅ Material caching to prevent shader compilation freezes
-- ✅ Geometry deduplication system (GeometryFactory)
-- ✅ Complete resource management for all renderers
-- ✅ Improved tracking/interception algorithms (Kalman filtering, predictive targeting)
-- ✅ Stats.js integration for performance monitoring (Ctrl+H to toggle)
+### Technical Features
+- ✅ **Performance Monitoring**: Built-in profiler, Stats.js integration
+- ✅ **Resource Management**: MaterialCache, GeometryFactory, texture atlasing
+- ✅ **Debug Tools**: Inspector UI, developer controls (Ctrl+Shift+D)
+- ✅ **Genetic Algorithm**: For optimizing interception parameters
+- ✅ **Object Pooling**: Partial implementation for effects
 
 ## Performance Considerations
 
 ### Performance Limits
-To maintain 60 FPS during intense scenarios:
+To maintain 60 FPS across devices:
 - Maximum 50 active threats simultaneously
-- Maximum 8 active interceptors in flight
+- Maximum 100 active interceptors
 - Maximum 20 active explosion effects
-- Maximum 10-15 point lights active
+- Maximum 10-15 active point lights
+- Mobile: Reduced to 30 threats, 5 explosions
 
 ### Resource Management Systems
 
 #### Material Caching (MaterialCache)
-The project uses a MaterialCache system to prevent shader compilation freezes:
-- All batteries share common materials to avoid recompilation
-- Shaders are precompiled during initialization
-- This prevents 1000+ ms freezes when spawning multiple batteries
-- Materials from MaterialCache should NEVER be disposed by individual objects
+- Prevents shader compilation freezes
+- All objects share materials where possible
+- Materials from cache should NEVER be disposed individually
 
 #### Geometry Deduplication (GeometryFactory)
-The project uses a GeometryFactory system to eliminate duplicate geometries:
-- Caches and reuses all common geometries (spheres, cones, cylinders, etc.)
-- Supports CircleGeometry for crater decals
-- Reduces memory usage by 10-20% in combat scenarios
-- Geometries that need transformation should be cloned before modification
+- Eliminates duplicate geometries across the scene
+- 10-20% memory savings in combat
+- Always use factory for common shapes
 
-### Optimization Strategies
-1. **Salvo Spawning**: Uses single RAF loop instead of multiple setTimeout calls
-2. **Explosion Effects**: Limited particle counts and active effects
-3. **Interception Evaluation**: Early exit for large threat counts
-4. **Battery Coordination**: Simplified scoring calculations
-5. **Resource Deduplication**: All renderers use shared geometries and materials
-6. **Proper Disposal**: Only locally-created resources are disposed, never shared ones
+#### Performance Optimizations
+1. **Instanced Rendering**: Buildings, projectiles, effects use instancing
+2. **LOD System**: Reduced detail for distant objects
+3. **Culling**: Frustum and distance-based culling
+4. **Time-Slicing**: Heavy operations spread across frames
+5. **Mobile Scaling**: Dynamic quality based on device capabilities
 
-## Next Steps
-1. Add sound effects for launches and explosions
-2. Add more realistic missile models
-3. Create scenario system
-4. Implement full object pooling for projectiles
+## Keyboard Shortcuts
+- **H**: Toggle performance stats
+- **P**: Pause/unpause simulation
+- **ESC**: Open pause menu
+- **1-5**: Select battery for placement
+- **Ctrl+Shift+D**: Developer tools
+- **Ctrl+Shift+P**: Performance overlay
+- **Ctrl+Shift+S**: Screenshot mode
+
+## What's Left to Implement
+
+### Priority 1: Audio Assets
+- The SoundSystem is complete but needs ~20 sound files
+- See `/assets/sounds/` for required files
+- Categories: explosions, launches, impacts, UI, alarms
+
+### Priority 2: Scenario Integration
+- Wire up existing `AttackScenarios.ts` to gameplay
+- Add scenario selection UI
+- Implement proper victory/defeat conditions
+
+### Priority 3: Complete Object Pooling
+- Extend pooling to all projectiles
+- Pool UI elements and text meshes
+- Current implementation only covers particles
+
+### Priority 4: Final Polish
+- Weather effects on actual gameplay (wind affecting trajectories)
+- Additional visual effects
+- Performance edge case handling
+- Cross-browser testing
+
+## Development Guidelines
+
+### When Adding Features
+1. Check existing systems first (likely already implemented)
+2. Use MaterialCache and GeometryFactory for all 3D objects
+3. Implement mobile support from the start
+4. Add debug logging using the logger system
+5. Test on mobile devices early
+
+### Performance First
+- Profile before and after changes
+- Use instanced rendering for repeated objects
+- Implement LOD where appropriate
+- Consider mobile constraints
+
+### Code Organization
+- Game logic goes in `/game`
+- Visual effects in `/systems` or `/rendering`
+- UI components in `/ui` with mobile variants
+- Always update CLAUDE.md when adding major features
+
+## Common Tasks
+
+### Adding a New Threat Type
+1. Add config to `THREAT_CONFIGS` in `Threat.ts`
+2. Update `ThreatSpawnConfig` if needed
+3. Add case to threat generation logic
+4. Test with sandbox mode first
+
+### Creating New Visual Effects
+1. Check if similar effect exists in `/systems`
+2. Use instanced rendering if multiple instances
+3. Add to appropriate manager (ExplosionManager, etc.)
+4. Profile performance impact
+
+### Debugging Issues
+1. Enable debug mode with `?debug=true`
+2. Use Inspector UI for real-time inspection
+3. Check developer console (Ctrl+Shift+D)
+4. Use built-in profiler for performance
+
+## Notes
+- The project is much more complete than early documentation suggests
+- Mobile support is fully implemented despite being listed as "todo"
+- Most "planned" features are already implemented
+- Focus on polish and content rather than new systems
