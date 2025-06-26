@@ -46,11 +46,13 @@ export class ExplosionManager {
   private explosions = new Map<string, ExplosionInstance>();
   private nextId = 0;
   private lightPool: LightPool;
-  private activeShockwaves = new Map<
-    string,
-    { mesh: THREE.Mesh; material: THREE.Material; startTime: number }
-  >();
   private readonly MAX_SHOCKWAVES = 10; // Limit active shockwaves for performance
+  
+  // CHAINSAW: Instanced shockwave rendering
+  private shockwaveInstancedMesh: THREE.InstancedMesh;
+  private shockwaveInstances = new Map<string, { index: number; position: THREE.Vector3; radius: number; startTime: number }>();
+  private availableShockwaveIndices: number[] = [];
+  private shockwaveDummy = new THREE.Object3D();
 
   // Explosion type configurations
   private typeConfigs = {
@@ -98,6 +100,31 @@ export class ExplosionManager {
     this.scene = scene;
     this.instancedRenderer = new InstancedExplosionRenderer(scene);
     this.lightPool = LightPool.getInstance(scene, 20); // Support 20 simultaneous explosion lights
+    
+    // CHAINSAW: Initialize instanced shockwave mesh
+    const shockwaveGeometry = GeometryFactory.getInstance().getRing(1, 1.2, 32, 1);
+    const shockwaveMaterial = MaterialCache.getInstance().getMeshBasicMaterial({
+      color: 0xffffff,
+      transparent: true,
+      opacity: 0.5,
+      side: THREE.DoubleSide,
+      blending: THREE.AdditiveBlending,
+      depthWrite: false,
+    });
+    
+    this.shockwaveInstancedMesh = new THREE.InstancedMesh(shockwaveGeometry, shockwaveMaterial, this.MAX_SHOCKWAVES);
+    this.shockwaveInstancedMesh.castShadow = false;
+    this.shockwaveInstancedMesh.receiveShadow = false;
+    
+    // Initialize all instances as invisible
+    const zeroScale = new THREE.Matrix4().makeScale(0, 0, 0);
+    for (let i = 0; i < this.MAX_SHOCKWAVES; i++) {
+      this.shockwaveInstancedMesh.setMatrixAt(i, zeroScale);
+      this.availableShockwaveIndices.push(i);
+    }
+    this.shockwaveInstancedMesh.instanceMatrix.needsUpdate = true;
+    
+    this.scene.add(this.shockwaveInstancedMesh);
   }
 
   static getInstance(scene: THREE.Scene): ExplosionManager {
@@ -319,19 +346,17 @@ export class ExplosionManager {
       return; // Skip shockwave for explosions too high above ground
     }
 
-    // Limit total number of shockwaves
-    if (this.activeShockwaves.size >= this.MAX_SHOCKWAVES) {
+    // CHAINSAW: Use instanced rendering for shockwaves
+    if (this.availableShockwaveIndices.length === 0) {
       debug.log(`Skipping shockwave creation - max shockwaves (${this.MAX_SHOCKWAVES}) reached`);
       return;
     }
 
     // Check if there's already a shockwave nearby to prevent overlap
     const minShockwaveDistance = Math.max(5, radius * 0.5); // At least 5m apart
-    for (const [id, shockwaveData] of this.activeShockwaves) {
-      // Use stored position for comparison (handles both placeholder and actual mesh)
-      const otherPos = shockwaveData.mesh.position;
+    for (const [id, instance] of this.shockwaveInstances) {
       const distance = Math.sqrt(
-        Math.pow(otherPos.x - position.x, 2) + Math.pow(otherPos.z - position.z, 2)
+        Math.pow(instance.position.x - position.x, 2) + Math.pow(instance.position.z - position.z, 2)
       ); // Only check horizontal distance
 
       if (distance < minShockwaveDistance) {
@@ -342,48 +367,15 @@ export class ExplosionManager {
       }
     }
 
-    // Create unique ID first to ensure atomicity
     const shockwaveId = `shockwave_${Date.now()}_${Math.random()}`;
-
-    // Reserve the position immediately to prevent race conditions
-    const placeholder = {
-      mesh: { position: position.clone() } as any,
-      material: null as any,
-      startTime: Date.now(),
-    };
-    this.activeShockwaves.set(shockwaveId, placeholder);
-
-    // Now create the actual shockwave
-    const geometry = GeometryFactory.getInstance().getRing(0, radius * 2, 32, 1);
-    // Create unique material for this shockwave (needed for opacity animation)
-    const material = new THREE.MeshBasicMaterial({
-      color: 0xffffff,
-      transparent: true,
-      opacity: 0.5,
-      side: THREE.DoubleSide,
-      blending: THREE.AdditiveBlending,
-      depthWrite: false,
-    });
-
-    const shockwave = new THREE.Mesh(geometry, material);
-    shockwave.position.copy(position);
-    shockwave.position.y = 0.05 + Math.random() * 0.02; // Slight random height to prevent Z-fighting
-    shockwave.rotation.x = -Math.PI / 2; // Horizontal for ground impacts
+    const index = this.availableShockwaveIndices.pop()!;
     
-    // Optimize: Shockwaves don't need shadows
-    shockwave.castShadow = false;
-    shockwave.receiveShadow = false;
-
-    // Add unique identifier to mesh for debugging
-    shockwave.userData.shockwaveId = shockwaveId;
-
-    this.scene.add(shockwave);
-
-    // Update with actual data
-    this.activeShockwaves.set(shockwaveId, {
-      mesh: shockwave,
-      material: material,
-      startTime: placeholder.startTime,
+    // Store shockwave instance data
+    this.shockwaveInstances.set(shockwaveId, {
+      index,
+      position: position.clone(),
+      radius: radius * 2,
+      startTime: Date.now(),
     });
 
     debug.log(
@@ -422,33 +414,47 @@ export class ExplosionManager {
     // Update instanced renderer
     this.instancedRenderer.update(deltaTime);
 
-    // Update shockwaves
+    // CHAINSAW: Update instanced shockwaves
     const shockwaveDuration = 500; // 500ms for shockwave animation
     const toRemove: string[] = [];
+    let needsUpdate = false;
 
-    for (const [id, shockwaveData] of this.activeShockwaves) {
-      // Skip if placeholder (not fully initialized)
-      if (!shockwaveData.material || !shockwaveData.mesh.geometry) {
+    for (const [id, instance] of this.shockwaveInstances) {
+      const elapsed = currentTime - instance.startTime;
+      const progress = Math.min(elapsed / shockwaveDuration, 1);
+
+      if (progress >= 1) {
+        toRemove.push(id);
         continue;
       }
 
-      const elapsed = currentTime - shockwaveData.startTime;
-      const progress = Math.min(elapsed / shockwaveDuration, 1);
+      // Update instance matrix
+      const scale = 1 + (instance.radius - 1) * progress;
+      this.shockwaveDummy.position.copy(instance.position);
+      this.shockwaveDummy.position.y = 0.05 + Math.random() * 0.02;
+      this.shockwaveDummy.rotation.x = -Math.PI / 2;
+      this.shockwaveDummy.scale.set(scale, scale, 1);
+      
+      this.shockwaveDummy.updateMatrix();
+      this.shockwaveInstancedMesh.setMatrixAt(instance.index, this.shockwaveDummy.matrix);
+      
+      // Update opacity through color
+      const opacity = 0.5 * (1 - progress);
+      const color = new THREE.Color(1, 1, 1).multiplyScalar(opacity * 2);
+      this.shockwaveInstancedMesh.setColorAt(instance.index, color);
+      
+      needsUpdate = true;
+    }
 
-      // Update scale and opacity only if mesh is still in scene
-      if (shockwaveData.mesh.parent) {
-        const scale = 1 + progress * 3;
-        shockwaveData.mesh.scale.set(scale, scale, 1);
-        shockwaveData.material.opacity = 0.5 * (1 - progress);
-      }
-
-      // Mark for removal if complete
-      if (progress >= 1) {
-        toRemove.push(id);
+    // Update instance matrix if needed
+    if (needsUpdate) {
+      this.shockwaveInstancedMesh.instanceMatrix.needsUpdate = true;
+      if (this.shockwaveInstancedMesh.instanceColor) {
+        this.shockwaveInstancedMesh.instanceColor.needsUpdate = true;
       }
     }
 
-    // Remove completed shockwaves atomically
+    // Remove completed shockwaves
     for (const id of toRemove) {
       this.removeShockwave(id);
     }
@@ -477,27 +483,22 @@ export class ExplosionManager {
   }
 
   private removeShockwave(id: string): void {
-    const shockwaveData = this.activeShockwaves.get(id);
-    if (!shockwaveData) {
+    // CHAINSAW: Handle instanced shockwaves
+    const instance = this.shockwaveInstances.get(id);
+    if (!instance) {
       return;
     }
 
-    // Remove from map first to prevent concurrent access
-    this.activeShockwaves.delete(id);
+    // Hide the instance
+    const zeroScale = new THREE.Matrix4().makeScale(0, 0, 0);
+    this.shockwaveInstancedMesh.setMatrixAt(instance.index, zeroScale);
+    this.shockwaveInstancedMesh.instanceMatrix.needsUpdate = true;
 
-    // Then clean up resources
-    try {
-      if (shockwaveData.mesh && shockwaveData.mesh.parent) {
-        this.scene.remove(shockwaveData.mesh);
-      }
-      if (shockwaveData.material) {
-        shockwaveData.material.dispose();
-      }
-    } catch (error) {
-      debug.error(`Error removing shockwave ${id}:`, error);
-    }
+    // Return index to pool
+    this.availableShockwaveIndices.push(instance.index);
+    this.shockwaveInstances.delete(id);
 
-    debug.log(`Shockwave ${id} removed. Active shockwaves: ${this.activeShockwaves.size}`);
+    debug.log(`Shockwave ${id} removed. Active shockwaves: ${this.shockwaveInstances.size}`);
   }
 
   private removeExplosion(id: string): void {
@@ -530,7 +531,7 @@ export class ExplosionManager {
       activeExplosions: this.explosions.size,
       activeLights: lightStats.inUse,
       availableLights: lightStats.available,
-      activeShockwaves: this.activeShockwaves.size,
+      activeShockwaves: this.shockwaveInstances.size,
     };
   }
 
@@ -542,8 +543,8 @@ export class ExplosionManager {
       this.removeExplosion(id);
     }
 
-    // Clean up all shockwaves atomically
-    const shockwaveIds = Array.from(this.activeShockwaves.keys());
+    // CHAINSAW: Clean up all instanced shockwaves
+    const shockwaveIds = Array.from(this.shockwaveInstances.keys());
     for (const id of shockwaveIds) {
       this.removeShockwave(id);
     }

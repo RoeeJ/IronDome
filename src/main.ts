@@ -291,6 +291,10 @@ interceptionSystem.setThreatManager(threatManager);
 // Export interception system for global access
 (window as any).__interceptionSystem = interceptionSystem;
 
+// CHAINSAW: Set up instanced debris renderer for performance
+import { InstancedDebrisRenderer } from './rendering/InstancedDebrisRenderer';
+const instancedDebrisRenderer = new InstancedDebrisRenderer(scene, 1000); // Support up to 1000 debris pieces
+(window as any).__instancedDebrisRenderer = instancedDebrisRenderer;
 
 // Connect all systems
 domePlacementSystem.setInterceptionSystem(interceptionSystem);
@@ -1588,6 +1592,9 @@ function animate() {
 
     // Update dome placement system (for instanced rendering)
     domePlacementSystem.update();
+    
+    // CHAINSAW: Update instanced debris renderer
+    instancedDebrisRenderer.update(deltaTime);
 
     // CHAINSAW: Removed instanced rendering update - using standard meshes
   }
