@@ -41,10 +41,11 @@ export class BuildingSystem {
   private unlitWindowMesh: THREE.InstancedMesh;
   private windowMatrix = new THREE.Matrix4();
   private windowCount = 0;
-  private maxWindowsPerMesh = 2000; // PERFORMANCE: Reduced from 10k for faster initialization
+  private maxWindowsPerMesh = 5000; // Increased for larger city (was 2000)
   private maxWindowsPerBuilding = 200; // Increased limit since we're using instancing efficiently
   private litWindowPool: number[] = [];
   private unlitWindowPool: number[] = [];
+  private poolExhaustedWarned: boolean = false;
   private dummyObject = new THREE.Object3D();
   private lastUpdateHour: number = -1; // Track last update to avoid constant changes
   private windowStates: Map<string, { lit: boolean; litIndex?: number; unlitIndex?: number }> =
@@ -126,7 +127,7 @@ export class BuildingSystem {
     this.unlitWindowMesh.castShadow = false;
     this.unlitWindowMesh.receiveShadow = false;
 
-    console.log('Window materials setup:', {
+    debug.log('Window materials setup:', {
       litMaterial: litWindowMaterial,
       unlitMaterial: unlitWindowMaterial,
       maxWindowsPerMesh: this.maxWindowsPerMesh,
@@ -228,7 +229,7 @@ export class BuildingSystem {
           litChance = 0.5; // Late night - 50% lit
         }
       } else {
-        console.warn('optimizedDayNight not available during building creation');
+        debug.warn('optimizedDayNight not available during building creation');
       }
       const isLit = Math.random() < litChance;
       const pool = isLit ? this.litWindowPool : this.unlitWindowPool;
@@ -692,7 +693,7 @@ export class BuildingSystem {
         this.buildingPositions.push(...districtBuildings);
       } else {
         // Cancel this district - remove any buildings we created
-        console.warn(
+        debug.warn(
           `Cancelling district at (${district.center.x}, ${district.center.z}) - only placed ${placedInDistrict} buildings`
         );
         // Remove the buildings we just created from the scene
@@ -874,7 +875,7 @@ export class BuildingSystem {
       const centerDist = Math.sqrt(hood.center.x * hood.center.x + hood.center.z * hood.center.z);
       if (centerDist < hubRadius + 30) return; // Only skip if too close to hub
 
-      console.log(
+      debug.category('Building', 
         `Creating road for neighborhood at (${hood.center.x.toFixed(0)}, ${hood.center.z.toFixed(0)}), dist=${centerDist.toFixed(0)}, buildings=${hood.buildings.length}`
       );
 
@@ -914,7 +915,7 @@ export class BuildingSystem {
         );
 
         this.roads.add(connectionMesh);
-        console.log(`Connected inner neighborhood to hub`);
+        debug.category('Building', `Connected inner neighborhood to hub`);
       }
 
       // CITIZEN ROADS: Connect each building in the neighborhood to the circular road
@@ -955,22 +956,22 @@ export class BuildingSystem {
     });
 
     // Debug: log ring sizes
-    console.log(
+    debug.category('Building',
       `Ring distribution: Inner=${innerRing.length}, Middle=${middleRing.length}, Outer=${outerRing.length}`
     );
 
     // Connect neighborhoods within same ring - only to immediate neighbors
     [innerRing, middleRing, outerRing].forEach((ring, ringIndex) => {
       const ringNames = ['Inner', 'Middle', 'Outer'];
-      console.log(`Processing ${ringNames[ringIndex]} ring with ${ring.length} neighborhoods`);
+      debug.category('Building', `Processing ${ringNames[ringIndex]} ring with ${ring.length} neighborhoods`);
 
       if (ring.length === 0) {
-        console.log(`Ring ${ringIndex} is empty!`);
+        debug.category('Building', `Ring ${ringIndex} is empty!`);
         return;
       }
 
       if (ring.length === 1) {
-        console.log(`Ring ${ringIndex} has only 1 neighborhood, skipping connections`);
+        debug.category('Building', `Ring ${ringIndex} has only 1 neighborhood, skipping connections`);
         return;
       }
 
@@ -982,7 +983,7 @@ export class BuildingSystem {
         }))
         .sort((a, b) => a.angle - b.angle);
 
-      console.log(
+      debug.category('Building',
         `Sorted ${ringNames[ringIndex]} ring angles:`,
         sortedRing.map(s => ((s.angle * 180) / Math.PI).toFixed(0))
       );
@@ -997,7 +998,7 @@ export class BuildingSystem {
             Math.pow(current.hood.center.z - next.hood.center.z, 2)
         );
 
-        console.log(
+        debug.category('Building',
           `${ringNames[ringIndex]} ring: Checking connection ${index} -> ${(index + 1) % sortedRing.length}, dist=${dist.toFixed(0)}`
         );
 
@@ -1006,7 +1007,7 @@ export class BuildingSystem {
 
         // Only connect if they're reasonably close (not on opposite sides)
         if (dist < distThreshold) {
-          console.log(`  -> Connecting!`);
+          debug.category('Building', `  -> Connecting!`);
           // Calculate connection points on both circles
           const angle = Math.atan2(
             next.hood.center.z - current.hood.center.z,
@@ -1028,15 +1029,15 @@ export class BuildingSystem {
           );
 
           this.roads.add(interHoodMesh);
-          console.log(`  -> Road created!`);
+          debug.category('Building', `  -> Road created!`);
         } else {
-          console.log(`  -> Too far apart (${dist.toFixed(0)} > ${distThreshold})`);
+          debug.category('Building', `  -> Too far apart (${dist.toFixed(0)} > ${distThreshold})`);
         }
       });
     });
 
     // INTER-RING CONNECTIONS: Connect rings to each other
-    console.log('Creating inter-ring connections...');
+    debug.category('Building', 'Creating inter-ring connections...');
 
     // Connect inner ring to middle ring
     innerRing.forEach(innerHood => {
@@ -1077,7 +1078,7 @@ export class BuildingSystem {
         );
 
         this.roads.add(interRingMesh);
-        console.log(`Connected inner->middle: dist=${minDist.toFixed(0)}`);
+        debug.category('Building', `Connected inner->middle: dist=${minDist.toFixed(0)}`);
       }
     });
 
@@ -1120,7 +1121,7 @@ export class BuildingSystem {
         );
 
         this.roads.add(interRingMesh);
-        console.log(`Connected middle->outer: dist=${minDist.toFixed(0)}`);
+        debug.category('Building', `Connected middle->outer: dist=${minDist.toFixed(0)}`);
       }
     });
 
@@ -1418,7 +1419,7 @@ export class BuildingSystem {
     if (this.debugCount++ < 3) {
       const sampleStates = windowStatesArray.slice(0, 10);
       // console.log('Sample window states for debugging:', sampleStates);
-      console.log('First state lit check:', sampleStates[0]?.lit, typeof sampleStates[0]?.lit);
+      debug.category('Building', 'First state lit check:', sampleStates[0]?.lit, typeof sampleStates[0]?.lit);
     }
     const targetLitCount = Math.floor(totalWindows * targetLitPercentage);
     const difference = targetLitCount - currentLitCount;
@@ -1429,7 +1430,7 @@ export class BuildingSystem {
       const unlitWithIndex = windowStatesArray.filter(
         s => !s.lit && s.unlitIndex !== undefined
       ).length;
-      console.log(`Initial window state distribution:
+      debug.category('Building', `Initial window state distribution:
         Total: ${totalWindows}
         Lit (state.lit=true): ${currentLitCount}
         Lit with index: ${litWithIndex}
@@ -1480,7 +1481,7 @@ export class BuildingSystem {
       });
 
       if (forceUpdate && litWindows.length === 0) {
-        console.error('No lit windows found to turn off! Window states might be corrupted.');
+        debug.error('No lit windows found to turn off! Window states might be corrupted.');
         // Debug: check a sample of window states
         const sampleStates = Array.from(this.windowStates.entries()).slice(0, 5);
         // console.log('Sample window states:', sampleStates);
@@ -1665,7 +1666,13 @@ export class BuildingSystem {
       return true;
     }
 
-    console.warn(`Failed to switch window ${windowKey} - no indices available in target pool`);
+    // Pool exhausted - log once and stop trying
+    if (!this.poolExhaustedWarned) {
+      this.poolExhaustedWarned = true;
+      console.warn(`Window pool exhausted! Total windows: ${this.windowCount}, max per mesh: ${this.maxWindowsPerMesh}`);
+      console.warn(`Lit pool: ${this.litWindowPool.length}, Unlit pool: ${this.unlitWindowPool.length}`);
+      console.warn(`This usually means more windows were created than the pool size allows.`);
+    }
     return false;
   }
 
@@ -1697,8 +1704,8 @@ export class BuildingSystem {
       }
     });
 
-    console.log(`Merging: ${roadMeshes.length} roads`);
-    console.log(
+    debug.category('Building', `Merging: ${roadMeshes.length} roads`);
+    debug.category('Building',
       `Keeping separate: ${this.buildings.length} buildings (for windows), all street lights (for visibility)`
     );
 
@@ -1714,7 +1721,7 @@ export class BuildingSystem {
       // Add merged road mesh
       this.roads.add(mergedRoads);
       this.mergedStaticGeometry.roads = mergedRoads;
-      console.log(`✅ Roads merged: ${roadMeshes.length} meshes → 1 draw call`);
+      debug.category('Building', `✅ Roads merged: ${roadMeshes.length} meshes → 1 draw call`);
     }
 
     const stats = this.getStats();
@@ -1723,11 +1730,11 @@ export class BuildingSystem {
       : 0;
     // Street lights now use 6 instanced meshes (3 components x 2 types)
     const totalDrawCalls = stats.buildingCount + 1 + 6 + 2; // buildings + roads + street light instances + windows
-    console.log(`🏆 CITY OPTIMIZATION COMPLETE!`);
-    console.log(`   Buildings: ${stats.buildingCount} (preserved for windows)`);
-    console.log(`   Roads: 1 merged mesh`);
-    console.log(`   Street lights: ${streetLightCount} lights using 6 instanced meshes`);
-    console.log(`   Windows: 2 instanced meshes`);
-    console.log(`   Estimated total: ~${totalDrawCalls} draw calls`);
+    debug.category('Building', `🏆 CITY OPTIMIZATION COMPLETE!`);
+    debug.category('Building', `   Buildings: ${stats.buildingCount} (preserved for windows)`);
+    debug.category('Building', `   Roads: 1 merged mesh`);
+    debug.category('Building', `   Street lights: ${streetLightCount} lights using 6 instanced meshes`);
+    debug.category('Building', `   Windows: 2 instanced meshes`);
+    debug.category('Building', `   Estimated total: ~${totalDrawCalls} draw calls`);
   }
 }

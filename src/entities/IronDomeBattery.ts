@@ -939,6 +939,21 @@ export class IronDomeBattery extends EventEmitter {
       debug.module('Battery').log('Health bar enabled and updated, visible:', this.healthBar.visible);
     }
   }
+  
+  resetInterceptorStock(): void {
+    // Reset all launcher tubes to loaded state
+    this.launcherTubes.forEach(tube => {
+      tube.isLoaded = true;
+      tube.lastFiredTime = -this.config.reloadTime; // Ready to fire immediately
+      
+      // Show missile if it exists
+      if (tube.missile) {
+        tube.missile.visible = true;
+      }
+    });
+    
+    debug.log(`Battery interceptor stock reset - all ${this.launcherTubes.length} tubes ready`);
+  }
 
   private createHealthBar(): void {
     debug.module('Battery').log('Creating health bar, useResources:', this.useResources);

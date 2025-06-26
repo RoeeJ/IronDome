@@ -2,6 +2,8 @@
  * Generic Genetic Algorithm Framework for Iron Dome Systems Optimization
  */
 
+import { debug } from '../utils/logger';
+
 export interface Gene {
   name: string;
   min: number;
@@ -266,16 +268,16 @@ export class GeneticAlgorithm {
 
       // Log progress
       if (this.config.verbose && gen % 10 === 0) {
-        console.log(
+        debug.log(
           `Generation ${gen}: Best fitness = ${bestFitness.toFixed(4)}, Avg = ${avgFitness.toFixed(4)}`
         );
-        console.log(`  Best genome:`, this.formatGenome(this.population[0]));
+        debug.log(`  Best genome:`, this.formatGenome(this.population[0]));
       }
 
       // Check convergence
       if (this.hasConverged()) {
         if (this.config.verbose) {
-          console.log(`Converged at generation ${gen}`);
+          debug.log(`Converged at generation ${gen}`);
         }
         break;
       }

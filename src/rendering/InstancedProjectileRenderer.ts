@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import { Projectile } from '../entities/Projectile';
 import { GeometryFactory } from '../utils/GeometryFactory';
 import { MaterialCache } from '../utils/MaterialCache';
+import { debug } from '../utils/logger';
 
 export class InstancedProjectileRenderer {
   private scene: THREE.Scene;
@@ -59,7 +60,7 @@ export class InstancedProjectileRenderer {
 
   addProjectile(projectile: Projectile): boolean {
     if (this.availableIndices.length === 0) {
-      console.warn('No available instance slots for projectile');
+      debug.warn('No available instance slots for projectile');
       return false;
     }
 

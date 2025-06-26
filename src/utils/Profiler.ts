@@ -1,3 +1,5 @@
+import { debug } from './logger';
+
 export interface ProfilerSection {
   name: string;
   startTime: number;
@@ -40,7 +42,7 @@ export class Profiler {
   endSection(name: string): void {
     const section = this.sections.get(name);
     if (!section || section !== this.currentSection) {
-      console.warn(`Profiler: Mismatched section end for "${name}"`);
+      debug.warn(`Profiler: Mismatched section end for "${name}"`);
       return;
     }
 

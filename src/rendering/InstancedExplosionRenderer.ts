@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { MaterialCache } from '../utils/MaterialCache';
 import { TextureCache } from '../utils/TextureCache';
+import { debug } from '../utils/logger';
 
 interface ExplosionInstance {
   id: string;
@@ -152,7 +153,7 @@ export class InstancedExplosionRenderer {
     // Performance optimization: Limit active effects
     const maxActiveEffects = 20;
     if (this.activeEffects.length > maxActiveEffects) {
-      console.warn(
+      debug.warn(
         `Too many active effects (${this.activeEffects.length}), performance may be impacted`
       );
     }
@@ -432,7 +433,7 @@ export class InstancedExplosionRenderer {
     ring.renderOrder = -1; // Render dust ring way behind explosion
     this.scene.add(ring);
 
-    console.log(
+    debug.category('Visual',
       `Created explosion dust ring at ${position.x.toFixed(1)}, ${position.z.toFixed(1)}`
     );
 
@@ -445,7 +446,7 @@ export class InstancedExplosionRenderer {
           this.scene.remove(ring);
           ringGeometry.dispose();
           ringMaterial.dispose();
-          console.log(
+          debug.category('Visual',
             `Removed explosion dust ring from ${position.x.toFixed(1)}, ${position.z.toFixed(1)}`
           );
           return false;
@@ -472,7 +473,7 @@ export class InstancedExplosionRenderer {
 
   // Debug method to clean up any leftover dust rings
   cleanupOrphanedDustRings(): void {
-    console.log(`Cleaning up orphaned dust rings. Active effects: ${this.activeEffects.length}`);
+    debug.category('Cleanup', `Cleaning up orphaned dust rings. Active effects: ${this.activeEffects.length}`);
 
     // Force all effects to complete their cleanup
     this.activeEffects.forEach(effect => {
@@ -501,7 +502,7 @@ export class InstancedExplosionRenderer {
       }
     });
 
-    console.log(`Found ${toRemove.length} potential orphaned dust rings in scene`);
+    debug.category('Cleanup', `Found ${toRemove.length} potential orphaned dust rings in scene`);
     toRemove.forEach(mesh => {
       this.scene.remove(mesh);
       if ((mesh as THREE.Mesh).geometry) {

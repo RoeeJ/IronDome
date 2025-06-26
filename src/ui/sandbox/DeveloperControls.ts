@@ -1,6 +1,7 @@
 import GUI from 'lil-gui';
 import { ThreatManager } from '../../scene/ThreatManager';
 import { ExplosionManager } from '../../systems/ExplosionManager';
+import { debug } from '../../utils/logger';
 
 export interface DeveloperControlsConfig {
   threatManager: ThreatManager;
@@ -81,8 +82,8 @@ export class DeveloperControls {
           geometries: this.config.renderer.info.memory.geometries,
           textures: this.config.renderer.info.memory.textures
         };
-        console.log('=== DEBUG STATS ===');
-        console.table(stats);
+        debug.log('=== DEBUG STATS ===');
+        debug.log('Stats:', stats);
         this.config.showNotification('Stats logged to console');
       }
     }, 'logStats').name('Log Stats to Console');
@@ -90,9 +91,9 @@ export class DeveloperControls {
     debugFolder.add({
       logThreatInfo: () => {
         const threats = this.config.threatManager.getActiveThreats();
-        console.log('=== ACTIVE THREATS ===');
+        debug.log('=== ACTIVE THREATS ===');
         threats.forEach((threat, i) => {
-          console.log(`Threat ${i}: Type=${threat.type}, Active=${threat.isActive}, ` +
+          debug.log(`Threat ${i}: Type=${threat.type}, Active=${threat.isActive}, ` +
             `Position=(${threat.getPosition().x.toFixed(1)}, ${threat.getPosition().y.toFixed(1)}, ${threat.getPosition().z.toFixed(1)})`);
         });
       }

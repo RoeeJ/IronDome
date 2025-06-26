@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { ThreatType, THREAT_CONFIGS } from '../entities/Threat';
 import { MaterialCache } from '../utils/MaterialCache';
+import { debug } from '../utils/logger';
 import { GeometryFactory } from '../utils/GeometryFactory';
 
 interface ProjectileInstance {
@@ -127,7 +128,7 @@ export class ProjectileInstanceManager {
     const mesh = this.instancedMeshes.get(key);
     
     if (!pool || !mesh || pool.length === 0) {
-      console.warn(`No available instances for ${key}`);
+      debug.warn(`No available instances for ${key}`);
       return null;
     }
     

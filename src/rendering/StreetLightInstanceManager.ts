@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { MaterialCache } from '../utils/MaterialCache';
 import { GeometryFactory } from '../utils/GeometryFactory';
+import { debug } from '../utils/logger';
 
 interface StreetLightInstance {
   index: number;
@@ -172,13 +173,13 @@ export class StreetLightInstanceManager {
     let index: number;
     if (isMajor) {
       if (this.availableMajorIndices.length === 0) {
-        console.warn('No available major street light instances');
+        debug.warn('No available major street light instances');
         return '';
       }
       index = this.availableMajorIndices.pop()!;
     } else {
       if (this.availableIndices.length === 0) {
-        console.warn('No available street light instances');
+        debug.warn('No available street light instances');
         return '';
       }
       index = this.availableIndices.pop()!;

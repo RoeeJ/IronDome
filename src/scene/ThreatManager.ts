@@ -223,7 +223,7 @@ export class ThreatManager extends EventEmitter {
     for (let i = this.threats.length - 1; i >= 0; i--) {
       const threat = this.threats[i];
       if (!threat) {
-        console.warn(`Undefined threat at index ${i}, skipping`);
+        debug.warn(`Undefined threat at index ${i}, skipping`);
         continue;
       }
 
@@ -324,7 +324,7 @@ export class ThreatManager extends EventEmitter {
 
             battery.takeDamage(actualDamage);
             this.emit('batteryHit', { battery, damage: actualDamage });
-            console.log(
+            debug.category('Combat',
               `Drone explosion damaged battery at ${distance.toFixed(1)}m for ${actualDamage} damage`
             );
           });
@@ -367,7 +367,7 @@ export class ThreatManager extends EventEmitter {
               if (hitBuilding) {
                 const damageAmount = this.getThreatDamage(threat.type);
                 buildingSystem.damageBuilding(hitBuilding.id, damageAmount);
-                console.log(`Threat hit building ${hitBuilding.id} for ${damageAmount} damage`);
+                debug.category('Combat', `Threat hit building ${hitBuilding.id} for ${damageAmount} damage`);
               }
             }
           }
@@ -808,13 +808,13 @@ export class ThreatManager extends EventEmitter {
   private removeThreat(index: number, wasIntercepted: boolean = false): void {
     // Safety check to ensure threat exists
     if (index < 0 || index >= this.threats.length) {
-      console.warn(`Attempted to remove threat at invalid index ${index}`);
+      debug.warn(`Attempted to remove threat at invalid index ${index}`);
       return;
     }
 
     const threat = this.threats[index];
     if (!threat) {
-      console.warn(`Threat at index ${index} is undefined`);
+      debug.warn(`Threat at index ${index} is undefined`);
       return;
     }
 
@@ -824,7 +824,7 @@ export class ThreatManager extends EventEmitter {
         threat.destroy(this.scene, this.world);
       }
     } catch (error) {
-      console.error(`Error destroying threat at index ${index}:`, error);
+      debug.error(`Error destroying threat at index ${index}:`, error);
     }
 
     this.threats.splice(index, 1);
@@ -1086,7 +1086,7 @@ export class ThreatManager extends EventEmitter {
 
     // Don't dispose material - it's shared from MaterialCache
 
-    console.log(`Removed crater ${craterId}. Active craters: ${this.activeCraters.size}`);
+    debug.category('Visual', `Removed crater ${craterId}. Active craters: ${this.activeCraters.size}`);
   }
 
   // Methods removed - now using ExplosionManager
@@ -1094,7 +1094,7 @@ export class ThreatManager extends EventEmitter {
   createCraterDecal(position: THREE.Vector3): void {
     // Limit total number of craters
     if (this.activeCraters.size >= this.MAX_CRATERS) {
-      console.log(`Skipping crater creation - max craters (${this.MAX_CRATERS}) reached`);
+      debug.category('Visual', `Skipping crater creation - max craters (${this.MAX_CRATERS}) reached`);
       return;
     }
 
@@ -1137,13 +1137,13 @@ export class ThreatManager extends EventEmitter {
     this.activeCraters.set(craterId, craterData);
 
     // Add debug log
-    console.log(
+    debug.category('Visual',
       `Created crater ${craterId} at ${position.x.toFixed(1)}, ${position.z.toFixed(1)}. Active craters: ${this.activeCraters.size}`
     );
 
     // Fade out crater over time
     const fadeDelay = setTimeout(() => {
-      console.log(`Starting fade for crater ${craterId}`);
+      debug.category('Visual', `Starting fade for crater ${craterId}`);
       const fadeStart = Date.now();
       const fadeDuration = 5000;
 
@@ -1151,7 +1151,7 @@ export class ThreatManager extends EventEmitter {
         // Check if crater was already removed
         const currentCraterData = this.activeCraters.get(craterId);
         if (!currentCraterData) {
-          console.log(`Crater ${craterId} already removed, stopping fade`);
+          debug.category('Visual', `Crater ${craterId} already removed, stopping fade`);
           return;
         }
 
@@ -1159,7 +1159,7 @@ export class ThreatManager extends EventEmitter {
         const progress = elapsed / fadeDuration;
 
         if (progress >= 1) {
-          console.log(`Crater ${craterId} fade complete, removing`);
+          debug.category('Visual', `Crater ${craterId} fade complete, removing`);
           // Remove crater
           this.removeCrater(craterId);
           return;
@@ -1172,7 +1172,7 @@ export class ThreatManager extends EventEmitter {
 
           // Log progress every second
           if (Math.floor(elapsed / 1000) !== Math.floor((elapsed - 16) / 1000)) {
-            console.log(
+            debug.category('Visual',
               `Crater ${craterId} fade progress: ${(progress * 100).toFixed(1)}%, opacity: ${newOpacity.toFixed(2)}`
             );
           }
@@ -1500,7 +1500,7 @@ export class ThreatManager extends EventEmitter {
    * Start an attack scenario with player-friendly parameters
    */
   startScenario(scenario: ScenarioPreset): void {
-    console.log(`Starting scenario: ${scenario.name}`);
+    debug.log(`Starting scenario: ${scenario.name}`);
     
     // Set attack parameters
     this.currentAttackParameters = scenario.parameters;
@@ -1526,7 +1526,7 @@ export class ThreatManager extends EventEmitter {
     // Start the scenario manager
     this.scenarioManager.startScenario(scenario, {
       onComplete: () => {
-        console.log(`Scenario ${scenario.name} completed`);
+        debug.log(`Scenario ${scenario.name} completed`);
         this.stopScenario();
       },
       onUpdate: (progress) => {

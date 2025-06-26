@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import { Threat, ThreatType, THREAT_CONFIGS } from '../entities/Threat';
 import { GeometryFactory } from '../utils/GeometryFactory';
 import { MaterialCache } from '../utils/MaterialCache';
+import { debug } from '../utils/logger';
 
 interface ThreatMeshes {
   rocket: THREE.InstancedMesh;
@@ -132,7 +133,7 @@ export class InstancedThreatRenderer {
     const availableForType = this.availableIndices.get(meshCategory);
 
     if (!availableForType || availableForType.length === 0) {
-      console.warn(
+      debug.warn(
         `No available instance slots for threat type: ${type} (mesh category: ${meshCategory})`
       );
       return false;

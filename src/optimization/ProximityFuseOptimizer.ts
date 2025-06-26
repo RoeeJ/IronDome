@@ -9,6 +9,7 @@ import {
   createMultipleThreatScenarios,
 } from '../testing/InterceptionScenarios';
 import { BlastPhysics } from '../systems/BlastPhysics';
+import { debug } from '../utils/logger';
 
 export interface OptimizationResult {
   bestSettings: {
@@ -203,8 +204,8 @@ export class ProximityFuseOptimizer {
       verbose: config?.verbose ?? true,
     });
 
-    console.log('Starting proximity fuse optimization...');
-    console.log('Testing against', this.getTestScenarios().length, 'scenarios');
+    debug.category('Optimization', 'Starting proximity fuse optimization...');
+    debug.category('Optimization', 'Testing against', this.getTestScenarios().length, 'scenarios');
 
     const result = await ga.run();
 
@@ -299,25 +300,25 @@ export class ProximityFuseOptimizer {
       };
     }>
   ): Promise<void> {
-    console.log('\n=== PROXIMITY FUSE SETTINGS COMPARISON ===\n');
+    debug.category('Optimization', '\n=== PROXIMITY FUSE SETTINGS COMPARISON ===\n');
 
     for (const { name, settings } of settingsArray) {
-      console.log(`\nTesting: ${name}`);
-      console.log(`Settings: ${JSON.stringify(settings, null, 2)}`);
+      debug.category('Optimization', `\nTesting: ${name}`);
+      debug.category('Optimization', `Settings: ${JSON.stringify(settings, null, 2)}`);
 
       const performance = await this.evaluatePerformance(settings);
 
-      console.log('Performance:');
-      console.log(`  Hit Rate: ${(performance.hitRate * 100).toFixed(1)}%`);
-      console.log(`  Avg Kill Probability: ${(performance.avgKillProbability * 100).toFixed(1)}%`);
-      console.log(`  Interceptors per Kill: ${performance.avgInterceptorsPerKill.toFixed(2)}`);
-      console.log(`  Avg Detonation Distance: ${performance.avgDetonationDistance.toFixed(1)}m`);
+      debug.category('Optimization', 'Performance:');
+      debug.category('Optimization', `  Hit Rate: ${(performance.hitRate * 100).toFixed(1)}%`);
+      debug.category('Optimization', `  Avg Kill Probability: ${(performance.avgKillProbability * 100).toFixed(1)}%`);
+      debug.category('Optimization', `  Interceptors per Kill: ${performance.avgInterceptorsPerKill.toFixed(2)}`);
+      debug.category('Optimization', `  Avg Detonation Distance: ${performance.avgDetonationDistance.toFixed(1)}m`);
 
       // Calculate efficiency score
       const efficiency =
         (performance.hitRate * performance.avgKillProbability) /
         Math.max(1, performance.avgInterceptorsPerKill);
-      console.log(`  Efficiency Score: ${efficiency.toFixed(3)}`);
+      debug.category('Optimization', `  Efficiency Score: ${efficiency.toFixed(3)}`);
     }
   }
 }

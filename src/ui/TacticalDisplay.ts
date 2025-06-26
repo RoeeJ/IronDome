@@ -11,7 +11,15 @@ export class TacticalDisplay {
   private scale: number = 0.1; // World units to pixels - reduced to show more area (1000m radius)
   private threatTracks: Map<
     Threat,
-    { id: string; positions: THREE.Vector2[]; firstDetected: number; pinged: boolean }
+    { 
+      id: string; 
+      positions: THREE.Vector2[]; 
+      firstDetected: number; 
+      pinged: boolean;
+      pulsePhase: number;
+      dangerLevel: number; // 0-1
+      lastTti: number;
+    }
   > = new Map();
   private nextId: number = 1;
   private radarPings: { position: THREE.Vector2; time: number }[] = [];
@@ -19,13 +27,19 @@ export class TacticalDisplay {
   // Performance optimizations
   private lastSweepAngle: number = 0;
   private frameSkip: number = 0;
-  private readonly TRACK_HISTORY_LENGTH = 10; // Reduced from 20
+  private readonly TRACK_HISTORY_LENGTH = 15; // Increased for smoother trails
   private readonly UPDATE_SKIP_FRAMES = 0; // Update every frame for smooth display
 
   // Animation timers
   private animationTime: number = 0;
   private glitchTimer: number = 0;
   private scanlineOffset: number = 0;
+  
+  // Enhanced visual effects
+  private sweepTrails: { angle: number; alpha: number }[] = [];
+  private gridDistortions: { x: number; y: number; radius: number; strength: number }[] = [];
+  private hoveredThreat: Threat | null = null;
+  private mousePos: { x: number; y: number } = { x: 0, y: 0 };
 
   constructor() {
     this.initialize();
@@ -90,6 +104,13 @@ export class TacticalDisplay {
 
     // Append to document body
     document.body.appendChild(this.container);
+    
+    // Add mouse tracking
+    this.canvas.addEventListener('mousemove', (e) => {
+      const rect = this.canvas.getBoundingClientRect();
+      this.mousePos.x = e.clientX - rect.left;
+      this.mousePos.y = e.clientY - rect.top;
+    });
   }
 
   public getContainer(): HTMLDivElement {
@@ -108,8 +129,19 @@ export class TacticalDisplay {
     this.glitchTimer += 0.016; // ~60fps
     this.scanlineOffset = (this.scanlineOffset + 1) % 4;
 
+    // Clear per-frame data
+    this.hoveredThreat = null;
+    this.gridDistortions = [];
+
     // Update sweep angle
     this.lastSweepAngle = this.animationTime % (Math.PI * 2);
+    
+    // Update sweep trails
+    this.sweepTrails.push({ angle: this.lastSweepAngle, alpha: 0.4 });
+    this.sweepTrails = this.sweepTrails.filter(trail => {
+      trail.alpha -= 0.02;
+      return trail.alpha > 0;
+    });
 
     // Skip frames if configured (0 = no skip)
     if (this.UPDATE_SKIP_FRAMES > 0) {
@@ -156,6 +188,11 @@ export class TacticalDisplay {
 
     // Draw radar pings
     this.drawRadarPings();
+    
+    // Draw hover info popup
+    if (this.hoveredThreat) {
+      this.drawHoverInfo(this.hoveredThreat, batteryPosition);
+    }
 
     // Removed info panel for cleaner display
 
@@ -165,6 +202,9 @@ export class TacticalDisplay {
 
     // Restore canvas state (remove clipping)
     this.ctx.restore();
+    
+    // Draw edge static effect
+    this.drawEdgeStatic();
 
     // Draw circular border
     this.ctx.strokeStyle = 'rgba(0, 255, 255, 0.5)';
@@ -205,15 +245,17 @@ export class TacticalDisplay {
   private drawRadarGrid(): void {
     const ctx = this.ctx;
 
-    // Draw concentric circles with gradient
+    // Draw concentric circles with gradient and distortion
     for (let i = 1; i <= 4; i++) {
+      const baseRadius = (this.radarRadius * i) / 4;
+      
       const gradient = ctx.createRadialGradient(
         this.radarCenter.x,
         this.radarCenter.y,
         0,
         this.radarCenter.x,
         this.radarCenter.y,
-        (this.radarRadius * i) / 4
+        baseRadius
       );
       gradient.addColorStop(0, 'rgba(0, 255, 255, 0)');
       gradient.addColorStop(0.7, 'rgba(0, 255, 255, 0.1)');
@@ -222,7 +264,32 @@ export class TacticalDisplay {
       ctx.strokeStyle = gradient;
       ctx.lineWidth = 1;
       ctx.beginPath();
-      ctx.arc(this.radarCenter.x, this.radarCenter.y, (this.radarRadius * i) / 4, 0, Math.PI * 2);
+      
+      // Draw circle with distortions
+      const segments = 64;
+      for (let j = 0; j <= segments; j++) {
+        const angle = (j / segments) * Math.PI * 2;
+        let radius = baseRadius;
+        
+        // Apply grid distortions from threats
+        this.gridDistortions.forEach(distortion => {
+          const distX = this.radarCenter.x + Math.cos(angle) * baseRadius - distortion.x;
+          const distY = this.radarCenter.y + Math.sin(angle) * baseRadius - distortion.y;
+          const dist = Math.sqrt(distX * distX + distY * distY);
+          
+          if (dist < distortion.radius) {
+            const effect = (1 - dist / distortion.radius) * distortion.strength;
+            radius += Math.sin(dist * 0.3 + this.animationTime * 3) * effect * 3;
+          }
+        });
+        
+        const x = this.radarCenter.x + Math.cos(angle) * radius;
+        const y = this.radarCenter.y + Math.sin(angle) * radius;
+        
+        if (j === 0) ctx.moveTo(x, y);
+        else ctx.lineTo(x, y);
+      }
+      ctx.closePath();
       ctx.stroke();
     }
 
@@ -254,9 +321,35 @@ export class TacticalDisplay {
   private drawRadarSweep(): void {
     const ctx = this.ctx;
 
-    // Simple sweep line
-    ctx.strokeStyle = 'rgba(0, 255, 255, 0.5)';
-    ctx.lineWidth = 2;
+    // Draw enhanced sweep trails
+    this.sweepTrails.forEach(trail => {
+      // Create gradient for each trail
+      const gradient = ctx.createLinearGradient(
+        this.radarCenter.x,
+        this.radarCenter.y,
+        this.radarCenter.x + Math.cos(trail.angle) * this.radarRadius,
+        this.radarCenter.y + Math.sin(trail.angle) * this.radarRadius
+      );
+      gradient.addColorStop(0, `rgba(0, 255, 255, ${trail.alpha * 0.3})`);
+      gradient.addColorStop(0.5, `rgba(0, 255, 255, ${trail.alpha * 0.5})`);
+      gradient.addColorStop(1, `rgba(0, 255, 255, ${trail.alpha * 0.1})`);
+      
+      ctx.strokeStyle = gradient;
+      ctx.lineWidth = 2 + trail.alpha * 2;
+      ctx.beginPath();
+      ctx.moveTo(this.radarCenter.x, this.radarCenter.y);
+      ctx.lineTo(
+        this.radarCenter.x + Math.cos(trail.angle) * this.radarRadius,
+        this.radarCenter.y + Math.sin(trail.angle) * this.radarRadius
+      );
+      ctx.stroke();
+    });
+
+    // Main sweep line with glow
+    ctx.shadowBlur = 10;
+    ctx.shadowColor = 'rgba(0, 255, 255, 0.8)';
+    ctx.strokeStyle = 'rgba(0, 255, 255, 0.8)';
+    ctx.lineWidth = 3;
     ctx.beginPath();
     ctx.moveTo(this.radarCenter.x, this.radarCenter.y);
     ctx.lineTo(
@@ -264,21 +357,18 @@ export class TacticalDisplay {
       this.radarCenter.y + Math.sin(this.lastSweepAngle) * this.radarRadius
     );
     ctx.stroke();
-
-    // Simple fade trail
-    for (let i = 1; i <= 3; i++) {
-      const trailAngle = this.lastSweepAngle - (i * Math.PI) / 30;
-      const opacity = 0.3 - i * 0.1;
-      ctx.strokeStyle = `rgba(0, 255, 255, ${opacity})`;
-      ctx.lineWidth = 2;
-      ctx.beginPath();
-      ctx.moveTo(this.radarCenter.x, this.radarCenter.y);
-      ctx.lineTo(
-        this.radarCenter.x + Math.cos(trailAngle) * this.radarRadius,
-        this.radarCenter.y + Math.sin(trailAngle) * this.radarRadius
-      );
-      ctx.stroke();
-    }
+    
+    // Add particle effect at sweep edge
+    const particleX = this.radarCenter.x + Math.cos(this.lastSweepAngle) * this.radarRadius;
+    const particleY = this.radarCenter.y + Math.sin(this.lastSweepAngle) * this.radarRadius;
+    
+    ctx.shadowBlur = 20;
+    ctx.fillStyle = 'rgba(0, 255, 255, 0.8)';
+    ctx.beginPath();
+    ctx.arc(particleX, particleY, 3, 0, Math.PI * 2);
+    ctx.fill();
+    
+    ctx.shadowBlur = 0;
   }
 
   private drawBattery(): void {
@@ -342,11 +432,20 @@ export class TacticalDisplay {
           positions: [],
           firstDetected: Date.now(),
           pinged: false,
+          pulsePhase: Math.random() * Math.PI * 2,
+          dangerLevel: 0.5,
+          lastTti: 30,
         });
       }
 
       const track = this.threatTracks.get(threat)!;
       const screenPos = this.worldToScreen(threat.getPosition(), batteryPosition);
+
+      // Update track data
+      const tti = threat.getTimeToImpact();
+      track.lastTti = tti;
+      track.dangerLevel = Math.min(1, Math.max(0, 1 - tti / 30)); // Higher danger as TTI decreases
+      track.pulsePhase += 0.1 + track.dangerLevel * 0.2; // Pulse faster when more dangerous
 
       // Add to track history
       track.positions.push(screenPos.clone());
@@ -354,10 +453,26 @@ export class TacticalDisplay {
         track.positions.shift();
       }
 
-      // Draw simple threat trail
+      // Draw enhanced threat trail with gradient
       if (track.positions.length > 1) {
-        ctx.strokeStyle = 'rgba(255, 0, 0, 0.3)';
-        ctx.lineWidth = 1;
+        // Create gradient based on danger level
+        const gradient = ctx.createLinearGradient(
+          track.positions[0].x,
+          track.positions[0].y,
+          screenPos.x,
+          screenPos.y
+        );
+        
+        const r = Math.floor(255);
+        const g = Math.floor(255 * (1 - track.dangerLevel));
+        const b = Math.floor(100 * (1 - track.dangerLevel));
+        
+        gradient.addColorStop(0, `rgba(${r}, ${g}, ${b}, 0.1)`);
+        gradient.addColorStop(0.5, `rgba(${r}, ${g}, ${b}, 0.3)`);
+        gradient.addColorStop(1, `rgba(${r}, ${g}, ${b}, 0.5)`);
+        
+        ctx.strokeStyle = gradient;
+        ctx.lineWidth = 1 + track.dangerLevel * 2;
         ctx.beginPath();
         track.positions.forEach((pos, i) => {
           if (i === 0) ctx.moveTo(pos.x, pos.y);
@@ -365,57 +480,127 @@ export class TacticalDisplay {
         });
         ctx.stroke();
       }
+      
+      // Check if threat is hovered
+      const distance = Math.sqrt(
+        Math.pow(this.mousePos.x - screenPos.x, 2) + 
+        Math.pow(this.mousePos.y - screenPos.y, 2)
+      );
+      if (distance < 20) {
+        this.hoveredThreat = threat;
+      }
 
       // Draw threat icon
       const relativePos = threat.getPosition().clone().sub(batteryPosition);
       const isInRange = relativePos.length() < this.radarRadius / this.scale;
       if (isInRange) {
-        // Threat shape based on type
-        ctx.fillStyle = '#ff0000';
-        ctx.strokeStyle = '#ff0000';
-        ctx.lineWidth = 1.5;
-
+        const vel = threat.getVelocity();
+        const speed = vel.length();
+        
+        // Pulsing glow effect based on danger
+        const pulseSize = 1 + Math.sin(track.pulsePhase) * 0.3 * track.dangerLevel;
+        const glowRadius = (8 + track.dangerLevel * 12) * pulseSize;
+        
+        // Draw danger glow
+        const glowGradient = ctx.createRadialGradient(
+          screenPos.x, screenPos.y, 0,
+          screenPos.x, screenPos.y, glowRadius
+        );
+        
+        const r = 255;
+        const g = Math.floor(255 * (1 - track.dangerLevel));
+        const b = Math.floor(100 * (1 - track.dangerLevel));
+        
+        glowGradient.addColorStop(0, `rgba(${r}, ${g}, ${b}, ${0.3 + track.dangerLevel * 0.3})`);
+        glowGradient.addColorStop(0.5, `rgba(${r}, ${g}, ${b}, ${0.1 + track.dangerLevel * 0.2})`);
+        glowGradient.addColorStop(1, `rgba(${r}, ${g}, ${b}, 0)`);
+        
+        ctx.fillStyle = glowGradient;
+        ctx.fillRect(
+          screenPos.x - glowRadius, 
+          screenPos.y - glowRadius, 
+          glowRadius * 2, 
+          glowRadius * 2
+        );
+        
+        // Draw threat icon with enhanced visuals
         ctx.save();
         ctx.translate(screenPos.x, screenPos.y);
 
         // Rotate based on velocity
-        const vel = threat.getVelocity();
         const angle = Math.atan2(-vel.z, vel.x);
         ctx.rotate(angle);
+        
+        // Scale based on pulse
+        ctx.scale(pulseSize, pulseSize);
 
         // Different shapes for different threat types
-        const speed = vel.length();
         ctx.beginPath();
-
+        
+        let baseColor;
         if (speed < 50) {
           // Mortar - circle
-          ctx.arc(0, 0, 4, 0, Math.PI * 2);
-          ctx.fillStyle = '#ff9900';
+          ctx.arc(0, 0, 5, 0, Math.PI * 2);
+          baseColor = { r: 255, g: 153, b: 0 }; // Orange
         } else if (speed < 100) {
           // Rocket - triangle
-          ctx.moveTo(6, 0);
-          ctx.lineTo(-4, -3);
-          ctx.lineTo(-4, 3);
+          ctx.moveTo(7, 0);
+          ctx.lineTo(-5, -4);
+          ctx.lineTo(-5, 4);
           ctx.closePath();
-          ctx.fillStyle = '#ff6600';
+          baseColor = { r: 255, g: 102, b: 0 }; // Red-orange
         } else {
           // Missile - diamond
-          ctx.moveTo(6, 0);
-          ctx.lineTo(0, -4);
-          ctx.lineTo(-6, 0);
-          ctx.lineTo(0, 4);
+          ctx.moveTo(8, 0);
+          ctx.lineTo(0, -5);
+          ctx.lineTo(-8, 0);
+          ctx.lineTo(0, 5);
           ctx.closePath();
-          ctx.fillStyle = '#ff0000';
+          baseColor = { r: 255, g: 0, b: 0 }; // Red
         }
-
+        
+        // Fill with gradient
+        const iconGradient = ctx.createLinearGradient(-5, -5, 5, 5);
+        iconGradient.addColorStop(0, `rgba(${baseColor.r}, ${baseColor.g}, ${baseColor.b}, 0.9)`);
+        iconGradient.addColorStop(1, `rgba(${baseColor.r * 0.7}, ${baseColor.g * 0.7}, ${baseColor.b * 0.7}, 0.9)`);
+        
+        ctx.fillStyle = iconGradient;
         ctx.fill();
+        
+        // Enhanced stroke with glow
+        ctx.shadowBlur = 5 + track.dangerLevel * 10;
+        ctx.shadowColor = `rgba(${r}, ${g}, ${b}, 0.8)`;
+        ctx.strokeStyle = `rgba(${r}, ${g}, ${b}, 0.9)`;
+        ctx.lineWidth = 1.5 + track.dangerLevel;
         ctx.stroke();
+        
         ctx.restore();
+        
 
-        // Show minimal threat info - just ID
-        ctx.fillStyle = '#ff6666';
-        ctx.font = '8px "Courier New", monospace';
-        ctx.fillText(track.id, screenPos.x + 8, screenPos.y - 8);
+        // Show threat ID only on hover
+        if (this.hoveredThreat === threat) {
+          ctx.fillStyle = `rgba(${r}, ${g}, ${b}, 0.9)`;
+          ctx.font = 'bold 9px "Courier New", monospace';
+          ctx.fillText(track.id, screenPos.x + 12, screenPos.y - 12);
+        }
+        
+        // Always show TTI for all threats
+        ctx.fillStyle = track.lastTti < 5 ? '#ff0000' : track.lastTti < 10 ? '#ffaa00' : '#ff6666';
+        ctx.font = 'bold 10px "Courier New", monospace';
+        ctx.shadowBlur = 3;
+        ctx.shadowColor = 'rgba(0, 0, 0, 0.8)';
+        ctx.fillText(`${track.lastTti.toFixed(1)}s`, screenPos.x + 8, screenPos.y + 12);
+        ctx.shadowBlur = 0;
+        
+        // Add grid distortion for nearby threats
+        if (track.dangerLevel > 0.5) {
+          this.gridDistortions.push({
+            x: screenPos.x,
+            y: screenPos.y,
+            radius: 30 + track.dangerLevel * 20,
+            strength: track.dangerLevel
+          });
+        }
       }
     });
   }
@@ -658,6 +843,175 @@ export class TacticalDisplay {
 
       return true;
     });
+  }
+  
+  private drawEdgeStatic(): void {
+    const ctx = this.ctx;
+    const centerX = this.radarCenter.x;
+    const centerY = this.radarCenter.y;
+    
+    // Create edge mask gradient
+    const edgeGradient = ctx.createRadialGradient(
+      centerX, centerY, this.radarRadius * 0.8,
+      centerX, centerY, this.radarRadius + 10
+    );
+    edgeGradient.addColorStop(0, 'rgba(0, 0, 0, 0)');
+    edgeGradient.addColorStop(0.7, 'rgba(0, 0, 0, 0)');
+    edgeGradient.addColorStop(1, 'rgba(0, 0, 0, 0.3)');
+    
+    // Apply static noise at edges
+    for (let i = 0; i < 100; i++) {
+      const angle = Math.random() * Math.PI * 2;
+      const distance = this.radarRadius * (0.85 + Math.random() * 0.15);
+      const x = centerX + Math.cos(angle) * distance;
+      const y = centerY + Math.sin(angle) * distance;
+      
+      const size = Math.random() * 2;
+      const opacity = Math.random() * 0.3 * (1 - (distance - this.radarRadius * 0.85) / (this.radarRadius * 0.15));
+      
+      ctx.fillStyle = `rgba(0, 255, 255, ${opacity})`;
+      ctx.fillRect(x - size / 2, y - size / 2, size, size);
+    }
+    
+    // Subtle interference lines at random angles
+    ctx.strokeStyle = 'rgba(0, 255, 255, 0.05)';
+    ctx.lineWidth = 0.5;
+    for (let i = 0; i < 5; i++) {
+      const angle = Math.random() * Math.PI * 2;
+      const wobble = Math.sin(this.animationTime * 2 + i) * 5;
+      
+      ctx.beginPath();
+      ctx.moveTo(
+        centerX + Math.cos(angle) * (this.radarRadius * 0.9 + wobble),
+        centerY + Math.sin(angle) * (this.radarRadius * 0.9 + wobble)
+      );
+      ctx.lineTo(
+        centerX + Math.cos(angle + Math.PI) * (this.radarRadius * 0.9 - wobble),
+        centerY + Math.sin(angle + Math.PI) * (this.radarRadius * 0.9 - wobble)
+      );
+      ctx.stroke();
+    }
+  }
+
+  private drawHoverInfo(threat: Threat, batteryPosition: THREE.Vector3): void {
+    const ctx = this.ctx;
+    const track = this.threatTracks.get(threat);
+    if (!track) return;
+    
+    const screenPos = this.worldToScreen(threat.getPosition(), batteryPosition);
+    const velocity = threat.getVelocity();
+    const speed = velocity.length();
+    const altitude = threat.getPosition().y;
+    
+    // Position popup to avoid edge clipping
+    let popupX = screenPos.x + 15;
+    let popupY = screenPos.y - 40;
+    const popupWidth = 120;
+    const popupHeight = 80;
+    
+    // Adjust position if near edges
+    if (popupX + popupWidth > this.canvas.width - 10) {
+      popupX = screenPos.x - popupWidth - 15;
+    }
+    if (popupY < 10) {
+      popupY = screenPos.y + 15;
+    }
+    
+    // Draw popup background with gradient
+    const bgGradient = ctx.createLinearGradient(
+      popupX, popupY,
+      popupX, popupY + popupHeight
+    );
+    bgGradient.addColorStop(0, 'rgba(0, 20, 40, 0.95)');
+    bgGradient.addColorStop(1, 'rgba(0, 10, 30, 0.95)');
+    
+    ctx.fillStyle = bgGradient;
+    ctx.fillRect(popupX, popupY, popupWidth, popupHeight);
+    
+    // Draw border with threat color
+    const r = 255;
+    const g = Math.floor(255 * (1 - track.dangerLevel));
+    const b = Math.floor(100 * (1 - track.dangerLevel));
+    
+    ctx.strokeStyle = `rgba(${r}, ${g}, ${b}, 0.8)`;
+    ctx.lineWidth = 1;
+    ctx.strokeRect(popupX, popupY, popupWidth, popupHeight);
+    
+    // Draw connector line
+    ctx.strokeStyle = `rgba(${r}, ${g}, ${b}, 0.4)`;
+    ctx.setLineDash([2, 2]);
+    ctx.beginPath();
+    ctx.moveTo(screenPos.x, screenPos.y);
+    ctx.lineTo(popupX < screenPos.x ? popupX + popupWidth : popupX, popupY + popupHeight / 2);
+    ctx.stroke();
+    ctx.setLineDash([]);
+    
+    // Header
+    ctx.fillStyle = `rgba(${r}, ${g}, ${b}, 0.9)`;
+    ctx.font = 'bold 10px "Courier New", monospace';
+    ctx.fillText(track.id, popupX + 5, popupY + 12);
+    
+    // Threat type icon
+    let typeIcon = '◯'; // Default circle
+    let typeName = 'UNKNOWN';
+    if (speed < 50) {
+      typeIcon = '◉';
+      typeName = 'MORTAR';
+    } else if (speed < 100) {
+      typeIcon = '▲';
+      typeName = 'ROCKET';
+    } else {
+      typeIcon = '◆';
+      typeName = 'MISSILE';
+    }
+    
+    ctx.fillStyle = '#00ffff';
+    ctx.font = '12px "Courier New", monospace';
+    ctx.fillText(typeIcon, popupX + popupWidth - 20, popupY + 12);
+    
+    ctx.font = '8px "Courier New", monospace';
+    ctx.fillText(typeName, popupX + 45, popupY + 12);
+    
+    // Stats with icons
+    const lineHeight = 15;
+    let yPos = popupY + 30;
+    
+    // Time to impact
+    ctx.fillStyle = track.lastTti < 5 ? '#ff0000' : track.lastTti < 10 ? '#ffaa00' : '#00ff00';
+    ctx.font = 'bold 10px "Courier New", monospace';
+    ctx.fillText(`⏱ ${track.lastTti.toFixed(1)}s`, popupX + 5, yPos);
+    
+    // Speed
+    yPos += lineHeight;
+    ctx.fillStyle = '#66ccff';
+    ctx.font = '9px "Courier New", monospace';
+    ctx.fillText(`→ ${speed.toFixed(0)} m/s`, popupX + 5, yPos);
+    
+    // Altitude
+    yPos += lineHeight;
+    ctx.fillStyle = '#66ccff';
+    ctx.fillText(`↑ ${altitude.toFixed(0)}m`, popupX + 5, yPos);
+    
+    // Danger indicator bar
+    yPos += lineHeight + 5;
+    const barWidth = popupWidth - 10;
+    const barHeight = 4;
+    
+    // Background
+    ctx.fillStyle = 'rgba(0, 0, 0, 0.5)';
+    ctx.fillRect(popupX + 5, yPos - barHeight, barWidth, barHeight);
+    
+    // Danger level bar
+    const dangerGradient = ctx.createLinearGradient(
+      popupX + 5, yPos,
+      popupX + 5 + barWidth, yPos
+    );
+    dangerGradient.addColorStop(0, '#00ff00');
+    dangerGradient.addColorStop(0.5, '#ffaa00');
+    dangerGradient.addColorStop(1, '#ff0000');
+    
+    ctx.fillStyle = dangerGradient;
+    ctx.fillRect(popupX + 5, yPos - barHeight, barWidth * track.dangerLevel, barHeight);
   }
 
   destroy(): void {

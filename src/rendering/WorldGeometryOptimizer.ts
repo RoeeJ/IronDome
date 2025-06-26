@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import * as BufferGeometryUtils from 'three/examples/jsm/utils/BufferGeometryUtils.js';
+import { debug } from '../utils/logger';
 
 export class WorldGeometryOptimizer {
   /**
@@ -60,7 +61,7 @@ export class WorldGeometryOptimizer {
         // Dispose of individual geometries
         group.geometries.forEach(geo => geo.dispose());
       } catch (error) {
-        console.warn('Failed to merge geometries:', error);
+        debug.warn('Failed to merge geometries:', error);
       }
     });
     

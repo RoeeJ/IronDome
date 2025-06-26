@@ -847,7 +847,7 @@ let touchStartPos = { x: 0, y: 0 };
 
 // Debug touch events
 renderer.domElement.addEventListener('touchstart', event => {
-  console.log('Touch start:', event.touches.length, 'touches');
+  debug.category('Input', 'Touch start:', event.touches.length, 'touches');
   if (event.touches.length === 1) {
     touchStartTime = Date.now();
     touchStartPos = { x: event.touches[0].clientX, y: event.touches[0].clientY };
@@ -1773,14 +1773,14 @@ setTimeout(hideLoadingScreen, 100);
 // Debug: Check what's blocking touch events
 if (deviceInfo.isMobile) {
   setTimeout(() => {
-    console.log('Canvas element:', renderer.domElement);
-    console.log('Canvas z-index:', renderer.domElement.style.zIndex);
-    console.log('Controls enabled:', controls.enabled);
-    console.log('Controls touch settings:', controls.touches);
+    debug.category('Input', 'Canvas element:', renderer.domElement);
+    debug.category('Input', 'Canvas z-index:', renderer.domElement.style.zIndex);
+    debug.category('Input', 'Controls enabled:', controls.enabled);
+    debug.category('Input', 'Controls touch settings:', controls.touches);
     
     // Add global touch listener to see if any element is capturing events
     document.addEventListener('touchstart', (e) => {
-      console.log('Document touch detected on:', e.target);
+      debug.category('Input', 'Document touch detected on:', e.target);
     }, { passive: true, capture: true });
   }, 1000);
 }

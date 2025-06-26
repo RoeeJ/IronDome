@@ -1,4 +1,5 @@
 import { EventEmitter } from 'events';
+import { debug } from '../utils/logger';
 
 export interface GameData {
   // Player progress
@@ -86,7 +87,7 @@ export class GameState extends EventEmitter {
         return { ...this.DEFAULT_STATE, ...parsed };
       }
     } catch (error) {
-      console.error('Failed to load game state:', error);
+      debug.error('Failed to load game state:', error);
     }
     return { ...this.DEFAULT_STATE };
   }
@@ -96,7 +97,7 @@ export class GameState extends EventEmitter {
       localStorage.setItem(this.STORAGE_KEY, JSON.stringify(this.data));
       this.emit('stateSaved');
     } catch (error) {
-      console.error('Failed to save game state:', error);
+      debug.error('Failed to save game state:', error);
     }
   }
 

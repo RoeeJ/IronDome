@@ -74,12 +74,8 @@ export class DomePlacementSystem {
     // Load the battery OBJ model for placement preview
     this.loadBatteryModel();
 
-    this.restoreSavedPlacements();
-
-    // Ensure at least one battery exists (only if not restoring saved placements)
-    if (this.placedDomes.size === 0) {
-      setTimeout(() => this.ensureInitialBattery(), 100);
-    }
+    // Don't restore yet - wait for sandbox mode to be set from main.ts
+    // This prevents the initial state mismatch
   }
 
   private loadBatteryModel(): void {
@@ -134,28 +130,39 @@ export class DomePlacementSystem {
     const previousMode = this.isSandboxMode;
     this.isSandboxMode = isSandbox;
 
-    // If switching from one mode to another, clean up and reset
+    // On first call (previousMode undefined), just set the mode and restore placements
+    if (previousMode === undefined || this.placedDomes.size === 0) {
+      debug.log(`Initial setSandboxMode call - setting to ${isSandbox ? 'sandbox' : 'game'} mode and restoring placements`);
+      this.restoreSavedPlacements();
+      return;
+    }
+
+    // Always reconfigure existing batteries when mode changes
     if (previousMode !== isSandbox) {
-      // Clear all existing batteries
-      const batteryIds = Array.from(this.placedDomes.keys());
-      batteryIds.forEach(id => {
-        this.removeBattery(id, false); // Don't update game state during mode switch
+      debug.log(`Mode changed from ${previousMode ? 'sandbox' : 'game'} to ${isSandbox ? 'sandbox' : 'game'}, reconfiguring all batteries`);
+      
+      // First reconfigure all existing batteries
+      this.placedDomes.forEach((dome, id) => {
+        debug.log(`Reconfiguring battery ${id} for ${isSandbox ? 'sandbox' : 'game'} mode`);
+        dome.battery.setResourceManagement(!isSandbox);
+        
+        // In sandbox mode, reset interceptor stock to ensure batteries work
+        if (isSandbox) {
+          dome.battery.resetInterceptorStock();
+        }
       });
-
-      // Clear saved placements from game state
-      const placements = this.gameState.getDomePlacements();
-      placements.forEach(p => {
-        this.gameState.removeDomePlacement(p.id);
-      });
-
-      // Place initial battery at center
-      const initialId = 'battery_initial';
-      const initialPosition = new THREE.Vector3(0, 0, 0);
-      this.placeBatteryAt(initialPosition, initialId, 1);
-      this.gameState.addDomePlacement(initialId, {
-        x: initialPosition.x,
-        z: initialPosition.z,
-      });
+      
+      // Only clear and reset if there are issues or if explicitly needed
+      if (this.placedDomes.size === 0) {
+        // Place initial battery at center if none exist
+        const initialId = 'battery_initial';
+        const initialPosition = new THREE.Vector3(0, 0, 0);
+        this.placeBatteryAt(initialPosition, initialId, 1);
+        this.gameState.addDomePlacement(initialId, {
+          x: initialPosition.x,
+          z: initialPosition.z,
+        });
+      }
     }
   }
 
@@ -250,6 +257,15 @@ export class DomePlacementSystem {
         this.placeBatteryAt(position, placement.id, placement.level);
       });
     }
+    
+    // Ensure all batteries are configured for the current mode after restoration
+    debug.log(`After restoring placements, ensuring all batteries are in ${this.isSandboxMode ? 'sandbox' : 'game'} mode`);
+    this.placedDomes.forEach((dome, id) => {
+      dome.battery.setResourceManagement(!this.isSandboxMode);
+      if (this.isSandboxMode) {
+        dome.battery.resetInterceptorStock();
+      }
+    });
   }
 
   enterPlacementMode(): void {
@@ -559,7 +575,7 @@ export class DomePlacementSystem {
 
     // Prevent removing the last battery (only when actually removing, not upgrading)
     if (removeFromGameState && this.placedDomes.size <= 1) {
-      console.warn('Cannot remove the last battery');
+      debug.warn('Cannot remove the last battery');
       return false;
     }
 
@@ -644,7 +660,7 @@ export class DomePlacementSystem {
   upgradeBattery(batteryId: string): boolean {
     const dome = this.placedDomes.get(batteryId);
     if (!dome) {
-      console.warn('[DomePlacement] Battery not found in placedDomes:', batteryId);
+      debug.warn('[DomePlacement] Battery not found in placedDomes:', batteryId);
       return false;
     }
 
@@ -753,7 +769,7 @@ export class DomePlacementSystem {
     const placements = this.gameState.getDomePlacements();
     const placement = placements.find(p => p.id === batteryId);
     if (!placement) {
-      console.warn(
+      debug.warn(
         `No placement found for battery ${batteryId}. All placements:`,
         placements.map(p => p.id)
       );
