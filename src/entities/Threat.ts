@@ -202,14 +202,10 @@ export class Threat extends Projectile {
 
     // Replace default sphere mesh with proper missile model
     // Only if not using instancing
-    if (!options.useInstancing || !(this as any).instanceId) {
+    if (!options.useInstancing) {
       this.replaceMeshWithModel(scene, options.type);
-    } else if (options.useInstancing && options.instanceManager) {
-      // For instancing, we need to allocate the correct threat type instance
-      options.instanceManager.releaseInstance(this.id); // Release generic allocation
-      const newId = options.instanceManager.allocateInstance(this.id, 'threat', options.type);
-      (this as any).instanceId = newId;
     }
+    // For instancing, the ThreatManager will handle adding to the instance renderer
 
     // Set up special physics for drones
     if (config.isDrone) {

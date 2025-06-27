@@ -5,7 +5,7 @@ import { ProximityFuse } from '../systems/ProximityFuse';
 import { ModelCache } from '../utils/ModelCache';
 import { debug } from '../utils/logger';
 import { ThrustVectorControl } from '../systems/ThrustVectorControl';
-import { UnifiedTrailSystem, TrailType } from '../systems/UnifiedTrailSystem';
+import { PooledTrailSystem } from '../rendering/PooledTrailSystem';
 import { GeometryFactory } from '../utils/GeometryFactory';
 import { MaterialCache } from '../utils/MaterialCache';
 import { MissileModelFactory } from '../utils/MissileModelFactory';
@@ -43,6 +43,7 @@ export class Projectile {
   proximityFuse?: ProximityFuse;
   detonationCallback?: (position: THREE.Vector3, quality: number) => void;
   exhaustTrailId?: string;
+  mainTrailId?: string;
   thrustControl?: ThrustVectorControl;
   private scene: THREE.Scene;
   private failureMode: string;
@@ -120,20 +121,16 @@ export class Projectile {
 
     // Create mesh using missile model factory or instancing
     if (useInstancing && instanceManager) {
-      // Use instanced rendering
-      this.instanceId = instanceManager.allocateInstance(this.id, isInterceptor ? 'interceptor' : 'threat');
-      if (this.instanceId !== null) {
-        // Create dummy mesh for physics sync
-        this.mesh = new THREE.Object3D() as any;
-        this.mesh.position.copy(position);
-        // Don't add to scene - it's rendered via instancing
-      } else {
-        // Fallback to regular mesh if instance allocation failed
-        this.useInstancing = false;
-      }
+      // For instanced rendering, we still need a mesh for physics
+      // The instance manager will handle hiding it and using instanced rendering
+      // Create dummy mesh for physics sync
+      this.mesh = new THREE.Object3D() as any;
+      this.mesh.position.copy(position);
+      // Don't add to scene yet - instance manager will handle it
+      this.instanceId = 0; // Placeholder, will be set by instance manager
     }
     
-    if (!useInstancing || this.instanceId === null) {
+    if (!useInstancing) {
       // Regular mesh creation
       const modelFactory = MissileModelFactory.getInstance();
       if (isInterceptor) {
@@ -172,39 +169,18 @@ export class Projectile {
     });
     world.addBody(this.body);
 
-    // Create trail using UnifiedTrailSystem if available
+    // Create trail using PooledTrailSystem for massive performance gain
     this.maxTrailLength = trailLength;
     this.trailPositions = [];
 
-    // Try to use UnifiedTrailSystem first
-    try {
-      const unifiedTrail = UnifiedTrailSystem.getInstance(scene);
-      unifiedTrail.createTrail(this.id, {
-        type: TrailType.LINE, // Use line trails for both interceptors and threats
-        color: color,
-        maxPoints: trailLength * 2, // Double the trail length for better visual effect
-        linewidth: isInterceptor ? 2 : 1,
-        fadeOut: true,
-      });
-      this.useUnifiedTrail = true;
+    // Use PooledTrailSystem - 1 draw call for ALL trails
+    const pooledTrail = PooledTrailSystem.getInstance(scene);
+    this.mainTrailId = pooledTrail.createTrail(trailLength, color);
+    this.useUnifiedTrail = true;
 
-      // Create minimal dummy objects for compatibility - NO geometry, NO material, NOT in scene
-      this.trailGeometry = null as any; // Set to null but typed as BufferGeometry for compatibility
-      this.trail = null as any; // Set to null but typed as Line for compatibility
-    } catch (e) {
-      // Fallback to legacy trail
-      this.trailGeometry = new THREE.BufferGeometry();
-      const trailMaterial = MaterialCache.getInstance().getLineMaterial({
-        color: color,
-        opacity: 0.6,
-        transparent: true,
-      });
-      this.trail = new THREE.Line(this.trailGeometry, trailMaterial);
-      // Optimize: Trails don't need shadows
-      this.trail.castShadow = false;
-      this.trail.receiveShadow = false;
-      scene.add(this.trail);
-    }
+    // Create minimal dummy objects for compatibility - NO geometry, NO material, NOT in scene
+    this.trailGeometry = null as any; // Set to null but typed as BufferGeometry for compatibility
+    this.trail = null as any; // Set to null but typed as Line for compatibility
 
     // Initialize proximity fuse for interceptors with realistic parameters
     if (isInterceptor && target) {
@@ -219,22 +195,12 @@ export class Projectile {
       // })
     }
 
-    // Initialize exhaust trail system using UnifiedTrailSystem
+    // Initialize exhaust trail using PooledTrailSystem
     if (useExhaustTrail) {
-      const exhaustTrailId = `exhaust_${this.id}`;
-      const unifiedTrail = UnifiedTrailSystem.getInstance(scene);
-
-      unifiedTrail.createTrail(exhaustTrailId, {
-        type: TrailType.LINE,
-        color: isInterceptor ? 0xffaa00 : 0xff6600,
-        particleCount: 10,
-        particleSize: 0.8,
-        particleLifetime: 1.0,
-        emissive: true,
-        emissiveIntensity: 0.5,
-      });
-
-      this.exhaustTrailId = exhaustTrailId;
+      this.exhaustTrailId = pooledTrail.createTrail(
+        Math.floor(trailLength * 0.5), // Shorter exhaust trail
+        isInterceptor ? 0xffaa00 : 0xff6600
+      );
     }
   }
 
@@ -264,11 +230,7 @@ export class Projectile {
         this.detonationCallback(this.mesh.position.clone(), 0.3); // Low quality explosion
       }
 
-      // Stop exhaust trail
-      if (this.exhaustTrailId) {
-        const unifiedTrail = UnifiedTrailSystem.getInstance(this.scene);
-        unifiedTrail.removeTrail(this.exhaustTrailId);
-      }
+      // Exhaust trail removed for performance
 
       this.isActive = false;
       return;
@@ -312,8 +274,8 @@ export class Projectile {
 
           // Stop exhaust trail
           if (this.exhaustTrailId) {
-            const unifiedTrail = UnifiedTrailSystem.getInstance(this.scene);
-            unifiedTrail.removeTrail(this.exhaustTrailId);
+            const pooledTrail = PooledTrailSystem.getInstance(this.scene);
+            pooledTrail.removeTrail(this.exhaustTrailId);
           }
 
           this.isActive = false;
@@ -332,22 +294,17 @@ export class Projectile {
       this.orientMissile(currentVel);
     }
     
-    // Update instance transform if using instancing
-    if (this.useInstancing && this.instanceManager && this.instanceId !== null) {
-      this.instanceManager.updateInstance(
-        this.id,
-        this.mesh.position,
-        this.mesh.rotation,
-        this.mesh.scale
-      );
-    }
+    // Instance updates are handled by the manager's batch update method
+    // No individual updates needed here
 
     // Update trail
     if (this.useUnifiedTrail) {
-      // Update unified trail system
-      const unifiedTrail = UnifiedTrailSystem.getInstance(this.scene);
-      unifiedTrail.updateTrail(this.id, this.mesh.position, this.getVelocity());
-      // Skip all legacy trail updates when using unified system
+      // Update pooled trail system
+      const pooledTrail = PooledTrailSystem.getInstance(this.scene);
+      if (this.mainTrailId) {
+        pooledTrail.updateTrail(this.mainTrailId, this.mesh.position);
+      }
+      // Skip all legacy trail updates when using pooled system
     } else if (this.trail && this.trailGeometry) {
       // Legacy trail update - only if trail objects exist
       this.trailPositions.push(this.mesh.position.clone());
@@ -377,8 +334,8 @@ export class Projectile {
       emitPosition.sub(velocityNormalized.multiplyScalar(this.radius));
 
       // Update particle trail position
-      const unifiedTrail = UnifiedTrailSystem.getInstance(this.scene);
-      unifiedTrail.updateTrail(this.exhaustTrailId, emitPosition, velocity);
+      const pooledTrail = PooledTrailSystem.getInstance(this.scene);
+      pooledTrail.updateTrail(this.exhaustTrailId, emitPosition);
     }
 
     // Mid-flight guidance for interceptors (if not failed)
@@ -402,8 +359,8 @@ export class Projectile {
       if (shouldDetonate) {
         // Stop exhaust trail
         if (this.exhaustTrailId) {
-          const unifiedTrail = UnifiedTrailSystem.getInstance(this.scene);
-          unifiedTrail.removeTrail(this.exhaustTrailId);
+          const pooledTrail = PooledTrailSystem.getInstance(this.scene);
+          pooledTrail.removeTrail(this.exhaustTrailId);
         }
 
         // Trigger detonation
@@ -418,20 +375,20 @@ export class Projectile {
   destroy(scene: THREE.Scene, world: CANNON.World): void {
     this.isActive = false;
     
-    // Release instance if using instancing
-    if (this.useInstancing && this.instanceManager && this.instanceId !== null) {
-      this.instanceManager.releaseInstance(this.id);
-    } else {
-      // Only remove mesh if not using instancing
+    // Instance removal is handled by the manager when removing threats
+    // Only remove mesh if not using instancing
+    if (!this.useInstancing && this.mesh) {
       scene.remove(this.mesh);
     }
     
     world.removeBody(this.body);
 
-    // Remove from unified trail system if used
+    // Remove from pooled trail system if used
     if (this.useUnifiedTrail) {
-      const unifiedTrail = UnifiedTrailSystem.getInstance(scene);
-      unifiedTrail.removeTrail(this.id);
+      const pooledTrail = PooledTrailSystem.getInstance(scene);
+      if (this.mainTrailId) {
+        pooledTrail.removeTrail(this.mainTrailId);
+      }
     } else if (this.trail && this.trailGeometry) {
       // Remove legacy trail - only if objects exist
       scene.remove(this.trail);
@@ -460,8 +417,8 @@ export class Projectile {
 
     // Clean up exhaust trail
     if (this.exhaustTrailId) {
-      const unifiedTrail = UnifiedTrailSystem.getInstance(scene);
-      unifiedTrail.removeTrail(this.exhaustTrailId);
+      const pooledTrail = PooledTrailSystem.getInstance(scene);
+      pooledTrail.removeTrail(this.exhaustTrailId);
     }
   }
 
@@ -510,8 +467,8 @@ export class Projectile {
       case 'motor':
         // Motor failure - stop thrust, let gravity take over
         if (this.exhaustTrailId) {
-          const unifiedTrail = UnifiedTrailSystem.getInstance(this.scene);
-          unifiedTrail.removeTrail(this.exhaustTrailId);
+          const pooledTrail = PooledTrailSystem.getInstance(this.scene);
+          pooledTrail.removeTrail(this.exhaustTrailId);
         }
         // Reduce velocity significantly
         this.body.velocity.x *= 0.3;

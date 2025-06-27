@@ -3,6 +3,7 @@ import { Threat, ThreatType, THREAT_CONFIGS } from '../entities/Threat';
 import { GeometryFactory } from '../utils/GeometryFactory';
 import { MaterialCache } from '../utils/MaterialCache';
 import { debug } from '../utils/logger';
+import { SimpleLODSystem } from './SimpleLODSystem';
 
 interface ThreatMeshes {
   rocket: THREE.InstancedMesh;
@@ -16,6 +17,9 @@ type MeshCategory = 'rocket' | 'mortar' | 'drone' | 'ballistic';
 export class InstancedThreatRenderer {
   private scene: THREE.Scene;
   private maxThreatsPerType: number;
+  private camera: THREE.Camera;
+  private lodSystem: SimpleLODSystem;
+  private readonly MAX_RENDER_DISTANCE = 500; // Cull beyond this distance
 
   // Instanced meshes for each threat type
   private threatMeshes: ThreatMeshes;
@@ -30,9 +34,15 @@ export class InstancedThreatRenderer {
   >();
   private availableIndices: Map<MeshCategory, number[]> = new Map();
 
-  constructor(scene: THREE.Scene, maxThreatsPerType: number = 100) {
+  constructor(scene: THREE.Scene, maxThreatsPerType: number = 100, camera?: THREE.Camera) {
     this.scene = scene;
     this.maxThreatsPerType = maxThreatsPerType;
+    this.camera = camera || scene.userData.camera;
+    
+    // Initialize LOD system if camera available
+    if (this.camera) {
+      this.lodSystem = SimpleLODSystem.getInstance(this.camera);
+    }
 
     // Get geometries from factory for each threat type
     const rocketGeometry = GeometryFactory.getInstance().getCone(0.3, 3, 6).clone();
@@ -198,9 +208,28 @@ export class InstancedThreatRenderer {
         );
       }
 
-      // Scale based on threat config
+      // Scale based on threat config and LOD
       const config = THREAT_CONFIGS[type];
-      const scale = config.radius ? config.radius * 2 : 1;
+      let scale = config.radius ? config.radius * 2 : 1;
+      
+      // Apply LOD-based culling and scaling
+      if (this.camera) {
+        const distance = position.distanceTo(this.camera.position);
+        
+        // Cull very distant threats
+        if (distance > this.MAX_RENDER_DISTANCE) {
+          scale = 0; // Hide by scaling to 0
+        } else if (distance > 300) {
+          // Slightly reduce scale for distant threats
+          scale *= 0.8;
+        }
+        
+        // Update shadow casting based on distance
+        if (distance > 150 && mesh.castShadow) {
+          mesh.castShadow = false;
+        }
+      }
+      
       this.dummy.scale.set(scale, scale, scale);
 
       this.dummy.updateMatrix();

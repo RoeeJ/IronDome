@@ -740,7 +740,7 @@ export class InterceptionSystem {
 
   private createSmokeRing(position: THREE.Vector3): void {
     const ringGeometry = new THREE.TorusGeometry(2, 0.5, 8, 16);
-    const ringMaterial = new THREE.MeshBasicMaterial({
+    const ringMaterial = MaterialCache.getInstance().getMeshBasicMaterial({
       color: 0x666666,
       opacity: 0.6,
       transparent: true,

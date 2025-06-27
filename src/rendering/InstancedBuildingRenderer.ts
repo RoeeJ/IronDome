@@ -94,9 +94,7 @@ export class InstancedBuildingRenderer {
     // Shared materials for windows
     const litMaterial = MaterialCache.getInstance().getMeshBasicMaterial({
       color: 0xffee88,
-      transparent: true,
-      opacity: 1.0,
-      depthWrite: false,
+      // No transparency needed for lit windows - saves render passes
     });
     
     const unlitMaterial = MaterialCache.getInstance().getMeshBasicMaterial({
@@ -110,12 +108,17 @@ export class InstancedBuildingRenderer {
     this.unlitWindowMesh = new THREE.InstancedMesh(windowGeometry, unlitMaterial, this.maxWindowsPerMesh);
     
     // Configure window meshes
-    [this.litWindowMesh, this.unlitWindowMesh].forEach(mesh => {
-      mesh.frustumCulled = true; // Enable culling for windows
-      mesh.castShadow = false;
-      mesh.receiveShadow = false;
-      mesh.renderOrder = 1;
-    });
+    this.litWindowMesh.frustumCulled = true;
+    this.litWindowMesh.castShadow = false;
+    this.litWindowMesh.receiveShadow = false;
+    // Lit windows render first (opaque)
+    this.litWindowMesh.renderOrder = 0;
+    
+    this.unlitWindowMesh.frustumCulled = true;
+    this.unlitWindowMesh.castShadow = false;
+    this.unlitWindowMesh.receiveShadow = false;
+    // Unlit windows render after (transparent)
+    this.unlitWindowMesh.renderOrder = 10;
     
     // Initialize window pools
     const zeroMatrix = new THREE.Matrix4().makeScale(0, 0, 0);

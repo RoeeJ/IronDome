@@ -107,10 +107,7 @@ export class BuildingSystem {
     // Material for lit windows - bright warm glow (SHARED)
     const litWindowMaterial = MaterialCache.getInstance().getMeshBasicMaterial({
       color: 0xffee88, // Brighter warm yellow
-      transparent: true,
-      opacity: 1.0, // Full opacity for lit windows
-      depthWrite: false,
-      renderOrder: 1,
+      // No transparency needed - saves render passes
     });
 
     // Material for unlit windows - much darker (SHARED)
@@ -119,7 +116,6 @@ export class BuildingSystem {
       transparent: true,
       opacity: 0.3, // Lower opacity for unlit windows
       depthWrite: false,
-      renderOrder: 1,
     });
 
     // Create separate instanced meshes
@@ -131,6 +127,7 @@ export class BuildingSystem {
     this.litWindowMesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
     this.litWindowMesh.castShadow = false;
     this.litWindowMesh.receiveShadow = false;
+    this.litWindowMesh.renderOrder = 0; // Render opaque first
 
     this.unlitWindowMesh = new THREE.InstancedMesh(
       windowGeometry,
@@ -140,6 +137,7 @@ export class BuildingSystem {
     this.unlitWindowMesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
     this.unlitWindowMesh.castShadow = false;
     this.unlitWindowMesh.receiveShadow = false;
+    this.unlitWindowMesh.renderOrder = 10; // Render transparent after
 
     debug.log('Window materials setup:', {
       litMaterial: litWindowMaterial,

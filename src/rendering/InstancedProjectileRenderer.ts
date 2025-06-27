@@ -3,10 +3,14 @@ import { Projectile } from '../entities/Projectile';
 import { GeometryFactory } from '../utils/GeometryFactory';
 import { MaterialCache } from '../utils/MaterialCache';
 import { debug } from '../utils/logger';
+import { SimpleLODSystem } from './SimpleLODSystem';
 
 export class InstancedProjectileRenderer {
   private scene: THREE.Scene;
   private maxProjectiles: number;
+  private camera: THREE.Camera;
+  private lodSystem: SimpleLODSystem;
+  private readonly MAX_RENDER_DISTANCE = 400; // Cull beyond this distance
 
   // Instanced mesh for interceptors
   private interceptorMesh: THREE.InstancedMesh;
@@ -18,9 +22,15 @@ export class InstancedProjectileRenderer {
   private projectileToIndex = new Map<string, number>();
   private availableIndices: number[] = [];
 
-  constructor(scene: THREE.Scene, maxProjectiles: number = 200) {
+  constructor(scene: THREE.Scene, maxProjectiles: number = 200, camera?: THREE.Camera) {
     this.scene = scene;
     this.maxProjectiles = maxProjectiles;
+    this.camera = camera || scene.userData.camera;
+    
+    // Initialize LOD system if camera available
+    if (this.camera) {
+      this.lodSystem = SimpleLODSystem.getInstance(this.camera);
+    }
 
     // Get interceptor geometry from factory (cone shape)
     const interceptorGeometry = GeometryFactory.getInstance().getCone(0.3, 2, 8);
@@ -114,7 +124,21 @@ export class InstancedProjectileRenderer {
         );
       }
 
-      this.dummy.scale.set(1, 1, 1);
+      // Apply LOD-based scaling and culling
+      let scale = 1;
+      if (this.camera) {
+        const distance = position.distanceTo(this.camera.position);
+        
+        // Cull very distant interceptors
+        if (distance > this.MAX_RENDER_DISTANCE) {
+          scale = 0; // Hide by scaling to 0
+        } else if (distance > 200) {
+          // Slightly reduce scale for distant interceptors
+          scale = 0.8;
+        }
+      }
+      
+      this.dummy.scale.set(scale, scale, scale);
       this.dummy.updateMatrix();
 
       this.interceptorMesh.setMatrixAt(index, this.dummy.matrix);

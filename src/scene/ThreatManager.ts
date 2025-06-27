@@ -18,6 +18,7 @@ import {
   ScenarioManager 
 } from '../game/scenarios/AttackScenarios';
 import { ThreatLauncherSystem, LauncherConfig, LauncherSite } from './ThreatLauncherSystem';
+import { InstancedThreatRenderer } from '../rendering/InstancedThreatRenderer';
 import { debug } from '../utils/logger';
 
 export interface ThreatSpawnConfig {
@@ -49,6 +50,7 @@ export class ThreatManager extends EventEmitter {
       const oldestThreat = this.threats.shift();
       if (oldestThreat) {
         debug.warn(`[ThreatManager] Removing oldest threat to prevent memory overflow (${this.threats.length} active)`);
+        this.instancedRenderer.removeThreat(oldestThreat.id);
         oldestThreat.destroy(this.scene, this.world);
       }
     }
@@ -59,6 +61,7 @@ export class ThreatManager extends EventEmitter {
     for (let i = 0; i < toRemove; i++) {
       const threat = this.threats.shift();
       if (threat) {
+        this.instancedRenderer.removeThreat(threat.id);
         threat.destroy(this.scene, this.world);
       }
     }
@@ -99,6 +102,9 @@ export class ThreatManager extends EventEmitter {
   // Launcher system for realistic volleys
   private launcherSystem: ThreatLauncherSystem;
   private launcherSiteVisuals: Map<string, THREE.Mesh> = new Map();
+  
+  // Instanced renderer for performance
+  private instancedRenderer: InstancedThreatRenderer;
 
   constructor(scene: THREE.Scene, world: CANNON.World) {
     super();
@@ -114,6 +120,10 @@ export class ThreatManager extends EventEmitter {
     // Initialize launcher system
     this.launcherSystem = new ThreatLauncherSystem();
     this.createLauncherSiteVisuals();
+    
+    // Initialize instanced renderer for massive performance gain
+    // Pass camera from scene userData if available for LOD support
+    this.instancedRenderer = new InstancedThreatRenderer(scene, 100, scene.userData.camera);
 
     // Default spawn configurations with all threat types
     this.spawnConfigs = [
@@ -218,6 +228,9 @@ export class ThreatManager extends EventEmitter {
 
     // Update explosion manager
     this.explosionManager.update(1 / 60);
+    
+    // Update instanced renderer with active threats
+    this.instancedRenderer.updateThreats(this.threats.filter(t => t.isActive));
 
     // Update all threats
     for (let i = this.threats.length - 1; i >= 0; i--) {
@@ -579,14 +592,23 @@ export class ThreatManager extends EventEmitter {
       }
     }
     
-    // Create the threat
+    // Create the threat with instancing support
     const threat = new Threat(this.scene, this.world, {
       type: launcher.type,
       position: spawnPosition,
       velocity,
       targetPosition,
+      useInstancing: true,
+      instanceManager: this.instancedRenderer,
     });
     this.cleanupOldestThreat();
+    
+    // Add to instanced renderer
+    if (!this.instancedRenderer.addThreat(threat)) {
+      // Fallback if instancing fails
+      threat.mesh.visible = true;
+    }
+    
     this.threats.push(threat);
     
     // Play launch sound - check if it's a valid threat type for sound
@@ -781,10 +803,19 @@ export class ThreatManager extends EventEmitter {
         position: spawnPosition,
         velocity,
         targetPosition,
+        useInstancing: true,
+        instanceManager: this.instancedRenderer,
       });
 
       this.cleanupOldestThreat();
-    this.threats.push(threat);
+      
+      // Add to instanced renderer
+      if (!this.instancedRenderer.addThreat(threat)) {
+        // Fallback if instancing fails
+        threat.mesh.visible = true;
+      }
+      
+      this.threats.push(threat);
       this.addImpactMarker(threat);
 
       // Play threat incoming sound
@@ -818,6 +849,9 @@ export class ThreatManager extends EventEmitter {
       return;
     }
 
+    // Remove from instanced renderer first
+    this.instancedRenderer.removeThreat(threat.id);
+    
     // Safely destroy the threat
     try {
       if (threat.destroy && typeof threat.destroy === 'function') {

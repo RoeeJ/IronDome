@@ -11,6 +11,7 @@ interface TrailSegment {
   positions: Float32Array;
   colors: Float32Array;
   currentIndex: number;
+  pointCount: number; // Track actual number of valid points
   active: boolean;
   lastUpdateTime: number;
 }
@@ -24,7 +25,7 @@ export class PooledTrailSystem {
   private scene: THREE.Scene;
   
   // Single mesh for all trails
-  private trailMesh: THREE.Line;
+  private trailMesh: THREE.LineSegments;
   private geometry: THREE.BufferGeometry;
   private material: THREE.LineBasicMaterial;
   
@@ -38,13 +39,13 @@ export class PooledTrailSystem {
   
   // Trail management
   private trails = new Map<string, TrailSegment>();
-  private freeSegments: { startIndex: number; length: number }[] = [];
   private nextTrailId = 0;
   
   // Optimization
   private updateQueue = new Set<string>();
   private lastCleanupTime = 0;
   private readonly CLEANUP_INTERVAL = 5000; // Clean up inactive trails every 5 seconds
+  private totalValidPoints = 0; // Track total points to render
 
   private constructor(scene: THREE.Scene) {
     this.scene = scene;
@@ -63,18 +64,6 @@ export class PooledTrailSystem {
     this.positions = new Float32Array(this.MAX_TOTAL_POINTS * 3);
     this.colors = new Float32Array(this.MAX_TOTAL_POINTS * 3);
     
-    // Initialize positions far away to avoid artifacts
-    for (let i = 0; i < this.MAX_TOTAL_POINTS * 3; i += 3) {
-      this.positions[i] = -10000;
-      this.positions[i + 1] = -10000;
-      this.positions[i + 2] = -10000;
-      
-      // Default color (will be overridden per trail)
-      this.colors[i] = 1;
-      this.colors[i + 1] = 1;
-      this.colors[i + 2] = 1;
-    }
-    
     // Create geometry with dynamic buffer attributes
     this.geometry = new THREE.BufferGeometry();
     this.positionAttribute = new THREE.BufferAttribute(this.positions, 3);
@@ -86,6 +75,9 @@ export class PooledTrailSystem {
     this.geometry.setAttribute('position', this.positionAttribute);
     this.geometry.setAttribute('color', this.colorAttribute);
     
+    // Start with no points drawn
+    this.geometry.setDrawRange(0, 0);
+    
     // Single material with vertex colors
     this.material = MaterialCache.getInstance().getLineMaterial({
       color: 0xffffff, // White base color, actual color from vertices
@@ -95,14 +87,11 @@ export class PooledTrailSystem {
       linewidth: 1,
     });
     
-    // Create the single trail mesh
-    this.trailMesh = new THREE.Line(this.geometry, this.material);
+    // Create the single trail mesh using LineSegments to avoid connecting different trails
+    this.trailMesh = new THREE.LineSegments(this.geometry, this.material);
     this.trailMesh.frustumCulled = false; // Always render trails
     this.trailMesh.name = 'PooledTrails';
     this.scene.add(this.trailMesh);
-    
-    // Initialize free segments pool
-    this.freeSegments.push({ startIndex: 0, length: this.MAX_TOTAL_POINTS });
     
     debug.log('PooledTrailSystem initialized with capacity for', this.MAX_TRAILS, 'trails');
   }
@@ -113,59 +102,28 @@ export class PooledTrailSystem {
   createTrail(maxLength: number = 50, color: number = 0xffffff): string {
     const id = `trail_${this.nextTrailId++}`;
     
-    // Find a free segment
-    let segment: { startIndex: number; length: number } | undefined;
-    let segmentIndex = -1;
-    
-    for (let i = 0; i < this.freeSegments.length; i++) {
-      if (this.freeSegments[i].length >= maxLength) {
-        segment = this.freeSegments[i];
-        segmentIndex = i;
-        break;
-      }
-    }
-    
-    if (!segment) {
-      debug.warn('PooledTrailSystem: No free segments available for new trail');
-      return id;
-    }
-    
-    // Allocate from the free segment
-    const startIndex = segment.startIndex;
-    
-    // Update or remove the free segment
-    if (segment.length === maxLength) {
-      this.freeSegments.splice(segmentIndex, 1);
-    } else {
-      segment.startIndex += maxLength;
-      segment.length -= maxLength;
-    }
-    
     // Convert hex color to RGB
     const color3 = new THREE.Color(color);
     const r = color3.r;
     const g = color3.g;
     const b = color3.b;
     
-    // Create trail segment
+    // Create trail segment - no fixed allocation in main buffer
     const trail: TrailSegment = {
       id,
-      startIndex,
+      startIndex: 0, // Will be dynamically assigned during update
       length: maxLength,
       maxLength,
       positions: new Float32Array(maxLength * 3),
       colors: new Float32Array(maxLength * 3),
       currentIndex: 0,
+      pointCount: 0, // Start with no valid points
       active: true,
       lastUpdateTime: Date.now(),
     };
     
-    // Initialize trail buffers
+    // Initialize trail colors
     for (let i = 0; i < maxLength * 3; i += 3) {
-      trail.positions[i] = -10000;
-      trail.positions[i + 1] = -10000;
-      trail.positions[i + 2] = -10000;
-      
       trail.colors[i] = r;
       trail.colors[i + 1] = g;
       trail.colors[i + 2] = b;
@@ -193,6 +151,11 @@ export class PooledTrailSystem {
     // Advance circular buffer index
     trail.currentIndex = (trail.currentIndex + 1) % trail.maxLength;
     
+    // Track actual point count (up to max)
+    if (trail.pointCount < trail.maxLength) {
+      trail.pointCount++;
+    }
+    
     // Mark for update
     this.updateQueue.add(id);
   }
@@ -205,28 +168,14 @@ export class PooledTrailSystem {
     if (!trail) return;
     
     trail.active = false;
-    
-    // Clear the trail from main buffers immediately
-    const baseIdx = trail.startIndex * 3;
-    for (let i = 0; i < trail.length * 3; i++) {
-      this.positions[baseIdx + i] = -10000;
-    }
-    
-    // Mark the entire range as needing update
-    this.positionAttribute.updateRange.offset = trail.startIndex * 3;
-    this.positionAttribute.updateRange.count = trail.length * 3;
-    this.positionAttribute.needsUpdate = true;
-    
-    // Return segment to free pool
-    this.freeSegments.push({ 
-      startIndex: trail.startIndex, 
-      length: trail.length 
-    });
-    
-    // Merge adjacent free segments
-    this.mergeFreeSegments();
-    
     this.trails.delete(id);
+    
+    // Mark all trails for update to recalculate positions
+    this.trails.forEach((t, tid) => {
+      if (t.active) {
+        this.updateQueue.add(tid);
+      }
+    });
   }
 
   /**
@@ -235,54 +184,80 @@ export class PooledTrailSystem {
   update(): void {
     const now = Date.now();
     
-    // Process update queue
-    if (this.updateQueue.size > 0) {
-      let minOffset = Infinity;
-      let maxOffset = 0;
-      
-      this.updateQueue.forEach(id => {
-        const trail = this.trails.get(id);
-        if (!trail || !trail.active) return;
-        
-        // Copy trail data to main buffers
-        const baseIdx = trail.startIndex * 3;
-        
-        // Reorder positions for continuous line
-        // Start from current index to show newest positions first
-        let writeIdx = 0;
-        for (let i = 0; i < trail.maxLength; i++) {
-          const readIdx = ((trail.currentIndex + i) % trail.maxLength) * 3;
-          const targetIdx = baseIdx + writeIdx * 3;
-          
-          this.positions[targetIdx] = trail.positions[readIdx];
-          this.positions[targetIdx + 1] = trail.positions[readIdx + 1];
-          this.positions[targetIdx + 2] = trail.positions[readIdx + 2];
-          
-          this.colors[targetIdx] = trail.colors[readIdx];
-          this.colors[targetIdx + 1] = trail.colors[readIdx + 1];
-          this.colors[targetIdx + 2] = trail.colors[readIdx + 2];
-          
-          writeIdx++;
-        }
-        
-        // Track update range
-        minOffset = Math.min(minOffset, baseIdx);
-        maxOffset = Math.max(maxOffset, baseIdx + trail.length * 3);
-      });
-      
-      // Update buffer attributes efficiently
-      if (minOffset < Infinity) {
-        this.positionAttribute.updateRange.offset = minOffset;
-        this.positionAttribute.updateRange.count = maxOffset - minOffset;
-        this.positionAttribute.needsUpdate = true;
-        
-        this.colorAttribute.updateRange.offset = minOffset;
-        this.colorAttribute.updateRange.count = maxOffset - minOffset;
-        this.colorAttribute.needsUpdate = true;
+    // Always update all trails for correct rendering
+    let totalSegments = 0;
+    
+    // First pass: calculate total segments needed (points - 1 per trail)
+    this.trails.forEach((trail, id) => {
+      if (trail.active && trail.pointCount > 1) {
+        totalSegments += (trail.pointCount - 1);
       }
+    });
+    
+    // LineSegments needs 2 points per segment
+    const totalPoints = totalSegments * 2;
+    
+    // Update draw range to only show valid points
+    this.geometry.setDrawRange(0, totalPoints);
+    
+    // Second pass: copy trail data to main buffers as line segments
+    let writeOffset = 0;
+    
+    this.trails.forEach((trail, id) => {
+      if (!trail.active || trail.pointCount < 2) return;
       
-      this.updateQueue.clear();
+      // Start from oldest valid point
+      const startIdx = trail.pointCount >= trail.maxLength 
+        ? trail.currentIndex 
+        : 0;
+      
+      // Create line segments from consecutive points
+      for (let i = 0; i < trail.pointCount - 1; i++) {
+        // Get two consecutive points
+        const idx1 = ((startIdx + i) % trail.maxLength) * 3;
+        const idx2 = ((startIdx + i + 1) % trail.maxLength) * 3;
+        
+        // Write first point of segment
+        const targetIdx1 = writeOffset * 3;
+        this.positions[targetIdx1] = trail.positions[idx1];
+        this.positions[targetIdx1 + 1] = trail.positions[idx1 + 1];
+        this.positions[targetIdx1 + 2] = trail.positions[idx1 + 2];
+        
+        this.colors[targetIdx1] = trail.colors[idx1];
+        this.colors[targetIdx1 + 1] = trail.colors[idx1 + 1];
+        this.colors[targetIdx1 + 2] = trail.colors[idx1 + 2];
+        
+        // Write second point of segment
+        const targetIdx2 = (writeOffset + 1) * 3;
+        this.positions[targetIdx2] = trail.positions[idx2];
+        this.positions[targetIdx2 + 1] = trail.positions[idx2 + 1];
+        this.positions[targetIdx2 + 2] = trail.positions[idx2 + 2];
+        
+        this.colors[targetIdx2] = trail.colors[idx2];
+        this.colors[targetIdx2 + 1] = trail.colors[idx2 + 1];
+        this.colors[targetIdx2 + 2] = trail.colors[idx2 + 2];
+        
+        writeOffset += 2; // Move to next segment
+      }
+    });
+    
+    // Update buffer attributes for the exact range we wrote
+    if (totalPoints > 0) {
+      this.positionAttribute.needsUpdate = true;
+      this.colorAttribute.needsUpdate = true;
+      
+      // Use updateRange for efficiency if available
+      if (this.positionAttribute.updateRange) {
+        this.positionAttribute.updateRange.offset = 0;
+        this.positionAttribute.updateRange.count = totalPoints * 3;
+      }
+      if (this.colorAttribute.updateRange) {
+        this.colorAttribute.updateRange.offset = 0;
+        this.colorAttribute.updateRange.count = totalPoints * 3;
+      }
     }
+    
+    this.updateQueue.clear();
     
     // Periodic cleanup of inactive trails
     if (now - this.lastCleanupTime > this.CLEANUP_INTERVAL) {
@@ -309,31 +284,6 @@ export class PooledTrailSystem {
     }
   }
 
-  private mergeFreeSegments(): void {
-    if (this.freeSegments.length < 2) return;
-    
-    // Sort by start index
-    this.freeSegments.sort((a, b) => a.startIndex - b.startIndex);
-    
-    // Merge adjacent segments
-    const merged: typeof this.freeSegments = [];
-    let current = this.freeSegments[0];
-    
-    for (let i = 1; i < this.freeSegments.length; i++) {
-      const next = this.freeSegments[i];
-      if (current.startIndex + current.length === next.startIndex) {
-        // Merge
-        current.length += next.length;
-      } else {
-        // Can't merge, save current and move to next
-        merged.push(current);
-        current = next;
-      }
-    }
-    merged.push(current);
-    
-    this.freeSegments = merged;
-  }
 
   /**
    * Get statistics about the trail system
@@ -342,7 +292,6 @@ export class PooledTrailSystem {
     activeTrails: number;
     totalCapacity: number;
     usedPoints: number;
-    freeSegments: number;
   } {
     let usedPoints = 0;
     this.trails.forEach(trail => {
@@ -353,7 +302,6 @@ export class PooledTrailSystem {
       activeTrails: this.trails.size,
       totalCapacity: this.MAX_TOTAL_POINTS,
       usedPoints,
-      freeSegments: this.freeSegments.length,
     };
   }
 }

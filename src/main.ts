@@ -39,6 +39,7 @@ import { Inspector } from './ui/Inspector';
 import { SandboxControls } from './ui/sandbox/SandboxControls';
 import { DeveloperControls } from './ui/sandbox/DeveloperControls';
 import { ProjectileInstanceManager } from './rendering/ProjectileInstanceManager';
+import { PooledTrailSystem } from './rendering/PooledTrailSystem';
 
 // Essential systems only
 import { CameraController, CameraMode } from './camera/CameraController';
@@ -1579,6 +1580,9 @@ function animate() {
         }
       }
     }
+    
+    // Update pooled trail system for all trails
+    PooledTrailSystem.getInstance(scene).update();
   }
 
   // Update interception system and other systems

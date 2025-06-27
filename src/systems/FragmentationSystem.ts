@@ -192,7 +192,7 @@ export class FragmentationSystem {
     const coneRadius = Math.tan(coneAngleRad) * coneLength;
 
     const geometry = new THREE.ConeGeometry(coneRadius, coneLength, 16, 1, true);
-    const material = new THREE.MeshBasicMaterial({
+    const material = MaterialCache.getInstance().getMeshBasicMaterial({
       color: 0xff6600,
       transparent: true,
       opacity: 0.3,
@@ -216,7 +216,7 @@ export class FragmentationSystem {
       if (material.opacity <= 0) {
         this.scene.remove(cone);
         geometry.dispose();
-        material.dispose();
+        // Don't dispose cached material
         return;
       }
       requestAnimationFrame(fadeOut);
