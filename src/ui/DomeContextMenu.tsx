@@ -362,6 +362,11 @@ export const DomeContextMenu: React.FC<DomeContextMenuProps> = ({
           </div>
 
           <div className="stat-row">
+            <span className="stat-label">Reload Time</span>
+            <span className="stat-value">{(batteryConfig.reloadTime / 1000).toFixed(1)}s</span>
+          </div>
+
+          <div className="stat-row">
             <span className="stat-label">Loaded Tubes</span>
             <span className="stat-value">
               {batteryStats.loadedTubes}/{batteryStats.totalTubes}
@@ -431,7 +436,16 @@ export const DomeContextMenu: React.FC<DomeContextMenuProps> = ({
               handleUpgrade();
             }}
             disabled={placementInfo.level >= 5 || !placementSystem.canUpgradeBattery(batteryId)}
-            title={placementInfo.level >= 5 ? 'Maximum level reached' : ''}
+            title={
+              placementInfo.level >= 5
+                ? 'Maximum level reached'
+                : `Level ${placementInfo.level + 1} Benefits:\n` +
+                  `• Reload: ${(3.0 - placementInfo.level * 0.4).toFixed(1)}s (from ${(3.0 - (placementInfo.level - 1) * 0.4).toFixed(1)}s)\n` +
+                  `• Range: ${1000 + placementInfo.level * 100}m (from ${1000 + (placementInfo.level - 1) * 100}m)\n` +
+                  `• Speed: ${250 + placementInfo.level * 30} m/s (from ${250 + (placementInfo.level - 1) * 30} m/s)\n` +
+                  `• Accuracy: ${(95 + placementInfo.level).toFixed(0)}% (from ${(95 + placementInfo.level - 1).toFixed(0)}%)\n` +
+                  `• Health: ${100 + placementInfo.level * 50} (from ${100 + (placementInfo.level - 1) * 50})`
+            }
           >
             Upgrade Battery
             {placementInfo.level >= 5 ? (

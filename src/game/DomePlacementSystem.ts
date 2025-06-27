@@ -457,9 +457,9 @@ export class DomePlacementSystem {
       position: adjustedPosition,
       maxRange: 1000 + (level - 1) * 100, // Extended to cover entire city (900m radius) plus buffer
       minRange: 10,
-      reloadTime: 3000 - (level - 1) * 200, // Faster reload with level
+      reloadTime: 3000 - (level - 1) * 400, // Much faster reload with level (3s → 1.4s at max)
       interceptorSpeed: 250 + (level - 1) * 30, // Faster interceptors for extended range
-      launcherCount: 20 + (level - 1) * 5, // More launchers with level
+      launcherCount: 20, // Fixed 20 tubes based on physical model
       successRate: 0.95 + (level - 1) * 0.01, // Better accuracy with level
       maxHealth: 100 + (level - 1) * 50, // More health with level
       useInstancedRendering: this.useInstancedRendering, // Pass the flag
