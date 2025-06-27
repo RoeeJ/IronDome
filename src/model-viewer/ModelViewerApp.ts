@@ -198,6 +198,13 @@ export class ModelViewerApp {
       const originalCenter = originalBox.getCenter(new THREE.Vector3());
       const originalSize = originalBox.getSize(new THREE.Vector3());
       
+      // Store original dimensions for display
+      const originalDimensions = {
+        width: originalSize.x,
+        height: originalSize.y,
+        depth: originalSize.z
+      };
+      
       // Apply config scale if specified
       if (config.scale) {
         model.scale.setScalar(config.scale);
@@ -243,6 +250,9 @@ export class ModelViewerApp {
       const finalSize = finalBox.getSize(new THREE.Vector3());
       const finalCenter = finalBox.getCenter(new THREE.Vector3());
       
+      // Update dimensions display
+      this.updateDimensions(originalDimensions, finalSize, totalScale);
+      
       // Set camera to view the model nicely
       const distance = Math.max(finalSize.x, finalSize.y, finalSize.z) * 2.5;
       this.orbitRadius = distance;
@@ -270,6 +280,30 @@ export class ModelViewerApp {
     document.getElementById('stat-textures')!.textContent = info.textures.toString();
     document.getElementById('stat-materials')!.textContent = info.materials.toString();
     document.getElementById('stat-size')!.textContent = info.memoryEstimate;
+  }
+  
+  private updateDimensions(original: {width: number, height: number, depth: number}, final: THREE.Vector3, scale: number): void {
+    // Display original dimensions with 3 decimal places
+    document.getElementById('stat-width')!.textContent = `${original.width.toFixed(3)} units`;
+    document.getElementById('stat-height')!.textContent = `${original.height.toFixed(3)} units`;
+    document.getElementById('stat-depth')!.textContent = `${original.depth.toFixed(3)} units`;
+    document.getElementById('stat-scale')!.textContent = `${scale.toFixed(6)}`;
+    
+    // Log detailed information to console
+    console.log('Model Dimensions:', {
+      original: {
+        width: original.width,
+        height: original.height,
+        depth: original.depth,
+      },
+      scaled: {
+        width: final.x,
+        height: final.y,
+        depth: final.z,
+      },
+      scale: scale,
+      modelId: this.currentModelConfig?.id
+    });
   }
   
   private showLoading(): void {

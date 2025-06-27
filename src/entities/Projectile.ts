@@ -118,6 +118,18 @@ export class Projectile {
     this.batteryPosition = batteryPosition;
     this.useInstancing = useInstancing;
     this.instanceManager = instanceManager;
+    
+    // Optional debug logging for interceptor launch positions
+    if (isInterceptor && batteryPosition && (window as any).__debugLaunchPositions) {
+      debug.module('Projectile').log('Interceptor created:', {
+        id: this.id,
+        position: position,
+        batteryPosition: batteryPosition,
+        distanceFromBattery: position.distanceTo(batteryPosition),
+        velocity: velocity,
+        speed: velocity.length()
+      });
+    }
 
     // Create mesh using missile model factory or instancing
     if (useInstancing && instanceManager) {
@@ -256,15 +268,18 @@ export class Projectile {
 
         // Check distance to battery
         const distanceToBattery = landingPos.distanceTo(this.batteryPosition);
-        const dangerRadius = 15; // Self-destruct if landing within 15m of battery
+        const dangerRadius = 10; // Self-destruct if landing within 10m of battery
+        
+        // Also check current distance to prevent immediate self-destruct on launch
+        const currentDistanceToBattery = position.distanceTo(this.batteryPosition);
 
-        if (distanceToBattery < dangerRadius && position.y < 50) {
-          // Only when low altitude
+        if (distanceToBattery < dangerRadius && position.y < 50 && currentDistanceToBattery > 5) {
+          // Only when low altitude and not just launched
           debug.category(
             'Projectile',
-            `Interceptor self-destructing to protect battery (${distanceToBattery.toFixed(
+            `Interceptor self-destructing to protect battery (landing ${distanceToBattery.toFixed(
               1
-            )}m from battery)`
+            )}m from battery, currently ${currentDistanceToBattery.toFixed(1)}m away)`
           );
 
           // Trigger detonation
@@ -571,10 +586,10 @@ export class Projectile {
 
     // Check minimum travel distance before guidance kicks in
     const distanceTraveled = this.proximityFuse?.getDistanceTraveled() || 0;
-    const minGuidanceDistance = 15; // Don't guide for first 15 meters
+    const minGuidanceDistance = 30; // Don't guide for first 30 meters to clear battery
     if (distanceTraveled < minGuidanceDistance && !this.isReEngaging) {
-      // Just orient the missile during launch phase
-      this.orientMissile(currentVelocity);
+      // During launch phase, don't apply any guidance corrections
+      // The interceptor will continue on its initial launch trajectory
       return;
     }
 

@@ -17,6 +17,7 @@ import { GeometryFactory } from '../utils/GeometryFactory';
 import { EventEmitter } from 'events';
 import { ExplosionManager, ExplosionType } from '../systems/ExplosionManager';
 import { SoundSystem } from '../systems/SoundSystem';
+import { BATTERY_TUBE_CONFIG, getTubeVectors } from '../../config/IronDome';
 
 export interface BatteryConfig {
   position: THREE.Vector3;
@@ -39,6 +40,10 @@ interface LauncherTube {
   isLoaded: boolean;
   lastFiredTime: number;
   missile?: THREE.Mesh;
+  position: THREE.Vector3;  // Tube start position (launch point)
+  endPosition: THREE.Vector3;  // Tube end position (for smoke effects)
+  direction: THREE.Vector3;  // Launch direction
+  xMarker?: THREE.Group;  // X marker for empty tubes
 }
 
 export class IronDomeBattery extends EventEmitter {
@@ -121,17 +126,44 @@ export class IronDomeBattery extends EventEmitter {
   private createBase(): void {
     // If using instanced rendering, create invisible hitbox for raycasting
     if (this.useInstancedRendering) {
-      const hitboxGeometry = GeometryFactory.getInstance().getBox(22.5, 22.5, 22.5);
+      // Original OBJ model dimensions from model viewer:
+      // Width (X): 24.518 units
+      // Height (Y): 22.465 units
+      // Depth (Z): 16.500 units
+      // The model appears at its original size in game with instanced rendering
+      
+      const modelWidth = 24.518;
+      const modelHeight = 22.465;
+      const modelDepth = 16.500;
+      
+      const hitboxGeometry = GeometryFactory.getInstance().getBox(
+        modelWidth * 1.1,  // Add 10% margin for easier targeting
+        modelHeight,
+        modelDepth * 1.1
+      );
       const hitboxMaterial = MaterialCache.getInstance().getMeshBasicMaterial({
         visible: false,
         transparent: true,
         opacity: 0,
       });
       const hitbox = new THREE.Mesh(hitboxGeometry, hitboxMaterial);
-      hitbox.position.y = 6;
+      hitbox.position.y = modelHeight / 2; // Center of the model
       hitbox.userData.isHitbox = true;
       hitbox.userData.battery = this; // Store reference to battery
+      hitbox.name = 'instanced-hitbox';
       this.group.add(hitbox);
+      
+      console.log('Created instanced rendering hitbox with actual OBJ dimensions:', {
+        width: modelWidth * 1.1,
+        height: modelHeight,
+        depth: modelDepth * 1.1,
+        position: hitbox.position,
+        originalDimensions: {
+          width: modelWidth,
+          height: modelHeight,
+          depth: modelDepth
+        }
+      });
       return;
     }
 
@@ -171,20 +203,74 @@ export class IronDomeBattery extends EventEmitter {
     });
   }
 
+  private transformTubePosition(position: THREE.Vector3): THREE.Vector3 {
+    // The tube positions from the config are in world space where:
+    // 1. The model is scaled to height 15 in the editor
+    // 2. The model's bottom is at Y=0
+    // 
+    // In our game with instanced rendering:
+    // 1. The model appears at its original size (height 22.465)
+    // 2. We need to scale the tube positions to match
+    //
+    // Scale factor: 22.465 / 15 = 1.4977
+    
+    if (this.useInstancedRendering) {
+      // For instanced rendering, scale up from editor height (15) to actual model height (22.465)
+      const editorHeight = 15;
+      const actualModelHeight = 22.465;
+      const scaleRatio = actualModelHeight / editorHeight;
+      
+      const transformed = position.clone();
+      transformed.multiplyScalar(scaleRatio);
+      
+      return transformed;
+    } else {
+      // For non-instanced rendering, scale down to height 4
+      const editorTargetHeight = 15;
+      const gameTargetHeight = 4;
+      const scaleRatio = gameTargetHeight / editorTargetHeight;
+      
+      const transformed = position.clone();
+      transformed.multiplyScalar(scaleRatio);
+      
+      return transformed;
+    }
+  }
+
   private createLauncher(): THREE.Group {
     const launcherGroup = new THREE.Group();
+
+    // Limit to 20 tubes based on physical model
+    const actualTubeCount = Math.min(this.config.launcherCount, 20);
 
     // If using instanced rendering, create minimal launcher data without meshes
     if (this.useInstancedRendering) {
       // Create launcher tube data without visual meshes
-      for (let i = 0; i < this.config.launcherCount; i++) {
+      for (let i = 0; i < actualTubeCount; i++) {
+        const tubeConfig = getTubeVectors(i);
+        if (!tubeConfig) continue;
+
         const launcherTube: LauncherTube = {
           index: i,
           mesh: new THREE.Mesh(), // Dummy mesh for compatibility
           isLoaded: true,
           lastFiredTime: -this.config.reloadTime, // Initialize as "already reloaded" so they're ready immediately
+          position: this.transformTubePosition(tubeConfig.start),
+          endPosition: this.transformTubePosition(tubeConfig.end),
+          direction: tubeConfig.direction, // Direction doesn't need transformation
         };
         this.launcherTubes.push(launcherTube);
+      }
+      
+      // Log tube positions for debugging
+      console.log('Launcher tubes created:', this.launcherTubes.length);
+      if (this.launcherTubes.length > 0) {
+        const firstTube = this.launcherTubes[0];
+        console.log('First tube positions:', {
+          start: { x: firstTube.position.x.toFixed(2), y: firstTube.position.y.toFixed(2), z: firstTube.position.z.toFixed(2) },
+          end: { x: firstTube.endPosition.x.toFixed(2), y: firstTube.endPosition.y.toFixed(2), z: firstTube.endPosition.z.toFixed(2) },
+          direction: firstTube.direction
+        });
       }
     } else {
       // Create full visual meshes for non-instanced rendering
@@ -195,23 +281,43 @@ export class IronDomeBattery extends EventEmitter {
         metalness: 0.7,
       });
 
-      // Create launch tubes in a circular pattern
-      for (let i = 0; i < this.config.launcherCount; i++) {
-        const angle = (i / this.config.launcherCount) * Math.PI * 2;
+      // Create launch tubes based on actual tube positions
+      for (let i = 0; i < actualTubeCount; i++) {
+        const tubeConfig = getTubeVectors(i);
+        if (!tubeConfig) continue;
+
         const tube = new THREE.Mesh(tubeGeometry, tubeMaterial);
-        tube.position.x = Math.cos(angle) * 0.8;
-        tube.position.z = Math.sin(angle) * 0.8;
-        tube.position.y = 0;
-        tube.rotation.z = Math.PI / 8; // Slightly angled outward
+        
+        // Transform positions
+        const transformedStart = this.transformTubePosition(tubeConfig.start);
+        const transformedEnd = this.transformTubePosition(tubeConfig.end);
+        
+        // Position tube at midpoint between start and end
+        const midpoint = transformedStart.clone().add(transformedEnd).multiplyScalar(0.5);
+        tube.position.copy(midpoint);
+        
+        // Calculate tube length based on transformed positions
+        const tubeLength = transformedStart.distanceTo(transformedEnd);
+        tube.scale.y = tubeLength / 3; // Original geometry is 3 units tall
+        
+        // Orient tube along its direction
+        const quaternion = new THREE.Quaternion();
+        const up = new THREE.Vector3(0, 1, 0);
+        quaternion.setFromUnitVectors(up, tubeConfig.direction.clone().normalize());
+        tube.quaternion.copy(quaternion);
+        
         tube.castShadow = true;
         launcherGroup.add(tube);
 
-        // Create launcher tube data
+        // Create launcher tube data with transformed positions
         const launcherTube: LauncherTube = {
           index: i,
           mesh: tube,
           isLoaded: true,
           lastFiredTime: -this.config.reloadTime, // Initialize as "already reloaded" so they're ready immediately
+          position: transformedStart,
+          endPosition: transformedEnd,
+          direction: tubeConfig.direction,
         };
 
         // Add visual missile in tube
@@ -231,10 +337,53 @@ export class IronDomeBattery extends EventEmitter {
       launcherGroup.add(mount);
     }
 
-    launcherGroup.position.y = 2.5;
+    // Don't offset launcher group - tubes have absolute positions
     this.group.add(launcherGroup);
 
     return launcherGroup;
+  }
+
+  private createXMarker(direction: THREE.Vector3): THREE.Group {
+    const group = new THREE.Group();
+    const material = MaterialCache.getInstance().getMeshEmissiveMaterial({ 
+      color: 0xff0000,
+      emissive: 0xff0000,
+      emissiveIntensity: 0.8,
+    });
+    
+    // Create two crossing bars for X - larger for better visibility
+    const thickness = 0.1;
+    const length = 1.2;
+    
+    const bar1 = new THREE.Mesh(
+      GeometryFactory.getInstance().getBox(length, thickness, thickness),
+      material
+    );
+    bar1.rotation.z = Math.PI / 4;
+    
+    const bar2 = new THREE.Mesh(
+      GeometryFactory.getInstance().getBox(length, thickness, thickness),
+      material
+    );
+    bar2.rotation.z = -Math.PI / 4;
+    
+    group.add(bar1);
+    group.add(bar2);
+    
+    // Orient the X to be perpendicular to the tube direction (flat against the tube opening)
+    const normalizedDirection = direction.clone().normalize();
+    const defaultNormal = new THREE.Vector3(0, 0, 1); // Default normal of the X plane
+    
+    // Calculate the rotation needed to align the default normal with the tube direction
+    const quaternion = new THREE.Quaternion();
+    quaternion.setFromUnitVectors(defaultNormal, normalizedDirection);
+    
+    group.quaternion.copy(quaternion);
+    
+    // Offset slightly above the tube opening
+    group.position.y += 0.5;
+    
+    return group;
   }
 
   private createMissileInTube(tube: LauncherTube, parent: THREE.Group): void {
@@ -250,9 +399,17 @@ export class IronDomeBattery extends EventEmitter {
     });
 
     const missile = new THREE.Mesh(missileGeometry, missileMaterial);
-    missile.position.copy(tube.mesh.position);
-    missile.position.y += 0.5; // Position at top of tube
-    missile.rotation.z = tube.mesh.rotation.z;
+    
+    // Position missile at tube end position (bottom, where launch happens)
+    missile.position.copy(tube.endPosition);
+    
+    // Orient missile along reversed tube direction (pointing upward)
+    const quaternion = new THREE.Quaternion();
+    const up = new THREE.Vector3(0, 1, 0);
+    const upwardDirection = tube.direction.clone().negate().normalize();
+    quaternion.setFromUnitVectors(up, upwardDirection);
+    missile.quaternion.copy(quaternion);
+    
     parent.add(missile);
 
     tube.missile = missile;
@@ -313,6 +470,110 @@ export class IronDomeBattery extends EventEmitter {
   
   setInstanceManager(instanceManager: any): void {
     this.instanceManager = instanceManager;
+  }
+  
+  // Public method to enable tube position debugging
+  public enableTubeDebug(): void {
+    this.debugTubePositions();
+    // Also log the first tube for analysis
+    if (this.launcherTubes.length > 0) {
+      const tube = this.launcherTubes[0];
+      console.log('First tube analysis:', {
+        startLocal: tube.position,
+        endLocal: tube.endPosition,
+        batteryPos: this.config.position,
+        startWorld: tube.position.clone().add(this.config.position),
+        endWorld: tube.endPosition.clone().add(this.config.position),
+      });
+    }
+    
+    // Add a visual battery bounds indicator
+    const modelWidth = 24.518 * 1.1;  // Include the 10% margin
+    const modelHeight = 22.465;
+    const modelDepth = 16.500 * 1.1;  // Include the 10% margin
+    
+    const boundGeom = GeometryFactory.getInstance().getBox(modelWidth, modelHeight, modelDepth);
+    const boundMat = MaterialCache.getInstance().getMeshBasicMaterial({ 
+      color: 0x00ffff,
+      wireframe: true,
+      transparent: true,
+      opacity: 0.3
+    });
+    const boundBox = new THREE.Mesh(boundGeom, boundMat);
+    boundBox.position.copy(this.config.position);
+    boundBox.position.y = modelHeight / 2; // Center of the model
+    this.scene.add(boundBox);
+  }
+
+  private recreateLauncherTubes(): void {
+    console.log('Recreating launcher tubes after model load');
+    
+    // Clear existing tubes
+    this.launcherTubes = [];
+    
+    // Remove all children from launcher group
+    while (this.launcherGroup.children.length > 0) {
+      const child = this.launcherGroup.children[0];
+      this.launcherGroup.remove(child);
+      if (child instanceof THREE.Mesh) {
+        // Don't dispose geometry - it's from GeometryFactory
+        // Don't dispose materials - they're from MaterialCache
+      }
+    }
+    
+    // Recreate launcher group with correct transformations
+    const tempGroup = this.createLauncher();
+    
+    // Move all children from temp group to existing launcher group
+    while (tempGroup.children.length > 0) {
+      const child = tempGroup.children[0];
+      tempGroup.remove(child);
+      this.launcherGroup.add(child);
+    }
+    
+    // Keep launcher group hidden when using OBJ model
+    this.launcherGroup.visible = false;
+    
+    console.log('Recreated launcher tubes - hidden for OBJ model');
+  }
+
+  // Debug method to visualize tube positions
+  private debugTubePositions(): void {
+    console.log('Debugging tube positions');
+    
+    this.launcherTubes.forEach((tube, index) => {
+      // Start position marker (green)
+      const startGeom = GeometryFactory.getInstance().getSphere(0.3, 16, 16);
+      const startMat = MaterialCache.getInstance().getMeshBasicMaterial({ 
+        color: 0x00ff00,
+        emissive: 0x00ff00,
+        emissiveIntensity: 0.5
+      });
+      const startMarker = new THREE.Mesh(startGeom, startMat);
+      startMarker.position.copy(tube.position);
+      this.launcherGroup.add(startMarker);
+      
+      // End position marker (red)
+      const endGeom = GeometryFactory.getInstance().getSphere(0.3, 16, 16);
+      const endMat = MaterialCache.getInstance().getMeshBasicMaterial({ 
+        color: 0xff0000,
+        emissive: 0xff0000,
+        emissiveIntensity: 0.5
+      });
+      const endMarker = new THREE.Mesh(endGeom, endMat);
+      endMarker.position.copy(tube.endPosition);
+      this.launcherGroup.add(endMarker);
+      
+      // Line between them (yellow)
+      const points = [tube.position, tube.endPosition];
+      const lineGeom = new THREE.BufferGeometry().setFromPoints(points);
+      const lineMat = MaterialCache.getInstance().getLineMaterial({ color: 0xffff00 });
+      const line = new THREE.Line(lineGeom, lineMat);
+      this.launcherGroup.add(line);
+      
+      // Add text label
+      console.log(`Tube ${index}: start=${tube.position.x.toFixed(2)},${tube.position.y.toFixed(2)},${tube.position.z.toFixed(2)} end=${tube.endPosition.x.toFixed(2)},${tube.endPosition.y.toFixed(2)},${tube.endPosition.z.toFixed(2)}`);
+    });
   }
 
   canIntercept(threat: Threat): boolean {
@@ -723,9 +984,31 @@ export class IronDomeBattery extends EventEmitter {
       return null;
     }
 
-    // Get launch position with offset
-    const tubeWorldPos = this.config.position.clone();
-    tubeWorldPos.add(this.launchOffset);
+    // Get launch position from the specific tube
+    // In the tube editor, "start" is the top (where interceptors launch from)
+    // "end" is the bottom (where smoke effects appear)
+    const tubeWorldPos = tube.position.clone().add(this.config.position);
+    
+    // The direction in the editor points from top to bottom, but we need to fire upward
+    // So we reverse it
+    const actualLaunchDirection = tube.direction.clone().negate();
+    
+    // Add offset along the actual launch direction to ensure interceptor spawns outside battery
+    const launchOffset = actualLaunchDirection.clone().multiplyScalar(1.5); // 1.5m offset along launch direction
+    tubeWorldPos.add(launchOffset);
+    
+    // Optional debug logging (enable if needed)
+    if ((window as any).__debugLaunchPositions) {
+      console.log('Launch debug:', {
+        tubeIndex: tube.index,
+        tubeEndPos: { x: tube.endPosition.x.toFixed(2), y: tube.endPosition.y.toFixed(2), z: tube.endPosition.z.toFixed(2) },
+        batteryPos: { x: this.config.position.x.toFixed(2), y: this.config.position.y.toFixed(2), z: this.config.position.z.toFixed(2) },
+        groupPos: { x: this.group.position.x.toFixed(2), y: this.group.position.y.toFixed(2), z: this.group.position.z.toFixed(2) },
+        tubeWorldPos: { x: tubeWorldPos.x.toFixed(2), y: tubeWorldPos.y.toFixed(2), z: tubeWorldPos.z.toFixed(2) },
+        distanceFromBattery: tubeWorldPos.distanceTo(this.config.position).toFixed(2),
+        actualLaunchDirection: { x: actualLaunchDirection.x.toFixed(2), y: actualLaunchDirection.y.toFixed(2), z: actualLaunchDirection.z.toFixed(2) }
+      });
+    }
 
     // Determine if this interceptor will fail
     let failureMode: 'none' | 'motor' | 'guidance' | 'premature' = 'none';
@@ -754,12 +1037,12 @@ export class IronDomeBattery extends EventEmitter {
     // Create interceptor with adjusted initial velocity based on launch direction
     let velocity = UnifiedTrajectorySystem.getVelocityVector(launchParams);
 
-    // Blend calculated velocity with launch direction for more realistic launch
-    // This ensures the missile initially follows the launcher's direction
+    // Blend calculated velocity with tube's launch direction for more realistic launch
+    // This ensures the missile initially follows the tube's direction
     const launchSpeed = velocity.length();
-    const launchVelocity = this.launchDirection.clone().multiplyScalar(launchSpeed);
+    const launchVelocity = actualLaunchDirection.clone().multiplyScalar(launchSpeed);
 
-    // Blend: 70% launch direction, 30% calculated direction for first moments
+    // Blend: 70% tube direction, 30% calculated direction for first moments
     velocity = launchVelocity.multiplyScalar(0.7).add(velocity.multiplyScalar(0.3));
     velocity.normalize().multiplyScalar(launchSpeed);
 
@@ -792,6 +1075,8 @@ export class IronDomeBattery extends EventEmitter {
       (tube.missile.material as THREE.Material).dispose();
       tube.missile = undefined;
     }
+    
+    // X marker will be created in the update loop when needed
 
     // Animate launcher
     this.animateLaunch(tube);
@@ -800,26 +1085,27 @@ export class IronDomeBattery extends EventEmitter {
   }
 
   private animateLaunch(tube: LauncherTube): void {
-    // Tube recoil animation
-    const originalY = tube.mesh.position.y;
-    const originalRotation = tube.mesh.rotation.z;
-    tube.mesh.position.y -= 0.15;
-    tube.mesh.rotation.z += 0.05; // Slight rotation from recoil
+    // Tube recoil animation only if mesh exists
+    if (tube.mesh && !this.useInstancedRendering) {
+      const originalPos = tube.mesh.position.clone();
+      // Move tube back along its direction for recoil
+      const recoilOffset = tube.direction.clone().multiplyScalar(-0.15);
+      tube.mesh.position.add(recoilOffset);
 
-    setTimeout(() => {
-      tube.mesh.position.y = originalY;
-      tube.mesh.rotation.z = originalRotation;
-    }, 300);
+      setTimeout(() => {
+        tube.mesh.position.copy(originalPos);
+      }, 300);
+    }
 
-    // Get launch position and direction
-    const tubeWorldPos = this.config.position.clone();
-    tubeWorldPos.add(this.launchOffset);
+    // Get launch position at tube end for smoke effects (where the missile actually launches from)
+    // Remember: in editor terminology, "end" is the bottom where we launch from
+    const smokeWorldPos = tube.endPosition.clone().add(this.config.position);
 
-    // Use configured launch direction
-    const launchDirection = this.launchDirection.clone();
+    // Use tube's specific launch direction (reversed since editor direction points downward)
+    const launchDirection = tube.direction.clone().negate();
 
-    // Create comprehensive launch effects
-    this.launchEffects.createLaunchEffect(tubeWorldPos, launchDirection, {
+    // Create comprehensive launch effects at tube end
+    this.launchEffects.createLaunchEffect(smokeWorldPos, launchDirection, {
       smokeCloudSize: 4,
       smokeDuration: 2000,
       flashIntensity: 6,
@@ -885,6 +1171,117 @@ export class IronDomeBattery extends EventEmitter {
   getGroup(): THREE.Group {
     return this.group;
   }
+  
+  // Add debug visualization for troubleshooting
+  addDebugVisualization(): void {
+    // Clear any existing debug visualizations
+    const existingDebug = [];
+    this.group.traverse(child => {
+      if (child.userData.isDebugVisualization) {
+        existingDebug.push(child);
+      }
+    });
+    existingDebug.forEach(child => this.group.remove(child));
+    
+    // Log all hitboxes found
+    const hitboxes = [];
+    this.group.traverse(child => {
+      if (child.userData.isHitbox) {
+        hitboxes.push({
+          name: child.name,
+          position: child.position,
+          scale: child.scale,
+          geometry: child.geometry?.parameters || 'unknown'
+        });
+      }
+    });
+    console.log('Found hitboxes:', hitboxes);
+    
+    // Find the actual hitbox to visualize its bounds - check all possible names
+    let hitbox = this.group.getObjectByName('battery-hitbox-accurate'); // New accurate hitbox
+    if (!hitbox) {
+      hitbox = this.group.getObjectByName('battery-hitbox'); // Regular hitbox
+    }
+    
+    if (hitbox && hitbox instanceof THREE.Mesh && hitbox.geometry instanceof THREE.BoxGeometry) {
+      // Get the actual hitbox dimensions
+      const params = hitbox.geometry.parameters;
+      console.log(`Using ${hitbox.name} with params:`, params);
+      const boundGeom = GeometryFactory.getInstance().getBox(params.width, params.height, params.depth);
+      const boundMat = MaterialCache.getInstance().getMeshBasicMaterial({ 
+        color: 0x00ffff,
+        wireframe: true,
+        transparent: true,
+        opacity: 0.5
+      });
+      const boundBox = new THREE.Mesh(boundGeom, boundMat);
+      boundBox.position.copy(hitbox.position);
+      boundBox.userData.isDebugVisualization = true;
+      this.group.add(boundBox);
+    } else {
+      // Check for instanced hitbox
+      const instancedHitbox = this.group.getObjectByName('instanced-hitbox');
+      if (instancedHitbox && instancedHitbox instanceof THREE.Mesh && instancedHitbox.geometry instanceof THREE.BoxGeometry) {
+        console.log('Using instanced hitbox');
+        const params = instancedHitbox.geometry.parameters;
+        const boundGeom = GeometryFactory.getInstance().getBox(params.width, params.height, params.depth);
+        const boundMat = MaterialCache.getInstance().getMeshBasicMaterial({ 
+          color: 0x00ff00, // Green for instanced hitbox
+          wireframe: true,
+          transparent: true,
+          opacity: 0.5
+        });
+        const boundBox = new THREE.Mesh(boundGeom, boundMat);
+        boundBox.position.copy(instancedHitbox.position);
+        this.group.add(boundBox);
+      }
+      
+      // Check for old procedural hitbox
+      const procHitbox = this.group.getObjectByName('procedural-hitbox');
+      if (procHitbox && procHitbox instanceof THREE.Mesh && procHitbox.geometry instanceof THREE.BoxGeometry) {
+        console.log('WARNING: Still using old procedural hitbox!');
+        const params = procHitbox.geometry.parameters;
+        const boundGeom = GeometryFactory.getInstance().getBox(params.width, params.height, params.depth);
+        const boundMat = MaterialCache.getInstance().getMeshBasicMaterial({ 
+          color: 0xff0000, // Red to indicate wrong hitbox
+          wireframe: true,
+          transparent: true,
+          opacity: 0.5
+        });
+        const boundBox = new THREE.Mesh(boundGeom, boundMat);
+        boundBox.position.copy(procHitbox.position);
+        this.group.add(boundBox);
+      }
+    }
+    
+    // Add spheres at each tube position
+    this.launcherTubes.forEach((tube, index) => {
+      // End position (launch point) - RED
+      const endSphere = new THREE.Mesh(
+        GeometryFactory.getInstance().getSphere(0.3, 16, 16),
+        MaterialCache.getInstance().getMeshBasicMaterial({ color: 0xff0000 })
+      );
+      endSphere.position.copy(tube.endPosition);
+      this.group.add(endSphere);
+      
+      // Start position (top) - GREEN
+      const startSphere = new THREE.Mesh(
+        GeometryFactory.getInstance().getSphere(0.3, 16, 16),
+        MaterialCache.getInstance().getMeshBasicMaterial({ color: 0x00ff00 })
+      );
+      startSphere.position.copy(tube.position);
+      this.group.add(startSphere);
+      
+      // Direction arrow
+      const arrow = new THREE.ArrowHelper(
+        tube.direction.clone().negate(), // Show upward direction
+        tube.endPosition,
+        2,
+        0xffff00
+      );
+      this.group.add(arrow);
+    });
+  }
 
   getConfig(): BatteryConfig {
     return { ...this.config };
@@ -904,6 +1301,21 @@ export class IronDomeBattery extends EventEmitter {
         percent: this.currentHealth / this.maxHealth,
       },
     };
+  }
+  
+  getBounds(): THREE.Box3 {
+    const box = new THREE.Box3();
+    
+    // Try to get bounds from the hitbox first
+    const hitbox = this.group.getObjectByName('battery-hitbox');
+    if (hitbox && hitbox instanceof THREE.Mesh) {
+      box.setFromObject(hitbox);
+    } else {
+      // Fallback to group bounds
+      box.setFromObject(this.group);
+    }
+    
+    return box;
   }
 
   setResourceManagement(enabled: boolean): void {
@@ -950,9 +1362,45 @@ export class IronDomeBattery extends EventEmitter {
       if (tube.missile) {
         tube.missile.visible = true;
       }
+      
+      // Remove X marker if it exists
+      if (tube.xMarker) {
+        this.launcherGroup.remove(tube.xMarker);
+        tube.xMarker.traverse(child => {
+          if (child instanceof THREE.Mesh) {
+            child.geometry.dispose();
+            // Don't dispose material - it's from MaterialCache
+          }
+        });
+        tube.xMarker = undefined;
+      }
     });
     
     debug.log(`Battery interceptor stock reset - all ${this.launcherTubes.length} tubes ready`);
+  }
+  
+  // Initialize X markers for empty tubes (call this after battery creation if needed)
+  initializeEmptyTubes(emptyTubeIndices: number[] = []): void {
+    this.launcherTubes.forEach((tube, index) => {
+      if (emptyTubeIndices.includes(index) || emptyTubeIndices.length === 0 && !tube.isLoaded) {
+        tube.isLoaded = false;
+        tube.lastFiredTime = Date.now();
+        
+        // Hide missile if it exists
+        if (tube.missile) {
+          tube.missile.visible = false;
+        }
+        
+        // Create X marker
+        if (!tube.xMarker) {
+          tube.xMarker = this.createXMarker(tube.direction);
+          // Position X marker at the top (start) of the tube where interceptors launch from
+          tube.xMarker.position.copy(tube.position);
+          // Add to main group for visibility with instanced rendering
+          this.group.add(tube.xMarker);
+        }
+      }
+    });
   }
 
   private createHealthBar(): void {
@@ -1164,17 +1612,14 @@ export class IronDomeBattery extends EventEmitter {
   }
 
   private loadBatteryModel(): void {
-    // Skip loading OBJ model if using instanced rendering
-    if (this.useInstancedRendering) {
-      debug.log('Skipping OBJ model load for instanced rendering');
-      return;
-    }
-
+    // Even with instanced rendering, we need to load the model once to get accurate dimensions
+    console.log('Starting OBJ model load...', { useInstancedRendering: this.useInstancedRendering });
     const loader = new OBJLoader();
     loader.load(
       '/assets/Battery.obj',
       object => {
         // Model loaded successfully
+        console.log('OBJ model loaded successfully');
         debug.asset('loading', 'battery', { object });
 
         // Log what we loaded
@@ -1194,6 +1639,13 @@ export class IronDomeBattery extends EventEmitter {
         const box = new THREE.Box3().setFromObject(object);
         const size = box.getSize(new THREE.Vector3());
         debug.asset('loading', 'battery-size', { size });
+        
+        // Log original tube positions for debugging
+        const sampleTube = getTubeVectors(0);
+        if (sampleTube) {
+          console.log('Original tube 0 position:', sampleTube.start);
+          console.log('Model original height:', size.y);
+        }
 
         // Check if model has valid size
         if (size.x === 0 || size.y === 0 || size.z === 0) {
@@ -1203,12 +1655,11 @@ export class IronDomeBattery extends EventEmitter {
 
         // If model is too small or too large, scale it
         const targetHeight = 4;
-        let scaleFactor = 1;
-        if (size.y < 0.1 || size.y > 100) {
-          scaleFactor = targetHeight / size.y;
+        let scaleFactor = targetHeight / size.y;  // Always calculate scale factor
+        if (Math.abs(scaleFactor - 1) > 0.01) {  // Only apply if significantly different from 1
           object.scale.set(scaleFactor, scaleFactor, scaleFactor);
         }
-        debug.asset('loading', 'battery-scale', { scaleFactor });
+        debug.asset('loading', 'battery-scale', { scaleFactor, originalHeight: size.y, targetHeight });
 
         // Center the model at origin BEFORE optimization
         box.setFromObject(object);
@@ -1216,6 +1667,8 @@ export class IronDomeBattery extends EventEmitter {
         const minY = box.min.y;
         object.position.set(-center.x, -minY, -center.z); // Place on ground
         debug.asset('loading', 'battery-position-before-opt', { position: object.position, minY });
+        
+        // Model transformations are now handled naturally by the group hierarchy
 
         // Analyze model complexity before optimization
         const beforeStats = GeometryOptimizer.analyzeComplexity(object);
@@ -1255,24 +1708,149 @@ export class IronDomeBattery extends EventEmitter {
           `Triangle reduction: ${beforeStats.totalTriangles} -> ${afterStats.totalTriangles} (${Math.round((1 - afterStats.totalTriangles / beforeStats.totalTriangles) * 100)}% reduction)`
         );
 
-        // Hide procedurally generated base components but keep launcher tubes
+        // Hide ALL procedurally generated components when model loads
         this.group.children.forEach(child => {
-          if (child.userData.isProcedural && child !== this.launcherGroup) {
+          if (child.userData.isProcedural) {
             child.visible = false;
           }
         });
+        
+        // Also hide the launcher group - we'll use the OBJ model's tubes
+        if (this.launcherGroup) {
+          this.launcherGroup.visible = false;
+        }
+        
+        // If using instanced rendering, we only need the dimensions, not the visual model
+        if (this.useInstancedRendering) {
+          // Wait a moment for the model to be fully processed and scaled
+          setTimeout(() => {
+            // Calculate model dimensions for accurate hitbox AFTER all transformations
+            const finalBox = new THREE.Box3().setFromObject(object);
+            const finalSize = finalBox.getSize(new THREE.Vector3());
+            const finalCenter = finalBox.getCenter(new THREE.Vector3());
+            
+            // The model should be scaled to height 4, but we're getting much smaller dimensions
+            // This suggests the scale wasn't applied yet or there's an issue with the measurement
+            // Let's use the known target height and scale proportionally
+            const targetHeight = 4;
+            const currentHeight = finalSize.y;
+            const heightScale = targetHeight / currentHeight;
+            
+            // Apply this scale to get the actual in-game dimensions
+            const actualSize = new THREE.Vector3(
+              finalSize.x * heightScale,
+              targetHeight,
+              finalSize.z * heightScale
+            );
+            
+            console.log('OBJ model dimensions for instanced rendering:', {
+              measuredSize: finalSize,
+              actualSize: actualSize,
+              heightScale: heightScale,
+              objectScale: object.scale,
+              objectPosition: object.position
+            });
+          
+          // Remove the old instanced hitbox
+          const oldHitbox = this.group.getObjectByName('instanced-hitbox');
+          if (oldHitbox) {
+            console.log('Removing old instanced hitbox');
+            this.group.remove(oldHitbox);
+          }
+          
+          // Create accurate hitbox based on actual scaled dimensions
+          const hitboxGeometry = GeometryFactory.getInstance().getBox(
+            actualSize.x * 1.1, // Slightly larger for easier targeting
+            actualSize.y,
+            actualSize.z * 1.1
+          );
+          const hitboxMaterial = MaterialCache.getInstance().getMeshBasicMaterial({
+            visible: false,
+            transparent: true,
+            opacity: 0,
+          });
+          const hitbox = new THREE.Mesh(hitboxGeometry, hitboxMaterial);
+          hitbox.position.y = actualSize.y / 2; // Center vertically with scaled height
+          hitbox.userData.isHitbox = true;
+          hitbox.userData.battery = this;
+          hitbox.name = 'battery-hitbox-accurate';
+          this.group.add(hitbox);
+          
+            console.log('Created accurate hitbox for instanced rendering:', {
+              dimensions: { width: actualSize.x * 1.1, height: actualSize.y, depth: actualSize.z * 1.1 },
+              position: hitbox.position
+            });
+          }, 50); // Small delay to ensure scaling is applied
+          
+          // Don't add the visual model to the scene - instanced renderer handles that
+          return;
+        }
 
-        // Position launcher group above the model
-        this.launcherGroup.position.y = targetHeight;
+        // Wait for next frame to ensure model is fully loaded
+        setTimeout(() => {
+          // Create proper hitbox based on OBJ model dimensions
+          const finalBox = new THREE.Box3().setFromObject(object);
+          const finalSize = finalBox.getSize(new THREE.Vector3());
+          const finalCenter = finalBox.getCenter(new THREE.Vector3());
+        
+        // Create hitbox that matches the OBJ model
+        const hitboxGeometry = GeometryFactory.getInstance().getBox(
+          finalSize.x * 1.2, // Slightly larger for easier targeting
+          finalSize.y,
+          finalSize.z * 1.2
+        );
+        const hitboxMaterial = MaterialCache.getInstance().getMeshBasicMaterial({
+          visible: false,
+          transparent: true,
+          opacity: 0,
+        });
+        const hitbox = new THREE.Mesh(hitboxGeometry, hitboxMaterial);
+        hitbox.position.copy(finalCenter);
+        hitbox.position.y = finalSize.y / 2; // Center vertically
+        hitbox.userData.isHitbox = true;
+        hitbox.userData.battery = this; // Store reference to battery
+        hitbox.name = 'battery-hitbox';
+        this.group.add(hitbox);
 
         // Add the model to the group
         this.group.add(object);
+        
+          console.log('Battery OBJ loaded with dimensions:', {
+            size: finalSize,
+            center: finalCenter,
+            hitboxPos: hitbox.position
+          });
+          
+          // Remove ALL old hitboxes
+          const oldHitboxes = [];
+          this.group.traverse(child => {
+            if (child.userData.isHitbox && child !== hitbox) {
+              oldHitboxes.push(child);
+            }
+          });
+          
+          oldHitboxes.forEach(oldHitbox => {
+            console.log('Removing old hitbox:', oldHitbox.name);
+            this.group.remove(oldHitbox);
+            if (oldHitbox instanceof THREE.Mesh) {
+              // Don't dispose geometry/material - they're from factories
+            }
+          });
+          
+          // Now recreate launcher tubes with proper model dimensions
+          this.recreateLauncherTubes();
+        }, 100); // Wait 100ms to ensure model is fully in scene
 
         // Log model info for debugging
         debug.asset('loading', 'battery', 'Model added to scene');
         debug.asset('loading', 'battery-bounds', {
           bounds: new THREE.Box3().setFromObject(object),
         });
+        
+        // Debug tube positions if in debug mode
+        if ((window as any).__debugTubePositions) {
+          this.debugTubePositions();
+        }
       },
       xhr => {
         // Progress callback
@@ -1393,15 +1971,44 @@ export class IronDomeBattery extends EventEmitter {
     // Ammo management: adjust reload time based on threat environment
     const reloadTimeMultiplier = this.calculateReloadMultiplier(threats);
 
-    // Reload individual tubes
+    // Reload individual tubes and manage X markers
     const currentTime = Date.now();
     this.launcherTubes.forEach(tube => {
       if (!tube.isLoaded) {
         const adjustedReloadTime = this.config.reloadTime * reloadTimeMultiplier;
         const timeSinceFire = currentTime - tube.lastFiredTime;
+        
+        // Create X marker if tube just became empty and doesn't have one
+        if (!tube.xMarker) {
+          tube.xMarker = this.createXMarker(tube.direction);
+          // Position X marker at the top (start) of the tube where interceptors launch from
+          tube.xMarker.position.copy(tube.position);
+          // Add X marker to the main group since launcherGroup might be hidden with instanced rendering
+          this.group.add(tube.xMarker);
+        }
+        
+        // Animate X marker (pulsing)
+        if (tube.xMarker) {
+          const pulse = Math.sin(currentTime * 0.005) * 0.1 + 1.0;
+          tube.xMarker.scale.setScalar(pulse);
+        }
+        
         if (timeSinceFire >= adjustedReloadTime) {
           // Reload this tube
           tube.isLoaded = true;
+          
+          // Remove X marker
+          if (tube.xMarker) {
+            this.group.remove(tube.xMarker);
+            tube.xMarker.traverse(child => {
+              if (child instanceof THREE.Mesh) {
+                // Don't dispose geometry - it's from GeometryFactory
+                // Don't dispose material - it's from MaterialCache
+              }
+            });
+            tube.xMarker = undefined;
+          }
+          
           this.createMissileInTube(tube, this.launcherGroup);
           debug.log(`Tube ${tube.index} reloaded after ${timeSinceFire}ms`);
         }

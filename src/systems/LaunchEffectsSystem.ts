@@ -62,10 +62,10 @@ export class LaunchEffectsSystem {
     // Create smoke cloud
     this.createSmokeCloud(position, direction, fullConfig);
 
-    // Create ground dust only if we have capacity
-    if (this.activeEffects.length < 20) {
-      this.createGroundDust(position, fullConfig);
-    }
+    // Skip ground dust effect - not realistic for vertical missile launches
+    // if (this.activeEffects.length < 20) {
+    //   this.createGroundDust(position, fullConfig);
+    // }
 
     // Create scorch mark
     this.createScorchMark(position, fullConfig);
@@ -76,10 +76,9 @@ export class LaunchEffectsSystem {
     direction: THREE.Vector3,
     config: LaunchEffectConfig
   ): void {
-    // Flash light
+    // Flash light - position at the launch point (no offset)
     const flashLight = new THREE.PointLight(0xffaa00, config.flashIntensity, 20);
     flashLight.position.copy(position);
-    flashLight.position.add(direction.clone().multiplyScalar(2));
     this.scene.add(flashLight);
 
     // Flash geometry - use cached cone geometry
@@ -92,7 +91,6 @@ export class LaunchEffectsSystem {
     });
     const flashMesh = new THREE.Mesh(flashGeometry, flashMaterial);
     flashMesh.position.copy(position);
-    flashMesh.position.add(direction.clone().multiplyScalar(2));
 
     // Orient flash along launch direction
     const quaternion = new THREE.Quaternion();
