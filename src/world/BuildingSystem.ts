@@ -42,8 +42,8 @@ export class BuildingSystem {
   private unlitWindowMesh: THREE.InstancedMesh;
   private windowMatrix = new THREE.Matrix4();
   private windowCount = 0;
-  private maxWindowsPerMesh = 5000; // Increased for larger city (was 2000)
-  private maxWindowsPerBuilding = 200; // Increased limit since we're using instancing efficiently
+  private maxWindowsPerMesh = 50000; // Greatly increased to prevent window concentration
+  private maxWindowsPerBuilding = Infinity; // No limit - let's see if this fixes window concentration
   private litWindowPool: number[] = [];
   private unlitWindowPool: number[] = [];
   private poolExhaustedWarned: boolean = false;
@@ -104,18 +104,23 @@ export class BuildingSystem {
     // Create instanced mesh for lit and unlit windows separately
     const windowGeometry = new THREE.PlaneGeometry(2, 3);
 
-    // Material for lit windows - bright warm glow (SHARED)
-    const litWindowMaterial = MaterialCache.getInstance().getMeshBasicMaterial({
+    // Material for lit windows - bright warm glow with polygon offset
+    const litWindowMaterial = new THREE.MeshBasicMaterial({
       color: 0xffee88, // Brighter warm yellow
-      // No transparency needed - saves render passes
+      polygonOffset: true,
+      polygonOffsetFactor: -1,
+      polygonOffsetUnits: -1,
     });
 
-    // Material for unlit windows - much darker (SHARED)
-    const unlitWindowMaterial = MaterialCache.getInstance().getMeshBasicMaterial({
+    // Material for unlit windows - much darker with polygon offset
+    const unlitWindowMaterial = new THREE.MeshBasicMaterial({
       color: 0x050508, // Almost black with slight blue tint
       transparent: true,
       opacity: 0.3, // Lower opacity for unlit windows
       depthWrite: false,
+      polygonOffset: true,
+      polygonOffsetFactor: -1,
+      polygonOffsetUnits: -1,
     });
 
     // Create separate instanced meshes
@@ -127,7 +132,7 @@ export class BuildingSystem {
     this.litWindowMesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
     this.litWindowMesh.castShadow = false;
     this.litWindowMesh.receiveShadow = false;
-    this.litWindowMesh.renderOrder = 0; // Render opaque first
+    this.litWindowMesh.renderOrder = 100; // Render windows after buildings
 
     this.unlitWindowMesh = new THREE.InstancedMesh(
       windowGeometry,
@@ -137,7 +142,7 @@ export class BuildingSystem {
     this.unlitWindowMesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
     this.unlitWindowMesh.castShadow = false;
     this.unlitWindowMesh.receiveShadow = false;
-    this.unlitWindowMesh.renderOrder = 10; // Render transparent after
+    this.unlitWindowMesh.renderOrder = 101; // Render transparent windows last
 
     debug.log('Window materials setup:', {
       litMaterial: litWindowMaterial,
@@ -177,8 +182,8 @@ export class BuildingSystem {
     const id = `building_${Date.now()}_${Math.random()}`;
     const floors = Math.floor(height / 4); // Assume 4m per floor
 
-    // UNIFORM WINDOWS: Calculate windows based on building surface area, not location
-    const windowDensity = 0.85; // 85% chance of window per possible slot (increased from 70%)
+    // DENSE WINDOWS: Fill buildings with windows since we're using instancing
+    const windowDensity = 1.0; // 100% window density - every slot gets a window
 
     // Create building mesh - CHAINSAW: Use standard geometry
     const geometry = new THREE.BoxGeometry(width, height, depth);
@@ -198,53 +203,34 @@ export class BuildingSystem {
     // Create windows using instancing - on all 4 sides
     const windowIndices: number[] = [];
     const windowStates: boolean[] = [];
-    // BALANCED WINDOWS: Calculate based on building size but cap total
-    const baseRows = Math.floor(height / 5); // Tighter vertical spacing (was 8)
-    const baseColsX = Math.floor(width / 4); // Tighter horizontal spacing (was 6)
-    const baseColsZ = Math.floor(depth / 4); // Tighter horizontal spacing (was 6)
+    // DENSE WINDOWS: Previous algorithm with better distribution
+    const windowSpacingY = 5; // 5m between window rows (previous algorithm)
+    const baseRows = Math.floor(height / windowSpacingY);
+    const baseColsX = Math.floor(width / 4); // 4m spacing (previous algorithm)
+    const baseColsZ = Math.floor(depth / 4); // 4m spacing (previous algorithm)
 
-    // Calculate total potential windows
-    const potentialWindows = baseRows * (baseColsX * 2 + baseColsZ * 2) * windowDensity;
+    // Use base calculations directly
+    const windowRows = Math.max(2, baseRows);
+    const windowColsX = Math.max(2, baseColsX);
+    const windowColsZ = Math.max(2, baseColsZ);
 
-    // Scale down if too many
-    let scaleFactor = 1.0;
-    if (potentialWindows > this.maxWindowsPerBuilding) {
-      scaleFactor = Math.sqrt(this.maxWindowsPerBuilding / potentialWindows);
-    }
+    // Start from appropriate floor
+    const startRow = 0;
 
-    const windowRows = Math.max(2, Math.floor(baseRows * scaleFactor));
-    const windowColsX = Math.max(2, Math.floor(baseColsX * scaleFactor));
-    const windowColsZ = Math.max(2, Math.floor(baseColsZ * scaleFactor));
-
-    // Skip first floor for more realistic look (lobby/entrance)
-    const startRow = 1;
-
-    // Helper function to add a window
+    // ALL SIDES GET WINDOWS: Dense coverage
+    const sidesWithWindows = new Set(['front', 'back', 'left', 'right']); // All 4 sides    // Helper function to add a window
     const addWindow = (x: number, y: number, z: number, rotation: number = 0) => {
-      // Decide if window should be lit based on current time of day
+      // Decide if window should be lit based on current time of day and building characteristics
       // Get current time from optimized day/night cycle
       let litChance = 0.05; // Default 5% for daytime
       if ((window as any).__optimizedDayNight) {
         const timeObj = (window as any).__optimizedDayNight.getTime();
         const hours = timeObj.hours;
-        // Debug first building
-        if (this.buildings.size === 0) {
-          // console.log('First building window creation, time:', hours);
-        }
-        // Match the time-based percentages
-        if (hours >= 11 && hours < 14) {
-          litChance = 0.02; // Noon - 2% lit
-        } else if (hours >= 9 && hours < 17) {
-          litChance = 0.05; // Day - 5% lit
-        } else if (hours >= 6 && hours < 9) {
-          litChance = 0.3; // Morning - 30% lit
-        } else if (hours >= 17 && hours < 20) {
-          litChance = 0.6; // Evening - 60% lit
-        } else if (hours >= 20 && hours < 22) {
-          litChance = 0.8; // Night - 80% lit
-        } else {
-          litChance = 0.5; // Late night - 50% lit
-        }
+        
+        // Generate per-building characteristics (simplified version)
+        const buildingHash = this.hashBuildingId(id);
+        const buildingType = this.getBuildingLightingType(position, { x: width, y: height, z: depth }, buildingHash);
+        litChance = this.calculateBuildingLitPercentage(hours, buildingType, buildingHash);
       } else {
         debug.warn('optimizedDayNight not available during building creation');
       }
@@ -285,50 +271,57 @@ export class BuildingSystem {
     };
 
     // Front face (positive Z)
-    for (let row = startRow; row < windowRows; row++) {
-      for (let col = 0; col < windowColsX; col++) {
-        if (Math.random() < windowDensity) {
-          // Uniform density
-          const localX = (col - windowColsX / 2) * 4 + 2;
-          const localY = (row - windowRows / 2) * 5 + 2.5;
-          const localZ = depth / 2 + 0.5;
-          addWindow(localX, localY, localZ, 0);
+    if (sidesWithWindows.has('front')) {
+      for (let row = startRow; row < windowRows; row++) {
+        for (let col = 0; col < windowColsX; col++) {
+          if (Math.random() < windowDensity) {
+            const localX = (col - windowColsX / 2) * 4 + 2;
+            const localY = 2.5 + row * 5; // Start 2.5m from base, go up
+            const localZ = depth / 2 + 0.5;
+            addWindow(localX, localY, localZ, 0);
+          }
         }
       }
     }
 
     // Back face (negative Z)
-    for (let row = startRow; row < windowRows; row++) {
-      for (let col = 0; col < windowColsX; col++) {
-        if (Math.random() < windowDensity) {
-          const localX = (col - windowColsX / 2) * 4 + 2;
-          const localY = (row - windowRows / 2) * 5 + 2.5;
-          const localZ = -depth / 2 - 0.5;
-          addWindow(localX, localY, localZ, Math.PI);
+    if (sidesWithWindows.has('back')) {
+      for (let row = startRow; row < windowRows; row++) {
+        for (let col = 0; col < windowColsX; col++) {
+          if (Math.random() < windowDensity) {
+            const localX = (col - windowColsX / 2) * 4 + 2;
+            const localY = 2.5 + row * 5; // Start 2.5m from base, go up
+            const localZ = -depth / 2 - 0.5;
+            addWindow(localX, localY, localZ, Math.PI);
+          }
         }
       }
     }
 
     // Right face (positive X)
-    for (let row = startRow; row < windowRows; row++) {
-      for (let col = 0; col < windowColsZ; col++) {
-        if (Math.random() < windowDensity) {
-          const localX = width / 2 + 0.5;
-          const localY = (row - windowRows / 2) * 5 + 2.5;
-          const localZ = (col - windowColsZ / 2) * 4 + 2;
-          addWindow(localX, localY, localZ, Math.PI / 2);
+    if (sidesWithWindows.has('right')) {
+      for (let row = startRow; row < windowRows; row++) {
+        for (let col = 0; col < windowColsZ; col++) {
+          if (Math.random() < windowDensity) {
+            const localX = width / 2 + 0.5;
+            const localY = 2.5 + row * 5; // Start 2.5m from base, go up
+            const localZ = (col - windowColsZ / 2) * 4 + 2;
+            addWindow(localX, localY, localZ, Math.PI / 2);
+          }
         }
       }
     }
 
     // Left face (negative X)
-    for (let row = startRow; row < windowRows; row++) {
-      for (let col = 0; col < windowColsZ; col++) {
-        if (Math.random() < windowDensity) {
-          const localX = -width / 2 - 0.5;
-          const localY = (row - windowRows / 2) * 5 + 2.5;
-          const localZ = (col - windowColsZ / 2) * 4 + 2;
-          addWindow(localX, localY, localZ, -Math.PI / 2);
+    if (sidesWithWindows.has('left')) {
+      for (let row = startRow; row < windowRows; row++) {
+        for (let col = 0; col < windowColsZ; col++) {
+          if (Math.random() < windowDensity) {
+            const localX = -width / 2 - 0.5;
+            const localY = 2.5 + row * 5; // Start 2.5m from base, go up
+            const localZ = (col - windowColsZ / 2) * 4 + 2;
+            addWindow(localX, localY, localZ, -Math.PI / 2);
+          }
         }
       }
     }
@@ -367,73 +360,98 @@ export class BuildingSystem {
       debug.warn('City already generated, skipping duplicate generation');
       return;
     }
-    
+
     // Mark as generated to prevent race conditions
     this.cityGenerated = true;
-    
+
     // Create all the data structures first
     this.createBuildings(centerX, centerZ, radius);
     this.createRoadNetwork(centerX, centerZ, radius);
     this.createStreetLights(centerX, centerZ, radius);
-    
+
     // Now animate them appearing gradually
     this.animateCityGeneration();
 
-    debug.log(`City generation started: ${this.buildings.size} buildings, roads, and street lights`);
+    debug.log(
+      `City generation started: ${this.buildings.size} buildings, roads, and street lights`
+    );
   }
-  
+
   private animateCityGeneration(): void {
     // Hide all buildings initially
     this.buildings.forEach(building => {
       building.mesh.visible = false;
       building.mesh.scale.y = 0.01; // Start flat
     });
-    
+
     // Hide roads and lights
     this.roads.visible = false;
     this.streetLights.visible = false;
-    
+
     // Sort buildings by distance from center for ripple effect
     const buildingArray = Array.from(this.buildings.values()).sort((a, b) => {
       const distA = Math.sqrt(a.position.x * a.position.x + a.position.z * a.position.z);
       const distB = Math.sqrt(b.position.x * b.position.x + b.position.z * b.position.z);
       return distA - distB;
     });
-    
+
     // Track animation completion
     let allBuildingsStarted = false;
     let roadsStarted = false;
     let lightsStarted = false;
     let allAnimationsComplete = 0;
     const totalAnimations = 3; // buildings, roads, lights
-    
+
     const checkAllComplete = () => {
       allAnimationsComplete++;
       if (allAnimationsComplete >= totalAnimations) {
-        // All animations complete - now merge static geometry for performance
+        // All animations complete - ensure all buildings are visible
+        this.buildings.forEach(building => {
+          building.mesh.visible = true;
+          building.mesh.scale.y = 1; // Ensure full scale
+        });
+
+        // Also ensure roads and lights are visible
+        this.roads.visible = true;
+        this.streetLights.visible = true;
+
+        // Now merge static geometry for performance
         setTimeout(() => {
           this.mergeStaticGeometry();
-          debug.log('City generation animations complete, static geometry merged');
+
+          // Fix instanced building culling by updating bounding spheres
+          if (this.useInstancedBuildings && this.instancedBuildingRenderer) {
+            this.instancedBuildingRenderer.updateBoundingSpheres();
+          }
+
+          // Fix street light culling too
+          if (this.streetLightManager) {
+            this.streetLightManager.updateBoundingSpheres();
+          }
+
+          debug.log(
+            'City generation animations complete, all buildings visible, static geometry merged'
+          );
         }, 200);
       }
     };
-    
+
     // Animate buildings rising from the ground
     let buildingIndex = 0;
     const buildingsPerBatch = 3; // How many buildings appear at once
-    
+
     const buildingInterval = setInterval(() => {
       // Process a batch of buildings
       for (let i = 0; i < buildingsPerBatch && buildingIndex < buildingArray.length; i++) {
         const building = buildingArray[buildingIndex];
         building.mesh.visible = true;
-        
+
         // Animate the building rising
         this.animateBuildingRise(building.mesh);
-        
+
         buildingIndex++;
       }
-      
+
       // Start roads once we have some buildings (after 25% are started)
       if (!roadsStarted && buildingIndex >= buildingArray.length * 0.25) {
         roadsStarted = true;
@@ -441,7 +459,7 @@ export class BuildingSystem {
           this.animateRoadsAppear(() => checkAllComplete());
         }, 200);
       }
-      
+
       // Start street lights once we have more buildings (after 50% are started)
       if (!lightsStarted && buildingIndex >= buildingArray.length * 0.5) {
         lightsStarted = true;
@@ -449,65 +467,72 @@ export class BuildingSystem {
           this.animateStreetLightsAppear(() => checkAllComplete());
         }, 400);
       }
-      
+
       // When all buildings are started
       if (buildingIndex >= buildingArray.length) {
         clearInterval(buildingInterval);
         allBuildingsStarted = true;
-        
+
         // Wait for all building animations to complete
         setTimeout(() => {
+          // Failsafe: ensure all buildings are visible even if animation failed
+          buildingArray.forEach(building => {
+            if (!building.mesh.visible) {
+              building.mesh.visible = true;
+              building.mesh.scale.y = 1;
+            }
+          });
           checkAllComplete();
         }, 1000); // Max building animation time
       }
     }, 50); // 50ms between batches = smooth appearance
   }
-  
+
   private animateBuildingRise(mesh: THREE.Mesh): void {
     const targetScale = 1; // Buildings should have scale.y = 1
     const targetY = mesh.position.y;
     const startY = targetY - 10;
-    
+
     // Start below ground
     mesh.position.y = startY;
     mesh.scale.y = 0.01;
-    
+
     const duration = 600 + Math.random() * 400; // 600-1000ms
     const startTime = Date.now();
-    
+
     const animate = () => {
       const elapsed = Date.now() - startTime;
       const progress = Math.min(elapsed / duration, 1);
-      
+
       // Easing function for smooth animation
       const eased = 1 - Math.pow(1 - progress, 3); // Cubic ease-out
-      
+
       mesh.scale.y = 0.01 + (targetScale - 0.01) * eased;
       mesh.position.y = startY + (targetY - startY) * eased;
-      
+
       if (progress < 1) {
         requestAnimationFrame(animate);
       }
     };
-    
+
     animate();
   }
-  
+
   private animateRoadsAppear(onComplete?: () => void): void {
     this.roads.visible = true;
-    
+
     let completedRoads = 0;
     const totalRoads = this.roads.children.length;
-    
+
     // Fade in roads
     this.roads.children.forEach((road, index) => {
       if (road instanceof THREE.Mesh && road.material) {
         const material = road.material as THREE.MeshBasicMaterial;
-        
+
         // Don't animate opacity on basic materials - just show them
         // MeshBasicMaterial doesn't support transparency well during animation
         material.visible = true;
-        
+
         // Small delay for stagger effect without opacity animation
         setTimeout(() => {
           completedRoads++;
@@ -517,32 +542,32 @@ export class BuildingSystem {
         }, index * 20); // Stagger by 20ms per road segment
       }
     });
-    
+
     // Fallback in case there are no roads
     if (totalRoads === 0 && onComplete) {
       onComplete();
     }
   }
-  
+
   private animateStreetLightsAppear(onComplete?: () => void): void {
     this.streetLights.visible = true;
-    
+
     // Make lights pop in with a scale animation
     if (this.streetLightManager) {
       const count = this.streetLightManager.getInstanceCount();
       const batchSize = 5;
       let currentIndex = 0;
-      
+
       const lightInterval = setInterval(() => {
         // Animate a batch of lights
         for (let i = 0; i < batchSize && currentIndex < count; i++) {
           this.streetLightManager!.animateLightAppear(currentIndex);
           currentIndex++;
         }
-        
+
         if (currentIndex >= count) {
           clearInterval(lightInterval);
-          
+
           // All lights animation complete
           if (onComplete) {
             setTimeout(onComplete, 300); // Wait for last animations to finish
@@ -892,7 +917,8 @@ export class BuildingSystem {
       const centerDist = Math.sqrt(hood.center.x * hood.center.x + hood.center.z * hood.center.z);
       if (centerDist < hubRadius + 30) return; // Only skip if too close to hub
 
-      debug.category('Building', 
+      debug.category(
+        'Building',
         `Creating road for neighborhood at (${hood.center.x.toFixed(0)}, ${hood.center.z.toFixed(0)}), dist=${centerDist.toFixed(0)}, buildings=${hood.buildings.length}`
       );
 
@@ -973,14 +999,18 @@ export class BuildingSystem {
     });
 
     // Debug: log ring sizes
-    debug.category('Building',
+    debug.category(
+      'Building',
       `Ring distribution: Inner=${innerRing.length}, Middle=${middleRing.length}, Outer=${outerRing.length}`
     );
 
     // Connect neighborhoods within same ring - only to immediate neighbors
     [innerRing, middleRing, outerRing].forEach((ring, ringIndex) => {
       const ringNames = ['Inner', 'Middle', 'Outer'];
-      debug.category('Building', `Processing ${ringNames[ringIndex]} ring with ${ring.length} neighborhoods`);
+      debug.category(
+        'Building',
+        `Processing ${ringNames[ringIndex]} ring with ${ring.length} neighborhoods`
+      );
 
       if (ring.length === 0) {
         debug.category('Building', `Ring ${ringIndex} is empty!`);
@@ -988,7 +1018,10 @@ export class BuildingSystem {
       }
 
       if (ring.length === 1) {
-        debug.category('Building', `Ring ${ringIndex} has only 1 neighborhood, skipping connections`);
+        debug.category(
+          'Building',
+          `Ring ${ringIndex} has only 1 neighborhood, skipping connections`
+        );
         return;
       }
 
@@ -1000,7 +1033,8 @@ export class BuildingSystem {
         }))
         .sort((a, b) => a.angle - b.angle);
 
-      debug.category('Building',
+      debug.category(
+        'Building',
         `Sorted ${ringNames[ringIndex]} ring angles:`,
         sortedRing.map(s => ((s.angle * 180) / Math.PI).toFixed(0))
       );
@@ -1015,7 +1049,8 @@ export class BuildingSystem {
             Math.pow(current.hood.center.z - next.hood.center.z, 2)
         );
 
-        debug.category('Building',
+        debug.category(
+          'Building',
           `${ringNames[ringIndex]} ring: Checking connection ${index} -> ${(index + 1) % sortedRing.length}, dist=${dist.toFixed(0)}`
         );
 
@@ -1444,7 +1479,12 @@ export class BuildingSystem {
     if (this.debugCount++ < 3) {
       const sampleStates = windowStatesArray.slice(0, 10);
       // console.log('Sample window states for debugging:', sampleStates);
-      debug.category('Building', 'First state lit check:', sampleStates[0]?.lit, typeof sampleStates[0]?.lit);
+      debug.category(
+        'Building',
+        'First state lit check:',
+        sampleStates[0]?.lit,
+        typeof sampleStates[0]?.lit
+      );
     }
     const targetLitCount = Math.floor(totalWindows * targetLitPercentage);
     const difference = targetLitCount - currentLitCount;
@@ -1455,12 +1495,15 @@ export class BuildingSystem {
       const unlitWithIndex = windowStatesArray.filter(
         s => !s.lit && s.unlitIndex !== undefined
       ).length;
-      debug.category('Building', `Initial window state distribution:
+      debug.category(
+        'Building',
+        `Initial window state distribution:
         Total: ${totalWindows}
         Lit (state.lit=true): ${currentLitCount}
         Lit with index: ${litWithIndex}
         Unlit with index: ${unlitWithIndex}
-        Pools - lit available: ${this.litWindowPool.length}, unlit available: ${this.unlitWindowPool.length}`);
+        Pools - lit available: ${this.litWindowPool.length}, unlit available: ${this.unlitWindowPool.length}`
+      );
     }
 
     // Commented out - too verbose for Seq
@@ -1694,8 +1737,12 @@ export class BuildingSystem {
     // Pool exhausted - log once and stop trying
     if (!this.poolExhaustedWarned) {
       this.poolExhaustedWarned = true;
-      console.warn(`Window pool exhausted! Total windows: ${this.windowCount}, max per mesh: ${this.maxWindowsPerMesh}`);
-      console.warn(`Lit pool: ${this.litWindowPool.length}, Unlit pool: ${this.unlitWindowPool.length}`);
+      console.warn(
+        `Window pool exhausted! Total windows: ${this.windowCount}, max per mesh: ${this.maxWindowsPerMesh}`
+      );
+      console.warn(
+        `Lit pool: ${this.litWindowPool.length}, Unlit pool: ${this.unlitWindowPool.length}`
+      );
       console.warn(`This usually means more windows were created than the pool size allows.`);
     }
     return false;
@@ -1706,6 +1753,175 @@ export class BuildingSystem {
    */
   getBuildings(): BuildingInfo[] {
     return this.buildingInfos;
+  }
+
+  /**
+   * Force all buildings to be visible (useful for debugging or fixing visibility issues)
+   */
+  forceAllBuildingsVisible(): void {
+    this.buildings.forEach(building => {
+      building.mesh.visible = true;
+      building.mesh.scale.set(1, 1, 1);
+    });
+
+    // Also ensure roads and lights are visible
+    this.roads.visible = true;
+    this.streetLights.visible = true;
+
+    // Update window meshes
+    if (this.litWindowMesh) {
+      this.litWindowMesh.visible = true;
+    }
+    if (this.unlitWindowMesh) {
+      this.unlitWindowMesh.visible = true;
+    }
+
+    debug.log('Forced all buildings and city elements to be visible');
+  }
+
+  /**
+   * Generate a consistent hash from building ID for per-building randomization
+   */
+  private hashBuildingId(id: string): number {
+    let hash = 0;
+    for (let i = 0; i < id.length; i++) {
+      const char = id.charCodeAt(i);
+      hash = ((hash << 5) - hash) + char;
+      hash = hash & hash; // Convert to 32-bit integer
+    }
+    return Math.abs(hash);
+  }
+
+  /**
+   * Determine building type based on size and position for lighting behavior
+   */
+  private getBuildingLightingType(position: THREE.Vector3, scale: { x: number; y: number; z: number }, hash: number): 'residential' | 'office' | 'commercial' | 'industrial' {
+    const distanceFromCenter = Math.sqrt(position.x * position.x + position.z * position.z);
+    const heightCategory = scale.y < 30 ? 'low' : scale.y < 60 ? 'medium' : 'high';
+    const hashMod = hash % 100;
+
+    // Center area (< 300m) - mostly office/commercial
+    if (distanceFromCenter < 300) {
+      if (heightCategory === 'high') return hashMod < 70 ? 'office' : 'commercial';
+      if (heightCategory === 'medium') return hashMod < 50 ? 'office' : 'commercial';
+      return hashMod < 40 ? 'residential' : 'commercial';
+    }
+    
+    // Mid area (300-600m) - mixed use
+    if (distanceFromCenter < 600) {
+      if (heightCategory === 'high') return hashMod < 60 ? 'office' : 'residential';
+      if (heightCategory === 'medium') return hashMod < 40 ? 'residential' : hashMod < 70 ? 'commercial' : 'office';
+      return hashMod < 70 ? 'residential' : 'commercial';
+    }
+    
+    // Outer area (> 600m) - mostly residential/industrial
+    if (heightCategory === 'low') return hashMod < 20 ? 'industrial' : 'residential';
+    if (heightCategory === 'medium') return hashMod < 80 ? 'residential' : 'industrial';
+    return hashMod < 90 ? 'residential' : 'office';
+  }
+
+  /**
+   * Calculate target lit percentage for a specific building type and time
+   */
+  private calculateBuildingLitPercentage(hours: number, type: 'residential' | 'office' | 'commercial' | 'industrial', hash: number): number {
+    // Base percentages for different building types at different times
+    const basePercentages = {
+      residential: {
+        morning: 0.4,    // People getting ready for work
+        day: 0.05,       // Most people at work
+        midday: 0.02,    // Minimal activity
+        afternoon: 0.08, // Some early returns
+        evening: 0.7,    // Peak home activity
+        night: 0.6,      // Evening activities
+        lateNight: 0.3   // Some people still awake
+      },
+      office: {
+        morning: 0.1,    // Early arrivals
+        day: 0.8,        // Full work activity
+        midday: 0.9,     // Peak work hours
+        afternoon: 0.7,  // Afternoon work
+        evening: 0.3,    // Overtime workers
+        night: 0.1,      // Night shift/security
+        lateNight: 0.05  // Minimal activity
+      },
+      commercial: {
+        morning: 0.2,    // Setup/early opening
+        day: 0.6,        // Business hours
+        midday: 0.7,     // Peak business
+        afternoon: 0.6,  // Continued business
+        evening: 0.8,    // Peak shopping/dining
+        night: 0.4,      // Late shopping/entertainment
+        lateNight: 0.1   // Closing/cleanup
+      },
+      industrial: {
+        morning: 0.3,    // Shift start
+        day: 0.6,        // Day shift
+        midday: 0.6,     // Continued operations
+        afternoon: 0.6,  // Shift continuation
+        evening: 0.4,    // Evening shift
+        night: 0.4,      // Night shift
+        lateNight: 0.3   // Reduced operations
+      }
+    };
+
+    // Determine time period
+    let period: keyof typeof basePercentages.residential;
+    if (hours >= 6 && hours < 9) period = 'morning';
+    else if (hours >= 9 && hours < 11) period = 'day';
+    else if (hours >= 11 && hours < 14) period = 'midday';
+    else if (hours >= 14 && hours < 17) period = 'afternoon';
+    else if (hours >= 17 && hours < 20) period = 'evening';
+    else if (hours >= 20 && hours < 22) period = 'night';
+    else period = 'lateNight';
+
+    const basePercentage = basePercentages[type][period];
+    
+    // Add per-building variation (-20% to +20%)
+    const variation = ((hash % 40) - 20) / 100; // -0.2 to +0.2
+    const finalPercentage = Math.max(0, Math.min(1, basePercentage + variation));
+    
+    return finalPercentage;
+  }
+
+  /**
+   * Force all buildings to be visible - fixes any visibility issues
+   */
+  forceAllBuildingsVisible(): void {
+    if (this.useInstancedBuildings && this.instancedBuildingRenderer) {
+      // For instanced rendering, update bounding spheres and optionally disable culling
+      this.instancedBuildingRenderer.updateBoundingSpheres();
+
+      // If still having issues, disable frustum culling entirely
+      // this.instancedBuildingRenderer.disableFrustumCulling();
+
+      debug.log('Updated instanced building bounding spheres');
+    }
+
+    // Also fix street lights
+    if (this.streetLightManager) {
+      this.streetLightManager.updateBoundingSpheres();
+      debug.log('Updated street light bounding spheres');
+    }
+
+    if (!this.useInstancedBuildings) {
+      // Legacy path for individual building meshes
+      this.buildings.forEach(building => {
+        if (building.mesh) {
+          building.mesh.visible = true;
+          building.mesh.scale.set(1, 1, 1);
+
+          // Also ensure the parent group is visible
+          if (building.mesh.parent) {
+            building.mesh.parent.visible = true;
+          }
+        }
+      });
+
+      // Ensure the building group itself is visible
+      this.buildingGroup.visible = true;
+    }
+
+    debug.log(`Forced ${this.buildings.size} buildings visible`);
   }
 
   /**
@@ -1730,7 +1946,8 @@ export class BuildingSystem {
     });
 
     debug.category('Building', `Merging: ${roadMeshes.length} roads`);
-    debug.category('Building',
+    debug.category(
+      'Building',
       `Keeping separate: ${this.buildings.length} buildings (for windows), all street lights (for visibility)`
     );
 
@@ -1758,7 +1975,10 @@ export class BuildingSystem {
     debug.category('Building', `🏆 CITY OPTIMIZATION COMPLETE!`);
     debug.category('Building', `   Buildings: ${stats.buildingCount} (preserved for windows)`);
     debug.category('Building', `   Roads: 1 merged mesh`);
-    debug.category('Building', `   Street lights: ${streetLightCount} lights using 6 instanced meshes`);
+    debug.category(
+      'Building',
+      `   Street lights: ${streetLightCount} lights using 6 instanced meshes`
+    );
     debug.category('Building', `   Windows: 2 instanced meshes`);
     debug.category('Building', `   Estimated total: ~${totalDrawCalls} draw calls`);
   }
