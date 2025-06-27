@@ -1,0 +1,373 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Iron Dome Battery Tube Position Editor</title>
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      overflow: hidden;
+      background: #1a1a1a;
+      color: #e0e0e0;
+    }
+
+    #canvas-container {
+      position: absolute;
+      width: 100%;
+      height: 100%;
+    }
+
+    #ui-container {
+      position: absolute;
+      top: 0;
+      left: 0;
+      padding: 20px;
+      pointer-events: none;
+    }
+
+    #ui-container > * {
+      pointer-events: auto;
+    }
+
+    .panel {
+      background: rgba(30, 30, 30, 0.95);
+      border: 1px solid #444;
+      border-radius: 8px;
+      padding: 16px;
+      margin-bottom: 16px;
+      backdrop-filter: blur(10px);
+    }
+
+    .panel h2 {
+      font-size: 18px;
+      font-weight: 600;
+      margin-bottom: 12px;
+      color: #00ff88;
+    }
+
+    .tube-grid {
+      display: grid;
+      grid-template-columns: repeat(5, 1fr);
+      gap: 8px;
+      margin-bottom: 16px;
+    }
+
+    .tube-button {
+      background: #2a2a2a;
+      border: 2px solid #444;
+      color: #888;
+      padding: 8px;
+      border-radius: 4px;
+      cursor: pointer;
+      transition: all 0.2s;
+      font-size: 14px;
+      font-weight: 500;
+    }
+
+    .tube-button:hover {
+      background: #3a3a3a;
+      border-color: #666;
+    }
+
+    .tube-button.active {
+      background: #00ff88;
+      color: #000;
+      border-color: #00ff88;
+    }
+
+    .tube-button.complete {
+      border-color: #00ff88;
+      color: #00ff88;
+    }
+
+    .tube-button.in-progress {
+      border-color: #ffaa00;
+      color: #ffaa00;
+    }
+
+    .info-row {
+      display: flex;
+      justify-content: space-between;
+      margin-bottom: 8px;
+      font-size: 14px;
+    }
+
+    .info-label {
+      color: #888;
+    }
+
+    .info-value {
+      color: #fff;
+      font-family: 'Courier New', monospace;
+    }
+
+    .button-group {
+      display: flex;
+      gap: 8px;
+      margin-top: 16px;
+    }
+
+    .action-button {
+      background: #2a2a2a;
+      border: 1px solid #444;
+      color: #e0e0e0;
+      padding: 8px 16px;
+      border-radius: 4px;
+      cursor: pointer;
+      transition: all 0.2s;
+      font-size: 14px;
+    }
+
+    .action-button:hover {
+      background: #3a3a3a;
+      border-color: #666;
+    }
+
+    .action-button.primary {
+      background: #00ff88;
+      color: #000;
+      border-color: #00ff88;
+    }
+
+    .action-button.primary:hover {
+      background: #00cc66;
+      border-color: #00cc66;
+    }
+
+    #export-panel {
+      position: absolute;
+      top: 20px;
+      right: 20px;
+    }
+
+    #instructions {
+      position: absolute;
+      bottom: 20px;
+      left: 20px;
+      max-width: 400px;
+    }
+
+    .instruction-item {
+      margin-bottom: 8px;
+      font-size: 14px;
+      color: #aaa;
+    }
+
+    .key {
+      display: inline-block;
+      background: #2a2a2a;
+      border: 1px solid #444;
+      padding: 2px 6px;
+      border-radius: 3px;
+      font-family: monospace;
+      font-size: 12px;
+      margin: 0 2px;
+    }
+
+    #loading {
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      font-size: 24px;
+      color: #00ff88;
+    }
+
+    .coordinates {
+      font-size: 12px;
+      line-height: 1.4;
+    }
+
+    .coord-label {
+      display: inline-block;
+      width: 50px;
+      color: #888;
+    }
+
+    textarea {
+      width: 100%;
+      height: 200px;
+      background: #1a1a1a;
+      color: #00ff88;
+      border: 1px solid #444;
+      border-radius: 4px;
+      padding: 8px;
+      font-family: 'Courier New', monospace;
+      font-size: 12px;
+      resize: vertical;
+    }
+
+    .status-indicator {
+      display: inline-block;
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      margin-right: 8px;
+    }
+
+    .status-indicator.empty {
+      background: #444;
+    }
+
+    .status-indicator.start-only {
+      background: #ffaa00;
+    }
+
+    .status-indicator.complete {
+      background: #00ff88;
+    }
+  </style>
+</head>
+<body>
+  <div id="canvas-container"></div>
+  
+  <div id="ui-container">
+    <div class="panel">
+      <h2>Tube Selector</h2>
+      <div class="tube-grid" id="tube-grid">
+        <!-- Tube buttons will be generated -->
+      </div>
+      
+      <div id="current-tube-info">
+        <div class="info-row">
+          <span class="info-label">Current Tube:</span>
+          <span class="info-value" id="current-tube-number">None</span>
+        </div>
+        <div class="info-row">
+          <span class="info-label">Status:</span>
+          <span class="info-value" id="current-tube-status">-</span>
+        </div>
+        <div class="coordinates">
+          <div><span class="coord-label">Start:</span> <span id="start-coords">-</span></div>
+          <div><span class="coord-label">End:</span> <span id="end-coords">-</span></div>
+          <div><span class="coord-label">Direction:</span> <span id="direction-coords">-</span></div>
+        </div>
+      </div>
+      
+      <div class="button-group">
+        <button class="action-button" id="clear-tube">Clear Tube</button>
+        <button class="action-button" id="copy-tube">Copy</button>
+        <button class="action-button" id="paste-tube">Paste</button>
+      </div>
+      
+      <div style="margin-top: 16px; padding-top: 16px; border-top: 1px solid #444;">
+        <h3 style="font-size: 14px; margin-bottom: 8px; color: #00ff88;">Fine Tune Position</h3>
+        <div style="font-size: 12px; color: #888; margin-bottom: 8px;">Start Position:</div>
+        <div style="display: flex; gap: 8px; margin-bottom: 8px;">
+          <input type="number" id="start-x" step="0.1" style="width: 60px; background: #2a2a2a; border: 1px solid #444; color: #fff; padding: 4px;" placeholder="X">
+          <input type="number" id="start-y" step="0.1" style="width: 60px; background: #2a2a2a; border: 1px solid #444; color: #fff; padding: 4px;" placeholder="Y">
+          <input type="number" id="start-z" step="0.1" style="width: 60px; background: #2a2a2a; border: 1px solid #444; color: #fff; padding: 4px;" placeholder="Z">
+        </div>
+        <div style="font-size: 12px; color: #888; margin-bottom: 8px;">End Position:</div>
+        <div style="display: flex; gap: 8px; margin-bottom: 8px;">
+          <input type="number" id="end-x" step="0.1" style="width: 60px; background: #2a2a2a; border: 1px solid #444; color: #fff; padding: 4px;" placeholder="X">
+          <input type="number" id="end-y" step="0.1" style="width: 60px; background: #2a2a2a; border: 1px solid #444; color: #fff; padding: 4px;" placeholder="Y">
+          <input type="number" id="end-z" step="0.1" style="width: 60px; background: #2a2a2a; border: 1px solid #444; color: #fff; padding: 4px;" placeholder="Z">
+        </div>
+        <button class="action-button" id="apply-position" style="width: 100%;">Apply Position</button>
+      </div>
+    </div>
+  </div>
+  
+  <div id="export-panel" class="panel" style="width: 400px;">
+    <h2>Export/Import Configuration</h2>
+    <div class="info-row">
+      <span class="info-label">Completed:</span>
+      <span class="info-value" id="completed-count">0 / 20</span>
+    </div>
+    <textarea id="export-output" readonly placeholder="Configure tubes to see export data..."></textarea>
+    <div class="button-group" style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px;">
+      <button class="action-button primary" id="export-button">Export</button>
+      <button class="action-button" id="download-button">Download</button>
+      <button class="action-button" id="import-button">Import</button>
+    </div>
+    <input type="file" id="import-file" accept=".ts,.json" style="display: none;">
+  </div>
+  
+  <div id="grid-panel" class="panel" style="position: absolute; top: 380px; right: 20px; width: 400px; max-height: calc(100vh - 400px); overflow-y: auto;">
+    <h2>Grid Normalization</h2>
+    <div class="info-row">
+      <span class="info-label">Rows:</span>
+      <input type="number" id="grid-rows" value="4" min="1" max="10" style="width: 50px; background: #2a2a2a; border: 1px solid #444; color: #fff; padding: 4px;">
+      <span class="info-label" style="margin-left: 16px;">Columns:</span>
+      <input type="number" id="grid-cols" value="5" min="1" max="10" style="width: 50px; background: #2a2a2a; border: 1px solid #444; color: #fff; padding: 4px;">
+    </div>
+    <div class="info-row">
+      <span class="info-label">Row Order:</span>
+      <select id="row-order" style="background: #2a2a2a; border: 1px solid #444; color: #fff; padding: 4px;">
+        <option value="top-to-bottom">Top to Bottom</option>
+        <option value="bottom-to-top">Bottom to Top</option>
+      </select>
+    </div>
+    <div class="info-row">
+      <span class="info-label">Selection Mode:</span>
+      <select id="selection-mode" style="background: #2a2a2a; border: 1px solid #444; color: #fff; padding: 4px;">
+        <option value="corners">Grid Corners (4 points)</option>
+        <option value="centers">Tube Centers (4 points)</option>
+        <option value="tube-corners">Tube Corners (16 points)</option>
+      </select>
+    </div>
+    <div class="button-group">
+      <button class="action-button" id="select-points">Select Points</button>
+      <button class="action-button primary" id="apply-grid" disabled>Apply Grid</button>
+    </div>
+    <div id="corner-status" style="margin-top: 8px; font-size: 12px; color: #888;"></div>
+    
+    <div style="margin-top: 16px; padding-top: 16px; border-top: 1px solid #444;">
+      <h3 style="font-size: 14px; margin-bottom: 8px; color: #00ff88;">Grid Parameters</h3>
+      <div class="info-row">
+        <span class="info-label">Row Spacing:</span>
+        <input type="number" id="row-spacing" value="1.0" min="0.1" max="10" step="0.1" style="width: 60px; background: #2a2a2a; border: 1px solid #444; color: #fff; padding: 4px;">
+      </div>
+      <div class="info-row">
+        <span class="info-label">Col Spacing:</span>
+        <input type="number" id="col-spacing" value="0.6" min="0.1" max="10" step="0.1" style="width: 60px; background: #2a2a2a; border: 1px solid #444; color: #fff; padding: 4px;">
+      </div>
+      <div class="info-row">
+        <span class="info-label">Tube Length:</span>
+        <input type="number" id="tube-length" value="7.4" min="1" max="20" step="0.1" style="width: 60px; background: #2a2a2a; border: 1px solid #444; color: #fff; padding: 4px;">
+      </div>
+    </div>
+    
+    <div class="info-row" style="margin-top: 16px; padding-top: 16px; border-top: 1px solid #444;">
+      <span class="info-label">Snap Grid:</span>
+      <input type="checkbox" id="snap-enabled" style="width: 16px; height: 16px;">
+      <input type="number" id="snap-size" value="0.1" min="0.01" max="1" step="0.01" style="width: 60px; background: #2a2a2a; border: 1px solid #444; color: #fff; padding: 4px; margin-left: 8px;">
+    </div>
+    <div class="info-row" style="margin-top: 8px;">
+      <span class="info-label">Show Labels:</span>
+      <input type="checkbox" id="show-labels" checked style="width: 16px; height: 16px;">
+    </div>
+  </div>
+  
+  <div id="instructions" class="panel">
+    <h2>Instructions</h2>
+    <div class="instruction-item">
+      <span class="status-indicator empty"></span>Select a tube number above
+    </div>
+    <div class="instruction-item">
+      <span class="status-indicator start-only"></span><key>Click</key> on the model to set tube start position
+    </div>
+    <div class="instruction-item">
+      <span class="status-indicator complete"></span><key>Click</key> again to set tube end position
+    </div>
+    <div class="instruction-item">
+      <key>Mouse</key> Rotate view | <key>Wheel</key> Zoom | <key>Right-drag</key> Pan
+    </div>
+    <div class="instruction-item">
+      <key>H</key> Toggle helpers | <key>P</key> Toggle preview | <key>L</key> Toggle labels
+    </div>
+  </div>
+  
+  <div id="loading">Loading Battery Model...</div>
+
+  <script type="module" src="TubeEditor.ts"></script>
+</body>
+</html>

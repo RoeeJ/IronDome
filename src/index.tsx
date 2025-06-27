@@ -1,8 +1,16 @@
 import { serve } from 'bun';
 import index from './index.html';
+import tubeEditor from './tools/tube-editor/index.html';
+import modelViewer from '../model-viewer.html';
 
 const server = serve({
   routes: {
+    // Serve tube editor
+    '/tube-editor': tubeEditor,
+
+    // Serve model viewer
+    '/model-viewer': modelViewer,
+
     // Serve assets
     '/assets/*': async req => {
       const url = new URL(req.url);
@@ -60,5 +68,8 @@ function getContentType(pathname: string): string {
   if (pathname.endsWith('.mtl')) return 'text/plain';
   if (pathname.endsWith('.png')) return 'image/png';
   if (pathname.endsWith('.jpg') || pathname.endsWith('.jpeg')) return 'image/jpeg';
+  if (pathname.endsWith('.gltf')) return 'model/gltf+json';
+  if (pathname.endsWith('.glb')) return 'model/gltf-binary';
+  if (pathname.endsWith('.bin')) return 'application/octet-stream';
   return 'application/octet-stream';
 }
