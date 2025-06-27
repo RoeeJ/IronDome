@@ -25,6 +25,9 @@ COPY nginx.conf /etc/nginx/nginx.conf
 COPY --from=builder /app/dist /usr/share/nginx/html
 COPY --from=builder /app/assets /usr/share/nginx/html/assets
 
+# Fix permissions on assets directory
+RUN chmod -R 755 /usr/share/nginx/html/assets
+
 # Expose port
 EXPOSE 8080
 

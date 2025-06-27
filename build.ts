@@ -172,13 +172,30 @@ console.log(`\n✅ Build completed in ${buildTime}ms\n`);
 
 console.log('🔗 Creating route-specific directory structure...');
 
+// Helper function to fix asset paths in HTML
+async function fixAssetPaths(htmlPath: string, targetDepth: number = 1) {
+  const content = await Bun.file(htmlPath).text();
+  // Convert all relative paths to point to root with correct depth
+  const prefix = '../'.repeat(targetDepth);
+  const fixedContent = content
+    // Fix ./path patterns
+    .replace(/src="\.\/([^"]+)"/g, `src="${prefix}$1"`)
+    .replace(/href="\.\/([^"]+)"/g, `href="${prefix}$1"`)
+    // Fix ../path and ../../path patterns by replacing them with correct depth
+    .replace(/src="(?:\.\.\/)+([^"]+)"/g, `src="${prefix}$1"`)
+    .replace(/href="(?:\.\.\/)+([^"]+)"/g, `href="${prefix}$1"`);
+  
+  await Bun.write(htmlPath, fixedContent);
+}
+
 // Create model-viewer route
 const modelViewerDir = path.join(outdir, 'model-viewer');
 const modelViewerHtml = path.join(outdir, 'model-viewer.html');
 if (existsSync(modelViewerHtml)) {
   await mkdir(modelViewerDir, { recursive: true });
   await copyFile(modelViewerHtml, path.join(modelViewerDir, 'index.html'));
-  console.log('✓ Created /model-viewer/index.html');
+  await fixAssetPaths(path.join(modelViewerDir, 'index.html'), 1);
+  console.log('✓ Created /model-viewer/index.html with fixed asset paths');
 }
 
 // Create tube-editor route
@@ -187,7 +204,8 @@ const builtTubeEditorHtml = path.join(outdir, 'tools', 'tube-editor', 'index.htm
 if (existsSync(builtTubeEditorHtml)) {
   await mkdir(tubeEditorDir, { recursive: true });
   await copyFile(builtTubeEditorHtml, path.join(tubeEditorDir, 'index.html'));
-  console.log('✓ Created /tube-editor/index.html');
+  await fixAssetPaths(path.join(tubeEditorDir, 'index.html'), 1);
+  console.log('✓ Created /tube-editor/index.html with fixed asset paths');
 }
 
 console.log('🎯 Route structure ready for production');
