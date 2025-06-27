@@ -1,7 +1,7 @@
 import { serve } from 'bun';
 import index from './index.html';
 import tubeEditor from './tools/tube-editor/index.html';
-import modelViewer from '../model-viewer.html';
+import modelViewer from './model-viewer.html';
 
 const server = serve({
   routes: {

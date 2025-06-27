@@ -202,16 +202,33 @@ export class EnvironmentSystem {
       const z = vertex.z;
       const distFromCenter = Math.sqrt(x * x + z * z);
 
-      // Keep center area flat for city
-      if (distFromCenter < 1000) {
+      // Smooth transition from city to mountains
+      const cityRadius = 900; // Core flat area
+      const transitionWidth = 200; // Smooth transition zone
+      
+      if (distFromCenter < cityRadius) {
+        // Keep center area flat for city
         vertex.y = 0;
         // City area - darker ground
         colors[i * 3] = 0.15;
         colors[i * 3 + 1] = 0.18;
         colors[i * 3 + 2] = 0.15;
+      } else if (distFromCenter < cityRadius + transitionWidth) {
+        // Smooth transition zone
+        const transitionFactor = (distFromCenter - cityRadius) / transitionWidth;
+        const smoothFactor = 0.5 - 0.5 * Math.cos(transitionFactor * Math.PI); // Smooth S-curve
+        
+        // Gradually increase height
+        const baseHeight = this.noise2D(x * 0.02, z * 0.02) * 20; // Gentle rolling
+        vertex.y = baseHeight * smoothFactor;
+        
+        // Blend ground colors
+        colors[i * 3] = 0.15 + (0.2 - 0.15) * smoothFactor;
+        colors[i * 3 + 1] = 0.18 + (0.25 - 0.18) * smoothFactor;
+        colors[i * 3 + 2] = 0.15 + (0.2 - 0.15) * smoothFactor;
       } else {
         // Create mountain terrain with multiple layers
-        const normalizedDist = Math.min((distFromCenter - 1000) / 1500, 1);
+        const normalizedDist = Math.min((distFromCenter - (cityRadius + transitionWidth)) / 1500, 1);
 
         // Base terrain shape
         let height = this.noise2D(x, z) * 150;

@@ -2,7 +2,7 @@
 import { build, type BuildConfig } from "bun";
 import plugin from "bun-plugin-tailwind";
 import { existsSync } from "fs";
-import { rm } from "fs/promises";
+import { rm, mkdir, copyFile } from "fs/promises";
 import path from "path";
 
 // Print help text if requested
@@ -135,7 +135,7 @@ if (existsSync(outdir)) {
 const start = performance.now();
 
 // Scan for all HTML files in the project
-const entrypoints = [...new Bun.Glob("**.html").scanSync("src")]
+const entrypoints = [...new Bun.Glob("**/*.html").scanSync("src")]
   .map(a => path.resolve("src", a))
   .filter(dir => !dir.includes("node_modules"));
 console.log(`📄 Found ${entrypoints.length} HTML ${entrypoints.length === 1 ? "file" : "files"} to process\n`);
@@ -167,3 +167,27 @@ console.table(outputTable);
 const buildTime = (end - start).toFixed(2);
 
 console.log(`\n✅ Build completed in ${buildTime}ms\n`);
+
+// Create route-specific directory structure
+
+console.log('🔗 Creating route-specific directory structure...');
+
+// Create model-viewer route
+const modelViewerDir = path.join(outdir, 'model-viewer');
+const modelViewerHtml = path.join(outdir, 'model-viewer.html');
+if (existsSync(modelViewerHtml)) {
+  await mkdir(modelViewerDir, { recursive: true });
+  await copyFile(modelViewerHtml, path.join(modelViewerDir, 'index.html'));
+  console.log('✓ Created /model-viewer/index.html');
+}
+
+// Create tube-editor route
+const tubeEditorDir = path.join(outdir, 'tube-editor');
+const builtTubeEditorHtml = path.join(outdir, 'tools', 'tube-editor', 'index.html');
+if (existsSync(builtTubeEditorHtml)) {
+  await mkdir(tubeEditorDir, { recursive: true });
+  await copyFile(builtTubeEditorHtml, path.join(tubeEditorDir, 'index.html'));
+  console.log('✓ Created /tube-editor/index.html');
+}
+
+console.log('🎯 Route structure ready for production');

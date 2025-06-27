@@ -223,6 +223,11 @@ export class StreetLightInstanceManager {
       bulbMatrix.makeTranslation(position.x, 15.5, position.z);
       this.majorBulbInstancedMesh.setMatrixAt(index, bulbMatrix);
       this.majorBulbInstancedMesh.instanceMatrix.needsUpdate = true;
+      
+      // Update bounding spheres for major meshes
+      this.majorPoleInstancedMesh.computeBoundingSphere();
+      this.majorFixtureInstancedMesh.computeBoundingSphere();
+      this.majorBulbInstancedMesh.computeBoundingSphere();
     } else {
       // Regular pole
       const poleMatrix = new THREE.Matrix4();
@@ -242,6 +247,11 @@ export class StreetLightInstanceManager {
       bulbMatrix.makeTranslation(position.x, 10.5, position.z);
       this.bulbInstancedMesh.setMatrixAt(index, bulbMatrix);
       this.bulbInstancedMesh.instanceMatrix.needsUpdate = true;
+      
+      // Update bounding spheres for regular meshes
+      this.poleInstancedMesh.computeBoundingSphere();
+      this.fixtureInstancedMesh.computeBoundingSphere();
+      this.bulbInstancedMesh.computeBoundingSphere();
     }
   }
   
@@ -431,5 +441,39 @@ export class StreetLightInstanceManager {
     
     // Dispose geometries and materials (handled by cache)
     this.instances.clear();
+  }
+  
+  /**
+   * Update bounding spheres for all street light meshes to fix culling
+   */
+  updateBoundingSpheres(): void {
+    // Update regular street light meshes
+    this.poleInstancedMesh.computeBoundingSphere();
+    this.fixtureInstancedMesh.computeBoundingSphere();
+    this.bulbInstancedMesh.computeBoundingSphere();
+    
+    // Update major street light meshes  
+    this.majorPoleInstancedMesh.computeBoundingSphere();
+    this.majorFixtureInstancedMesh.computeBoundingSphere();
+    this.majorBulbInstancedMesh.computeBoundingSphere();
+    
+    debug.log('Updated bounding spheres for all street light meshes');
+  }
+  
+  /**
+   * Disable frustum culling for all street light meshes
+   */
+  disableFrustumCulling(): void {
+    // Disable for regular meshes
+    this.poleInstancedMesh.frustumCulled = false;
+    this.fixtureInstancedMesh.frustumCulled = false;
+    this.bulbInstancedMesh.frustumCulled = false;
+    
+    // Disable for major meshes
+    this.majorPoleInstancedMesh.frustumCulled = false;
+    this.majorFixtureInstancedMesh.frustumCulled = false;
+    this.majorBulbInstancedMesh.frustumCulled = false;
+    
+    debug.log('Disabled frustum culling for all street light meshes');
   }
 }

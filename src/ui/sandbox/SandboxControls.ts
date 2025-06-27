@@ -239,6 +239,8 @@ export class SandboxControls {
         // Force building system update
         const buildingSystem = (window as any).__buildingSystem;
         if (buildingSystem) buildingSystem.updateTimeOfDay(8, true);
+        const environmentSystem = (window as any).__environmentSystem;
+        if (environmentSystem) environmentSystem.setTimeOfDay(8);
         this.config.showNotification('🌅 Morning - 8:00 AM');
       },
       
@@ -247,6 +249,8 @@ export class SandboxControls {
         timeControls.currentTime = 12;
         const buildingSystem = (window as any).__buildingSystem;
         if (buildingSystem) buildingSystem.updateTimeOfDay(12, true);
+        const environmentSystem = (window as any).__environmentSystem;
+        if (environmentSystem) environmentSystem.setTimeOfDay(12);
         this.config.showNotification('☀️ Noon - 12:00 PM');
       },
       
@@ -255,6 +259,8 @@ export class SandboxControls {
         timeControls.currentTime = 18;
         const buildingSystem = (window as any).__buildingSystem;
         if (buildingSystem) buildingSystem.updateTimeOfDay(18, true);
+        const environmentSystem = (window as any).__environmentSystem;
+        if (environmentSystem) environmentSystem.setTimeOfDay(18);
         this.config.showNotification('🌆 Evening - 6:00 PM');
       },
       
@@ -263,6 +269,8 @@ export class SandboxControls {
         timeControls.currentTime = 22;
         const buildingSystem = (window as any).__buildingSystem;
         if (buildingSystem) buildingSystem.updateTimeOfDay(22, true);
+        const environmentSystem = (window as any).__environmentSystem;
+        if (environmentSystem) environmentSystem.setTimeOfDay(22);
         this.config.showNotification('🌙 Night - 10:00 PM');
       }
     };
@@ -275,6 +283,8 @@ export class SandboxControls {
         // Force building system update on manual slider change
         const buildingSystem = (window as any).__buildingSystem;
         if (buildingSystem) buildingSystem.updateTimeOfDay(value, true);
+        const environmentSystem = (window as any).__environmentSystem;
+        if (environmentSystem) environmentSystem.setTimeOfDay(value);
       });
     
     // Quick time buttons

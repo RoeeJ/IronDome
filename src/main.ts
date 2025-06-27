@@ -18,7 +18,7 @@ import { Profiler } from './utils/Profiler';
 import { ProfilerDisplay } from './ui/ProfilerDisplay';
 import { RenderProfiler } from './utils/RenderProfiler';
 // CHAINSAW: Removed excess cache systems - keeping only MaterialCache
-import { debug } from './utils/logger';  // Using Seq-enabled logger when configured
+import { debug } from './utils/logger'; // Using Seq-enabled logger when configured
 // CHAINSAW: Removed memory monitoring overhead
 import { MobileInputManager } from './input/MobileInputManager';
 import { DeviceCapabilities } from './utils/DeviceCapabilities';
@@ -131,7 +131,7 @@ controls.maxPolarAngle = Math.PI / 2 - 0.1; // Prevent going below ground
 // Enable touch controls for mobile
 controls.touches = {
   ONE: THREE.TOUCH.ROTATE,
-  TWO: THREE.TOUCH.DOLLY_PAN
+  TWO: THREE.TOUCH.DOLLY_PAN,
 };
 controls.enablePan = true;
 controls.enableZoom = true;
@@ -227,7 +227,7 @@ const worldScaleIndicators = new WorldScaleIndicators(scene, {
   showGrid: true,
   showDistanceMarkers: false,
   showReferenceObjects: false, // Disable reference buildings initially
-  showWindParticles: false,   // CHAINSAW: Disabled wind particles
+  showWindParticles: false, // CHAINSAW: Disabled wind particles
   showAltitudeMarkers: false,
   gridSize: 2000,
   gridDivisions: 100,
@@ -246,12 +246,13 @@ const buildingSystem = new BuildingSystem(scene);
 // Make globally accessible for SandboxControls and explosion damage
 (window as any).__optimizedDayNight = optimizedDayNight;
 (window as any).__buildingSystem = buildingSystem;
+(window as any).__environmentSystem = environmentSystem;
 
 // Create invisible ground plane for raycasting
 const groundGeometry = new THREE.PlaneGeometry(8000, 8000); // Expanded to match terrain
 const groundMaterial = MaterialCache.getInstance().getMeshBasicMaterial({
   visible: false,
-  side: THREE.DoubleSide
+  side: THREE.DoubleSide,
 });
 const groundMesh = new THREE.Mesh(groundGeometry, groundMaterial);
 groundMesh.rotation.x = -Math.PI / 2;
@@ -851,45 +852,52 @@ let touchStartTime = 0;
 let touchStartPos = { x: 0, y: 0 };
 
 // Debug touch events
-renderer.domElement.addEventListener('touchstart', event => {
-  debug.category('Input', 'Touch start:', event.touches.length, 'touches');
-  if (event.touches.length === 1) {
-    touchStartTime = Date.now();
-    touchStartPos = { x: event.touches[0].clientX, y: event.touches[0].clientY };
-  }
-}, { passive: true });
+renderer.domElement.addEventListener(
+  'touchstart',
+  event => {
+    debug.category('Input', 'Touch start:', event.touches.length, 'touches');
+    if (event.touches.length === 1) {
+      touchStartTime = Date.now();
+      touchStartPos = { x: event.touches[0].clientX, y: event.touches[0].clientY };
+    }
+  },
+  { passive: true }
+);
 
-renderer.domElement.addEventListener('touchend', event => {
-  // Check if it was a tap (not a drag)
-  if (event.changedTouches.length === 1) {
-    const touchDuration = Date.now() - touchStartTime;
-    const touch = event.changedTouches[0];
-    const touchDistance = Math.sqrt(
-      Math.pow(touch.clientX - touchStartPos.x, 2) +
-      Math.pow(touch.clientY - touchStartPos.y, 2)
-    );
-
-    // Consider it a tap if short duration and small movement
-    if (touchDuration < 300 && touchDistance < 10) {
-      const mouse = new THREE.Vector2(
-        (touch.clientX / window.innerWidth) * 2 - 1,
-        -(touch.clientY / window.innerHeight) * 2 + 1
+renderer.domElement.addEventListener(
+  'touchend',
+  event => {
+    // Check if it was a tap (not a drag)
+    if (event.changedTouches.length === 1) {
+      const touchDuration = Date.now() - touchStartTime;
+      const touch = event.changedTouches[0];
+      const touchDistance = Math.sqrt(
+        Math.pow(touch.clientX - touchStartPos.x, 2) + Math.pow(touch.clientY - touchStartPos.y, 2)
       );
 
-      const raycaster = new THREE.Raycaster();
-      raycaster.setFromCamera(mouse, camera);
+      // Consider it a tap if short duration and small movement
+      if (touchDuration < 300 && touchDistance < 10) {
+        const mouse = new THREE.Vector2(
+          (touch.clientX / window.innerWidth) * 2 - 1,
+          -(touch.clientY / window.innerHeight) * 2 + 1
+        );
 
-      // Check if in dome placement mode
-      if (domePlacementSystem.isInPlacementMode()) {
-        const intersects = raycaster.intersectObject(groundMesh);
-        if (intersects.length > 0) {
-          domePlacementSystem.attemptPlacement(intersects[0].point);
-          if ('vibrate' in navigator) navigator.vibrate(20);
+        const raycaster = new THREE.Raycaster();
+        raycaster.setFromCamera(mouse, camera);
+
+        // Check if in dome placement mode
+        if (domePlacementSystem.isInPlacementMode()) {
+          const intersects = raycaster.intersectObject(groundMesh);
+          if (intersects.length > 0) {
+            domePlacementSystem.attemptPlacement(intersects[0].point);
+            if ('vibrate' in navigator) navigator.vibrate(20);
+          }
         }
       }
     }
-  }
-}, { passive: true });
+  },
+  { passive: true }
+);
 
 // Initialize mobile input if on touch device
 let mobileInput: MobileInputManager | null = null;
@@ -1035,7 +1043,7 @@ function showNotification(message: string): void {
 // Make THREE globally available for UI components
 (window as any).THREE = THREE;
 
-// Create new sandbox controls  
+// Create new sandbox controls
 const sandboxControls = new SandboxControls(gui, {
   threatManager,
   domePlacementSystem,
@@ -1043,7 +1051,7 @@ const sandboxControls = new SandboxControls(gui, {
   worldScaleIndicators,
   projectiles,
   simulationControls,
-  showNotification
+  showNotification,
 });
 
 // Create developer controls (hidden by default)
@@ -1052,7 +1060,7 @@ const developerControls = new DeveloperControls({
   simulationControls,
   showNotification,
   renderer,
-  scene
+  scene,
 });
 
 // Legacy controls object for compatibility
@@ -1060,7 +1068,7 @@ const legacySandboxControls = {
   // These are kept for compatibility with other parts of the code
   showTrajectories: true,
   timeScale: 1.0,
-  autoIntercept: true
+  autoIntercept: true,
 };
 
 // Update legacy controls when sandbox controls change
@@ -1266,7 +1274,7 @@ async function startDeferredInitialization() {
 
     // Re-enable reference objects after city is generated
     worldScaleIndicators.setVisibility({
-      showReferenceObjects: true
+      showReferenceObjects: true,
     });
 
     debug.log('City generation started');
@@ -1358,6 +1366,21 @@ window.addEventListener('keydown', e => {
   if (e.key === 'r' || e.key === 'R') {
     (window as any).toggleRenderStats();
   }
+  
+  // B key forces all buildings visible (fixes culling issues)
+  if (e.key === 'b' || e.key === 'B') {
+    buildingSystem.forceAllBuildingsVisible();
+    showNotification('Updated building & street light bounds');
+  }
+  
+  // Shift+B disables frustum culling entirely (nuclear option)
+  if ((e.key === 'b' || e.key === 'B') && e.shiftKey) {
+    const instancedRenderer = (buildingSystem as any).instancedBuildingRenderer;
+    if (instancedRenderer) {
+      instancedRenderer.disableFrustumCulling();
+      showNotification('Disabled building frustum culling');
+    }
+  }
 });
 
 // Mouse wheel zoom
@@ -1373,34 +1396,42 @@ renderer.domElement.addEventListener(
 );
 
 // WebGL context loss handling for mobile stability
-renderer.domElement.addEventListener('webglcontextlost', (event) => {
-  event.preventDefault();
-  debug.error('WebGL context lost!');
+renderer.domElement.addEventListener(
+  'webglcontextlost',
+  event => {
+    event.preventDefault();
+    debug.error('WebGL context lost!');
 
-  // Stop animation loop
-  if (animationId) {
-    cancelAnimationFrame(animationId);
-    animationId = null;
-  }
+    // Stop animation loop
+    if (animationId) {
+      cancelAnimationFrame(animationId);
+      animationId = null;
+    }
 
-  // Pause game
-  simulationControls.pause = true;
-  if (waveManager) waveManager.pauseWave();
+    // Pause game
+    simulationControls.pause = true;
+    if (waveManager) waveManager.pauseWave();
 
-  // Show notification
-  if ((window as any).showNotification) {
-    (window as any).showNotification('Graphics context lost - reloading...');
-  }
-}, false);
+    // Show notification
+    if ((window as any).showNotification) {
+      (window as any).showNotification('Graphics context lost - reloading...');
+    }
+  },
+  false
+);
 
-renderer.domElement.addEventListener('webglcontextrestored', () => {
-  debug.log('WebGL context restored!');
+renderer.domElement.addEventListener(
+  'webglcontextrestored',
+  () => {
+    debug.log('WebGL context restored!');
 
-  // Reload the page to ensure clean state
-  setTimeout(() => {
-    window.location.reload();
-  }, 1000);
-}, false);
+    // Reload the page to ensure clean state
+    setTimeout(() => {
+      window.location.reload();
+    }, 1000);
+  },
+  false
+);
 
 // Memory management for mobile
 let lastMemoryCheck = 0;
@@ -1416,7 +1447,7 @@ function checkMemoryPressure() {
   if (info.memory.geometries > 1000 || info.memory.textures > 500) {
     debug.warn('High memory usage detected', {
       geometries: info.memory.geometries,
-      textures: info.memory.textures
+      textures: info.memory.textures,
     });
 
     // Force garbage collection if available
@@ -1484,8 +1515,8 @@ window.addEventListener('beforeunload', cleanup);
 window.addEventListener('pagehide', cleanup);
 
 // Render bottleneck tracking
-let frameCount = 0;
-let renderBottleneckLogged = false;
+const frameCount = 0;
+const renderBottleneckLogged = false;
 
 function animate() {
   animationId = requestAnimationFrame(animate);
@@ -1502,7 +1533,7 @@ function animate() {
   const rawDeltaTime = clock.getDelta();
   // Clamp deltaTime to prevent large jumps when tab regains focus
   const deltaTime = Math.min(rawDeltaTime, 0.1); // Max 100ms per frame
-  const currentTime = clock.getElapsedTime();
+  let currentTime = clock.getElapsedTime();
   const fps = 1 / deltaTime;
 
   // CHAINSAW: Removed performance monitoring overhead
@@ -1529,7 +1560,9 @@ function animate() {
 
   // CHAINSAW OPTIMIZED: Update time-sliced systems (minimal performance impact)
   optimizedDayNight.update(deltaTime);
-  buildingSystem.updateTimeOfDay(optimizedDayNight.getTime().hours);
+  currentTime = optimizedDayNight.getTime();
+  buildingSystem.updateTimeOfDay(currentTime.hours);
+  environmentSystem.setTimeOfDay(currentTime.hours);
 
   // Keep visuals but NO dynamic updates during gameplay for performance
 
@@ -1538,7 +1571,6 @@ function animate() {
   // Update camera controller with all interceptors
   const allInterceptors = [...projectiles, ...interceptionSystem.getActiveInterceptors()];
   cameraController.update(deltaTime, activeThreats, allInterceptors);
-
 
   // Update game systems only when not paused
   if (!simulationControls.pause) {
@@ -1580,7 +1612,7 @@ function animate() {
         }
       }
     }
-    
+
     // Update pooled trail system for all trails
     PooledTrailSystem.getInstance(scene).update();
   }
@@ -1596,7 +1628,7 @@ function animate() {
 
     // Update dome placement system (for instanced rendering)
     domePlacementSystem.update();
-    
+
     // CHAINSAW: Update instanced debris renderer
     instancedDebrisRenderer.update(deltaTime);
 
@@ -1666,7 +1698,6 @@ function animate() {
   );
 
   // CHAINSAW: Removed heavy trail/explosion systems causing frame drops and interception lag
-
 
   // Render
   renderer.render(scene, camera);
@@ -1790,8 +1821,12 @@ if (deviceInfo.isMobile) {
     debug.category('Input', 'Controls touch settings:', controls.touches);
 
     // Add global touch listener to see if any element is capturing events
-    document.addEventListener('touchstart', (e) => {
-      debug.category('Input', 'Document touch detected on:', e.target);
-    }, { passive: true, capture: true });
+    document.addEventListener(
+      'touchstart',
+      e => {
+        debug.category('Input', 'Document touch detected on:', e.target);
+      },
+      { passive: true, capture: true }
+    );
   }, 1000);
 }
