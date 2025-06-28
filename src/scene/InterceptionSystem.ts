@@ -324,9 +324,9 @@ export class InterceptionSystem {
           launchTime: Date.now(),
         });
 
-        // Add to instanced renderer if available
+        // Add to instanced renderer if available AND interceptor supports instancing
         const renderer = (window as any).__instancedProjectileRenderer;
-        if (renderer) {
+        if (renderer && interceptor.useInstancing) {
           renderer.addProjectile(interceptor);
         }
         
@@ -428,7 +428,7 @@ export class InterceptionSystem {
           });
 
           const renderer = (window as any).__instancedProjectileRenderer;
-          if (renderer) {
+          if (renderer && interceptor.useInstancing) {
             renderer.addProjectile(interceptor);
           }
         });

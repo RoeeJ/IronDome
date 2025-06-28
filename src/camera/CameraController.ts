@@ -44,7 +44,7 @@ export class CameraController {
 
   // Smooth follow parameters
   private followOffset: THREE.Vector3 = new THREE.Vector3(30, 20, 30);
-  private followSmoothness: number = 0.1;
+  private followSmoothness: number = 0.15; // Increased for smoother following
   private lookAheadFactor: number = 0.5;
   private minVelocityThreshold: number = 5; // Minimum velocity to consider for direction
 
@@ -247,35 +247,39 @@ export class CameraController {
       }
     }
 
-    // Calculate look-ahead position
-    const lookAhead = targetVel.clone().multiplyScalar(this.lookAheadFactor);
-    const desiredTarget = targetPos.clone().add(lookAhead);
-
     // Calculate desired camera position - follow behind the target
     let desiredPosition: THREE.Vector3;
     const speed = targetVel.length();
 
-    if (speed > this.minVelocityThreshold) {
-      // Position camera behind the velocity direction
-      const behindDir = targetVel.clone().normalize().multiplyScalar(-40); // Increased distance
-      behindDir.y = 20; // Keep camera elevated
-      desiredPosition = targetPos.clone().add(behindDir);
+    if (speed > 0.1) {
+      // Much lower threshold for better tracking
+      // Position camera behind the projectile along its flight path
+      const behindDistance = this.currentMode === CameraMode.FOLLOW_INTERCEPTOR ? 15 : 20; // Closer for interceptors
+      // Get normalized velocity direction
+      const velocityDir = targetVel.clone().normalize();
+      // Camera offset is in the opposite direction of velocity (behind the projectile)
+      const cameraOffset = velocityDir.multiplyScalar(-behindDistance);
+      // Add the offset to position camera behind
+      desiredPosition = targetPos.clone().add(cameraOffset);
 
-      // For fast-moving interceptors, increase smoothness for smoother tracking
+      // Adjust smoothness based on speed
+      let smoothness = this.followSmoothness;
       if (this.currentMode === CameraMode.FOLLOW_INTERCEPTOR && speed > 100) {
-        this.camera.position.lerp(desiredPosition, this.followSmoothness * 1.5);
-      } else {
-        this.camera.position.lerp(desiredPosition, this.followSmoothness);
+        smoothness *= 2; // More smoothing for fast interceptors
+      } else if (speed < 10) {
+        smoothness *= 0.5; // Less smoothing for slow projectiles
       }
+
+      this.camera.position.lerp(desiredPosition, smoothness);
     } else {
-      // If not moving or moving slowly, use default offset
-      desiredPosition = targetPos.clone().add(this.followOffset);
+      // If not moving, position camera at default offset behind
+      const defaultBehind = new THREE.Vector3(0, 10, 20);
+      desiredPosition = targetPos.clone().add(defaultBehind);
       this.camera.position.lerp(desiredPosition, this.followSmoothness);
     }
 
-    // Look at target
-    // For a tailing camera, we want to look at the target itself or slightly ahead
-    this.camera.lookAt(desiredTarget);
+    // Always look directly at the projectile to keep it centered
+    this.camera.lookAt(targetPos);
   }
 
   private updateFirstPersonMode() {

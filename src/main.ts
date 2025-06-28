@@ -1255,7 +1255,8 @@ async function startDeferredInitialization() {
     batteries.forEach(battery => {
       battery.setResourceManagement(simulationControls.gameMode);
       if (radarNetwork) battery.setRadarNetwork(radarNetwork);
-      battery.setInstanceManager(projectileInstanceManager);
+      // Don't set instance manager for batteries - GLTF models don't work with instancing
+      // battery.setInstanceManager(projectileInstanceManager);
       threatManager.registerBattery(battery);
 
       // Apply auto-repair rate based on saved upgrade level

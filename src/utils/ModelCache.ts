@@ -45,15 +45,15 @@ export class ModelCache {
           let totalTriangles = 0;
           let meshCount = 0;
 
-          // Remove any debug helpers or lines from the model
+          // Remove any debug helpers from the model - but be very careful
           const toRemove: THREE.Object3D[] = [];
           model.traverse(child => {
-            // Remove any Line objects or helpers
+            // Only remove objects explicitly named as helpers or debug
+            // Don't remove based on type - Lines/LineSegments might be part of the model
             if (
-              child instanceof THREE.Line ||
-              child instanceof THREE.LineSegments ||
               child.name.toLowerCase().includes('helper') ||
-              child.name.toLowerCase().includes('debug')
+              child.name.toLowerCase().includes('debug') ||
+              child.name.toLowerCase().includes('bone') // Sometimes bones are left in exports
             ) {
               toRemove.push(child);
               debug.warn(`Removing debug object from model: ${child.name} (${child.type})`);
@@ -123,31 +123,46 @@ export class ModelCache {
     // Ensure model is loaded
     const originalModel = await this.loadModel(url);
 
-    // Create instance that reuses materials to prevent shader explosion
-    const instance = new THREE.Group();
-    
-    originalModel.traverse((child) => {
-      if (child instanceof THREE.Mesh) {
+    // Helper function to recursively create instances while preserving hierarchy
+    const createInstanceRecursive = (original: THREE.Object3D): THREE.Object3D | null => {
+      if (original instanceof THREE.Mesh) {
         // Create new mesh with same geometry but REUSE material
-        const newMesh = new THREE.Mesh(child.geometry, child.material);
-        newMesh.name = child.name;
-        newMesh.position.copy(child.position);
-        newMesh.rotation.copy(child.rotation);
-        newMesh.scale.copy(child.scale);
-        newMesh.castShadow = child.castShadow;
-        newMesh.receiveShadow = child.receiveShadow;
-        instance.add(newMesh);
-      } else if (child instanceof THREE.Group) {
-        // Clone groups but reuse their materials
+        const newMesh = new THREE.Mesh(original.geometry, original.material);
+        newMesh.name = original.name;
+        newMesh.position.copy(original.position);
+        newMesh.rotation.copy(original.rotation);
+        newMesh.scale.copy(original.scale);
+        newMesh.castShadow = original.castShadow;
+        newMesh.receiveShadow = original.receiveShadow;
+        newMesh.visible = original.visible;
+        newMesh.frustumCulled = original.frustumCulled;
+        return newMesh;
+      } else if (original instanceof THREE.Group || original.type === 'Object3D') {
+        // Create new group and preserve hierarchy
         const newGroup = new THREE.Group();
-        newGroup.name = child.name;
-        newGroup.position.copy(child.position);
-        newGroup.rotation.copy(child.rotation);
-        newGroup.scale.copy(child.scale);
-        instance.add(newGroup);
+        newGroup.name = original.name;
+        newGroup.position.copy(original.position);
+        newGroup.rotation.copy(original.rotation);
+        newGroup.scale.copy(original.scale);
+        newGroup.visible = original.visible;
+        
+        // Recursively add children to preserve hierarchy
+        original.children.forEach(child => {
+          const newChild = createInstanceRecursive(child);
+          if (newChild) {
+            newGroup.add(newChild);
+          }
+        });
+        
+        return newGroup;
       }
-    });
+      
+      // Skip other types (lights, cameras, etc.)
+      return null;
+    };
     
+    // Create instance preserving full hierarchy
+    const instance = createInstanceRecursive(originalModel) as THREE.Group;
     return instance;
 
     /* Instance creation code - temporarily disabled for debugging

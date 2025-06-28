@@ -53,7 +53,7 @@ export class Projectile {
   private radius: number;
   private maxLifetime: number;
   private batteryPosition?: THREE.Vector3;
-  private useInstancing: boolean = false;
+  useInstancing: boolean = false;
   private instanceManager?: any;
   private instanceId?: number;
   
@@ -813,12 +813,7 @@ export class Projectile {
   ): Promise<void> {
     try {
       const modelCache = ModelCache.getInstance();
-      // Choose model quality based on performance needs
-      // Ultra simple: ~10% triangles, Simple: ~20% triangles
-      const modelPath =
-        quality === 'simple'
-          ? 'assets/tamir/scene_simple.glb'
-          : 'assets/tamir/scene_ultra_simple.glb';
+      const modelPath = 'assets/tamir/scene.gltf'; // Use full model
       const model = await modelCache.createInstance(modelPath);
 
       // Store reference to old mesh
@@ -838,7 +833,7 @@ export class Projectile {
       );
 
       // Scale to match the desired size (based on radius parameter)
-      const targetSize = scale * 15; // Increased size - model might be too small
+      const targetSize = scale * 15; // Model scale from working version
       const scaleFactor = maxDimension > 0 ? targetSize / maxDimension : 1;
       this.mesh.scale.setScalar(scaleFactor);
       debug.asset(
@@ -849,43 +844,18 @@ export class Projectile {
       // Set initial rotation to match the cone's orientation
       this.mesh.rotation.x = Math.PI / 2; // Point forward
 
-      // Remove any debug lines and apply materials
-      const toRemove: THREE.Object3D[] = [];
+      // Apply materials but DON'T remove parts
       this.mesh.traverse(child => {
-        // Remove any Line objects that might be in the model
-        if (
-          child instanceof THREE.Line ||
-          child instanceof THREE.LineSegments ||
-          child.name.toLowerCase().includes('helper') ||
-          child.name.toLowerCase().includes('debug')
-        ) {
-          toRemove.push(child);
-          debug.warn(`Removing debug object from projectile model: ${child.name} (${child.type})`);
-        } else if (child instanceof THREE.Mesh) {
+        if (child instanceof THREE.Mesh) {
           child.castShadow = true;
           child.receiveShadow = true;
-          child.frustumCulled = true; // Enable frustum culling
-          child.visible = true; // Ensure visible
+          child.frustumCulled = true;
+          child.visible = true;
 
-          // Simplify material for performance
+          // Ensure materials are visible
           if (child.material) {
             const materials = Array.isArray(child.material) ? child.material : [child.material];
             materials.forEach(material => {
-              // Only modify properties that exist
-              if ('metalness' in material) {
-                material.metalness = 0.7;
-              }
-              if ('roughness' in material) {
-                material.roughness = 0.3;
-              }
-              // Only set emissive if the property exists
-              if ('emissive' in material && material.emissive) {
-                material.emissive = new THREE.Color(0x0066ff);
-              }
-              if ('emissiveIntensity' in material) {
-                material.emissiveIntensity = 0.2; // Increased for visibility
-              }
-              // Ensure material is visible
               if ('opacity' in material) {
                 material.opacity = 1.0;
               }
@@ -897,18 +867,11 @@ export class Projectile {
         }
       });
 
-      // Remove any debug objects
-      toRemove.forEach(obj => {
-        if (obj.parent) {
-          obj.parent.remove(obj);
-        }
-      });
-
       // Position and add to scene
       this.mesh.position.copy(this.body.position as any);
       scene.add(this.mesh);
 
-      // Now remove old mesh after new one is added
+      // Remove old mesh
       scene.remove(oldMesh);
       if (oldMesh instanceof THREE.Mesh) {
         oldMesh.geometry.dispose();
@@ -917,26 +880,28 @@ export class Projectile {
 
       debug.asset(
         'Tamir model loaded',
-        `at position ${this.mesh.position
-          .toArray()
-          .map(n => n.toFixed(2))
-          .join(', ')}`
+        `at position ${this.mesh.position.toArray().map(n => n.toFixed(2)).join(', ')}`
       );
-
-      // Debug: Add a bright box to show where the model should be (disabled to prevent visual artifacts)
-      // if (debug.isEnabled()) {
-      //   const debugBox = new THREE.Mesh(
-      //     new THREE.BoxGeometry(scale * 2, scale * 2, scale * 10),
-      //     new THREE.MeshBasicMaterial({ color: 0xff00ff, wireframe: true })
-      //   )
-      //   debugBox.position.copy(this.mesh.position)
-      //   debugBox.rotation.copy(this.mesh.rotation)
-      //   scene.add(debugBox)
-      //   setTimeout(() => scene.remove(debugBox), 5000) // Remove after 5 seconds
-      // }
     } catch (error) {
-      debug.error('Failed to load optimized Tamir model:', error);
-      // Keep using the simple cone on error
+      debug.error('Failed to load Tamir model:', error);
     }
+  }
+  
+  private logModelHierarchy(obj: THREE.Object3D, depth: number): void {
+    const indent = '  '.repeat(depth);
+    let info = `${indent}${obj.name || 'unnamed'} (${obj.type})`;
+    
+    if (obj instanceof THREE.Mesh) {
+      const box = new THREE.Box3().setFromObject(obj);
+      const size = box.getSize(new THREE.Vector3());
+      info += ` - Size: ${size.x.toFixed(2)}x${size.y.toFixed(2)}x${size.z.toFixed(2)}`;
+      info += ` - Scale: ${obj.scale.x.toFixed(2)},${obj.scale.y.toFixed(2)},${obj.scale.z.toFixed(2)}`;
+    }
+    
+    debug.asset(info);
+    
+    obj.children.forEach(child => {
+      this.logModelHierarchy(child, depth + 1);
+    });
   }
 }
