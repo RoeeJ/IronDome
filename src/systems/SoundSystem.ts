@@ -42,6 +42,7 @@ export class SoundSystem {
   private bgmEnabled: boolean = true;
   private sfxVolume: number = 1.0;
   private bgmVolume: number = 0.5;
+  private audioContextResumed = false;
 
   private constructor() {
     // Initialize Three.js audio
@@ -420,7 +421,7 @@ export class SoundSystem {
     });
   }
 
-  playBackgroundMusic() {
+  async playBackgroundMusic() {
     // Don't start if disabled or already playing
     if (!this.bgmEnabled || this.bgmInstance) return;
 
@@ -431,6 +432,9 @@ export class SoundSystem {
         return;
       }
     }
+
+    // Ensure audio context is resumed before playing
+    await this.ensureAudioContext();
 
     const bgmId = this.play('bgm_picaroon', 'bgm', {
       volume: 1.0, // Don't multiply by bgmVolume here, it's already applied in play()
@@ -531,6 +535,22 @@ export class SoundSystem {
     return this.bgmEnabled;
   }
 
+  isBGMPlaying(): boolean {
+    // Check both bgmInstance and scan active sounds to be sure
+    if (this.bgmInstance && this.bgmInstance.audio.isPlaying) {
+      return true;
+    }
+    
+    // Double-check active sounds in case bgmInstance is stale
+    for (const [, sound] of this.activeSounds) {
+      if (sound.category === 'bgm' && sound.audio.isPlaying) {
+        return true;
+      }
+    }
+    
+    return false;
+  }
+
   setSFXVolume(volume: number) {
     this.sfxVolume = Math.max(0, Math.min(1, volume));
     localStorage.setItem('ironDome_sfxVolume', this.sfxVolume.toString());
@@ -554,7 +574,10 @@ export class SoundSystem {
 
     // Update BGM volume if playing
     if (this.bgmInstance) {
-      this.bgmInstance.audio.setVolume(this.bgmVolume);
+      // Recalculate volume based on all factors
+      const categoryVolume = this.categoryVolumes.get('bgm') || 1.0;
+      const finalVolume = this.bgmInstance.originalVolume * categoryVolume * this.bgmVolume;
+      this.bgmInstance.audio.setVolume(finalVolume);
     }
   }
 
@@ -591,6 +614,19 @@ export class SoundSystem {
     if (bgmEnabled !== null) this.bgmEnabled = bgmEnabled === 'true';
     if (sfxVolume !== null) this.sfxVolume = parseFloat(sfxVolume);
     if (bgmVolume !== null) this.bgmVolume = parseFloat(bgmVolume);
+  }
+
+  async ensureAudioContext(): Promise<void> {
+    const context = THREE.AudioContext.getContext();
+    if (context.state === 'suspended' && !this.audioContextResumed) {
+      try {
+        await context.resume();
+        this.audioContextResumed = true;
+        debug.log('SoundSystem', 'AudioContext resumed successfully');
+      } catch (error) {
+        debug.error('SoundSystem', 'Failed to resume AudioContext:', error);
+      }
+    }
   }
 
   // Update method for fading

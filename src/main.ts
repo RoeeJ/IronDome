@@ -1250,7 +1250,20 @@ let isHidingLoadingScreen = false;
 let isDeferredInitStarted = false;
 
 // Function to hide loading screen with multiple fallbacks
-function hideLoadingScreen() {
+async function hideLoadingScreen() {
+  // Try to start BGM when hiding loading screen (user likely interacted)
+  await soundSystem.ensureAudioContext();
+  if (soundSystem.getBGMEnabled() && !soundSystem.isBGMPlaying()) {
+    soundSystem.playBackgroundMusic().catch(() => {
+      debug.log('BGM still blocked after loading screen hide');
+    });
+  }
+  
+  // Hide interaction prompt if shown
+  const interactionEl = document.getElementById('loading-interaction');
+  if (interactionEl) {
+    interactionEl.classList.remove('show');
+  }
   // Prevent multiple concurrent calls
   if (isHidingLoadingScreen) {
     debug.log('hideLoadingScreen already in progress, skipping');
@@ -1888,10 +1901,54 @@ if (inspectorMode) {
 // Update loading status
 updateLoadingStatus('Ready to launch!');
 
-// Start background music only if enabled
+// Show interaction prompt if audio context is suspended
+const checkAudioContext = () => {
+  const context = THREE.AudioContext.getContext();
+  if (context.state === 'suspended') {
+    const interactionEl = document.getElementById('loading-interaction');
+    if (interactionEl) {
+      interactionEl.classList.add('show');
+    }
+  }
+};
+
+// Check after a short delay to let browser determine autoplay capability
+setTimeout(checkAudioContext, 100);
+
+// Start background music after user interaction (browser autoplay policy)
+const startBGMOnInteraction = async () => {
+  if (soundSystem.getBGMEnabled() && !soundSystem.isBGMPlaying()) {
+    await soundSystem.playBackgroundMusic();
+  }
+};
+
+// Try to start BGM immediately (may be blocked by browser)
 if (soundSystem.getBGMEnabled()) {
-  soundSystem.playBackgroundMusic();
+  soundSystem.playBackgroundMusic().catch(() => {
+    debug.log('BGM autoplay blocked, waiting for user interaction');
+  });
 }
+
+// Add user interaction handler for BGM
+const handleFirstInteraction = async () => {
+  // Hide interaction prompt
+  const interactionEl = document.getElementById('loading-interaction');
+  if (interactionEl) {
+    interactionEl.classList.remove('show');
+  }
+  
+  await soundSystem.ensureAudioContext();
+  await startBGMOnInteraction();
+  // Remove listeners after first interaction
+  document.removeEventListener('click', handleFirstInteraction);
+  document.removeEventListener('touchstart', handleFirstInteraction);
+  document.removeEventListener('keydown', handleFirstInteraction);
+};
+
+// Listen for first user interaction
+document.addEventListener('click', handleFirstInteraction, { passive: true });
+document.addEventListener('touchstart', handleFirstInteraction, { passive: true });
+document.addEventListener('keydown', handleFirstInteraction, { passive: true });
 
 // Initial UI render
 updateUIMode();
