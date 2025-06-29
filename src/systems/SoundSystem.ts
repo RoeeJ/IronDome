@@ -117,7 +117,7 @@ export class SoundSystem {
 
       debug.log('Audio context initialized', { state: this.audioContext.state });
 
-      // Set up one-time user interaction handler to resume audio context
+      // Set up user interaction handler to resume audio context and retry BGM
       const resumeAudio = () => {
         if (this.audioContext && this.audioContext.state === 'suspended') {
           this.audioContext.resume().then(() => {
@@ -133,7 +133,14 @@ export class SoundSystem {
             this.playBackgroundMusic();
           }
         }
-        // Remove listeners after first interaction
+
+        // Keep listeners active until BGM successfully starts
+        if (this.bgmEnabled && !this.bgmInstance) {
+          // Don't remove listeners yet - BGM hasn't started
+          return;
+        }
+
+        // Remove listeners only after BGM is playing
         document.removeEventListener('click', resumeAudio);
         document.removeEventListener('keydown', resumeAudio);
         document.removeEventListener('touchstart', resumeAudio);
@@ -716,5 +723,30 @@ export class SoundSystem {
     if (savedBGMVolume !== null) {
       this.bgmVolume = parseFloat(savedBGMVolume);
     }
+  }
+
+  // Debug method to check BGM status
+  debugBGM(): void {
+    debug.log('BGM Debug Info:', {
+      bgmEnabled: this.bgmEnabled,
+      hasBgmInstance: !!this.bgmInstance,
+      bgmVolume: this.bgmVolume,
+      audioContextState: this.audioContext?.state,
+      bgmAudioElement: this.bgmInstance?.audio,
+      bgmPlaying: this.bgmInstance?.audio && !this.bgmInstance.audio.paused,
+      bgmCurrentTime: this.bgmInstance?.audio?.currentTime,
+      bgmDuration: this.bgmInstance?.audio?.duration,
+      bgmReadyState: this.bgmInstance?.audio?.readyState,
+      bgmError: this.bgmInstance?.audio?.error,
+    });
+  }
+
+  // Force retry BGM playback
+  retryBGM(): void {
+    debug.log('Manually retrying BGM playback');
+    if (this.bgmInstance) {
+      this.stopBackgroundMusic();
+    }
+    this.playBackgroundMusic();
   }
 }

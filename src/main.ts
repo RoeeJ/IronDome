@@ -1119,6 +1119,9 @@ simulationControls.autoIntercept = legacySandboxControls.autoIntercept;
 // Sound controls
 const soundFolder = gui.addFolder('Sound Settings');
 const soundSystem = SoundSystem.getInstance();
+// Store soundSystem globally for debugging
+(window as any).__soundSystem = soundSystem;
+
 const soundControls = {
   enabled: soundSystem.isEnabled(),
   masterVolume: soundSystem.getMasterVolume(),
