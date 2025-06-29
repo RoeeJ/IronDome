@@ -551,7 +551,7 @@ export class Projectile {
   setTargetPoint(targetPoint: THREE.Vector3): void {
     // Update the target position for improved targeting
     if (!targetPoint) {
-      debug.warning('setTargetPoint called with undefined targetPoint');
+      debug.warn('setTargetPoint called with undefined targetPoint');
       return;
     }
 
@@ -583,7 +583,7 @@ export class Projectile {
 
     // Don't guide if moving too slowly
     if (currentSpeed < 10) {
-      debug.category('Guidance', `[SKIP] Speed too low: ${currentSpeed.toFixed(1)} m/s`);
+      // Removed excessive logging - speed too low
       return;
     }
 
@@ -623,11 +623,7 @@ export class Projectile {
     ) {
       // Still have enough energy
 
-      debug.category(
-        'Guidance',
-        `[RE-ENGAGE] Missed target! Min dist: ${this.minDistanceToTarget.toFixed(1)}m, ` +
-          `Current: ${distance.toFixed(1)}m, Attempting turnaround`
-      );
+      // Removed re-engage miss logging
 
       this.isReEngaging = true;
       this.reEngagementAttempts++;
@@ -636,16 +632,7 @@ export class Projectile {
 
     this.lastTargetDistance = distance;
 
-    // DEBUG: Log basic guidance info
-    debug.category(
-      'Guidance',
-      `[UPDATE] Distance to target: ${distance.toFixed(
-        1
-      )}m, Speed: ${currentSpeed.toFixed(1)} m/s, Flight time: ${(
-        (Date.now() - this.launchTime) /
-        1000
-      ).toFixed(1)}s`
-    );
+    // Removed excessive guidance logging
 
     // Continue guiding even when close to ensure hit
     // Proximity fuse will handle detonation
@@ -662,13 +649,7 @@ export class Projectile {
       const leadTime = timeToImpact * 0.5; // Lead by half the time to impact
       predictedTargetPos.add(targetVel.clone().multiplyScalar(leadTime));
 
-      // DEBUG: Log prediction details
-      debug.category(
-        'Guidance',
-        `[PREDICTION] Target speed: ${targetSpeed.toFixed(
-          1
-        )} m/s, Time to impact: ${timeToImpact.toFixed(2)}s, Lead time: ${leadTime.toFixed(2)}s`
-      );
+      // Removed excessive prediction logging
     }
 
     // Calculate line of sight to predicted position
@@ -680,10 +661,7 @@ export class Projectile {
 
     // Only guide if we're not too close (avoid overshooting)
     if (distance < 3) {
-      debug.category(
-        'Guidance',
-        `[CLOSE RANGE] Distance < 5m, letting momentum carry - Distance: ${distance.toFixed(1)}m`
-      );
+      // Removed excessive close range logging
       this.orientMissile(currentVelocity);
       return; // Let momentum and proximity fuse handle it
     }
@@ -702,7 +680,7 @@ export class Projectile {
       const turnForce = turnAxis.multiplyScalar(this.body.mass * 100);
       velocityError.add(turnForce);
 
-      debug.category('Guidance', '[RE-ENGAGE] Using aggressive turn parameters');
+      // Removed re-engage logging
     }
 
     const correctionForce = velocityError.multiplyScalar(correctionGain);
@@ -716,13 +694,7 @@ export class Projectile {
       correctionForce.normalize().multiplyScalar(maxForce);
     }
 
-    // DEBUG: Log forces
-    debug.category(
-      'Guidance',
-      `[FORCES] Correction force: ${forceBeforeLimit.toFixed(1)}N (limited: ${correctionForce
-        .length()
-        .toFixed(1)}N), Max: ${maxForce.toFixed(1)}N`
-    );
+    // Removed excessive force logging
 
     // Apply the force with gravity compensation
     const gravityCompensation = this.body.mass * 9.81;
@@ -742,12 +714,7 @@ export class Projectile {
     const thrustForce = Math.max(0, speedError * this.body.mass * 0.5);
 
     if (thrustForce > 0 && thrustDirection.length() > 0) {
-      debug.category(
-        'Guidance',
-        `[THRUST] Thrust force: ${thrustForce.toFixed(1)}N, Current speed: ${currentSpeed.toFixed(
-          1
-        )} m/s, Target: ${targetSpeed} m/s`
-      );
+      // Removed thrust logging
       this.body.applyForce(
         new CANNON.Vec3(
           thrustDirection.x * thrustForce,
@@ -762,7 +729,7 @@ export class Projectile {
     if (this.isReEngaging && distance < 20) {
       const closingVelocity = -toTarget.normalize().dot(currentVelocity);
       if (closingVelocity > 0) {
-        debug.category('Guidance', '[RE-ENGAGE] Successfully re-acquired target!');
+        // Removed re-engage success logging
         this.isReEngaging = false;
         // Reset proximity fuse for new approach
         if (this.proximityFuse) {

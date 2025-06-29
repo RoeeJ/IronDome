@@ -1,12 +1,25 @@
 /**
  * @deprecated Use `import { debug } from '../utils/logger'` instead
- * 
+ *
  * Debug logger that only outputs when ?debug is in the URL
  */
 export class DebugLogger {
   private static instance: DebugLogger;
   private enabled: boolean;
   private prefix: string = '[IronDome]';
+  private disabledCategories: Set<string> = new Set([
+    'Guidance',
+    'ProximityFuse',
+    'WindowUpdate',
+    'CameraUpdate',
+    'MouseMove',
+    'LaunchEffects',
+    'Thrust',
+    'Forces',
+    'Prediction',
+    'Battery',
+    'InterceptorAllocation',
+  ]);
 
   protected constructor() {
     // Check if debug mode is enabled via query parameter
@@ -54,7 +67,7 @@ export class DebugLogger {
    * Log with a specific category
    */
   category(category: string, ...args: any[]): void {
-    if (this.enabled) {
+    if (this.enabled && !this.disabledCategories.has(category)) {
       console.log(`${this.prefix}[${category}]`, ...args);
     }
   }
@@ -87,7 +100,7 @@ export class DebugLogger {
    * Create a named logger for a specific module
    */
   module(moduleName: string): ModuleLogger {
-    return new ModuleLogger(moduleName, this.enabled);
+    return new ModuleLogger(moduleName, this.enabled, this.disabledCategories);
   }
 
   /**
@@ -104,17 +117,24 @@ export class DebugLogger {
 export class ModuleLogger {
   constructor(
     private moduleName: string,
-    private enabled: boolean
+    private enabled: boolean,
+    private disabledCategories?: Set<string>
   ) {}
 
   log(...args: any[]): void {
-    if (this.enabled) {
+    if (
+      this.enabled &&
+      (!this.disabledCategories || !this.disabledCategories.has(this.moduleName))
+    ) {
       console.log(`[IronDome][${this.moduleName}]`, ...args);
     }
   }
 
   warn(...args: any[]): void {
-    if (this.enabled) {
+    if (
+      this.enabled &&
+      (!this.disabledCategories || !this.disabledCategories.has(this.moduleName))
+    ) {
       console.warn(`[IronDome][${this.moduleName}]`, ...args);
     }
   }

@@ -226,10 +226,14 @@ export class BuildingSystem {
       if ((window as any).__optimizedDayNight) {
         const timeObj = (window as any).__optimizedDayNight.getTime();
         const hours = timeObj.hours;
-        
+
         // Generate per-building characteristics (simplified version)
         const buildingHash = this.hashBuildingId(id);
-        const buildingType = this.getBuildingLightingType(position, { x: width, y: height, z: depth }, buildingHash);
+        const buildingType = this.getBuildingLightingType(
+          position,
+          { x: width, y: height, z: depth },
+          buildingHash
+        );
         litChance = this.calculateBuildingLitPercentage(hours, buildingType, buildingHash);
       } else {
         debug.warn('optimizedDayNight not available during building creation');
@@ -1567,7 +1571,7 @@ export class BuildingSystem {
         if (switched) switchedCount++;
       }
       if (forceUpdate) {
-        console.log(`Turned OFF ${switchedCount} windows (force update)`);
+        // Removed window state logging
       }
     }
 
@@ -1786,7 +1790,7 @@ export class BuildingSystem {
     let hash = 0;
     for (let i = 0; i < id.length; i++) {
       const char = id.charCodeAt(i);
-      hash = ((hash << 5) - hash) + char;
+      hash = (hash << 5) - hash + char;
       hash = hash & hash; // Convert to 32-bit integer
     }
     return Math.abs(hash);
@@ -1795,7 +1799,11 @@ export class BuildingSystem {
   /**
    * Determine building type based on size and position for lighting behavior
    */
-  private getBuildingLightingType(position: THREE.Vector3, scale: { x: number; y: number; z: number }, hash: number): 'residential' | 'office' | 'commercial' | 'industrial' {
+  private getBuildingLightingType(
+    position: THREE.Vector3,
+    scale: { x: number; y: number; z: number },
+    hash: number
+  ): 'residential' | 'office' | 'commercial' | 'industrial' {
     const distanceFromCenter = Math.sqrt(position.x * position.x + position.z * position.z);
     const heightCategory = scale.y < 30 ? 'low' : scale.y < 60 ? 'medium' : 'high';
     const hashMod = hash % 100;
@@ -1806,14 +1814,15 @@ export class BuildingSystem {
       if (heightCategory === 'medium') return hashMod < 50 ? 'office' : 'commercial';
       return hashMod < 40 ? 'residential' : 'commercial';
     }
-    
+
     // Mid area (300-600m) - mixed use
     if (distanceFromCenter < 600) {
       if (heightCategory === 'high') return hashMod < 60 ? 'office' : 'residential';
-      if (heightCategory === 'medium') return hashMod < 40 ? 'residential' : hashMod < 70 ? 'commercial' : 'office';
+      if (heightCategory === 'medium')
+        return hashMod < 40 ? 'residential' : hashMod < 70 ? 'commercial' : 'office';
       return hashMod < 70 ? 'residential' : 'commercial';
     }
-    
+
     // Outer area (> 600m) - mostly residential/industrial
     if (heightCategory === 'low') return hashMod < 20 ? 'industrial' : 'residential';
     if (heightCategory === 'medium') return hashMod < 80 ? 'residential' : 'industrial';
@@ -1823,45 +1832,49 @@ export class BuildingSystem {
   /**
    * Calculate target lit percentage for a specific building type and time
    */
-  private calculateBuildingLitPercentage(hours: number, type: 'residential' | 'office' | 'commercial' | 'industrial', hash: number): number {
+  private calculateBuildingLitPercentage(
+    hours: number,
+    type: 'residential' | 'office' | 'commercial' | 'industrial',
+    hash: number
+  ): number {
     // Base percentages for different building types at different times
     const basePercentages = {
       residential: {
-        morning: 0.4,    // People getting ready for work
-        day: 0.05,       // Most people at work
-        midday: 0.02,    // Minimal activity
+        morning: 0.4, // People getting ready for work
+        day: 0.05, // Most people at work
+        midday: 0.02, // Minimal activity
         afternoon: 0.08, // Some early returns
-        evening: 0.7,    // Peak home activity
-        night: 0.6,      // Evening activities
-        lateNight: 0.3   // Some people still awake
+        evening: 0.7, // Peak home activity
+        night: 0.6, // Evening activities
+        lateNight: 0.3, // Some people still awake
       },
       office: {
-        morning: 0.1,    // Early arrivals
-        day: 0.8,        // Full work activity
-        midday: 0.9,     // Peak work hours
-        afternoon: 0.7,  // Afternoon work
-        evening: 0.3,    // Overtime workers
-        night: 0.1,      // Night shift/security
-        lateNight: 0.05  // Minimal activity
+        morning: 0.1, // Early arrivals
+        day: 0.8, // Full work activity
+        midday: 0.9, // Peak work hours
+        afternoon: 0.7, // Afternoon work
+        evening: 0.3, // Overtime workers
+        night: 0.1, // Night shift/security
+        lateNight: 0.05, // Minimal activity
       },
       commercial: {
-        morning: 0.2,    // Setup/early opening
-        day: 0.6,        // Business hours
-        midday: 0.7,     // Peak business
-        afternoon: 0.6,  // Continued business
-        evening: 0.8,    // Peak shopping/dining
-        night: 0.4,      // Late shopping/entertainment
-        lateNight: 0.1   // Closing/cleanup
+        morning: 0.2, // Setup/early opening
+        day: 0.6, // Business hours
+        midday: 0.7, // Peak business
+        afternoon: 0.6, // Continued business
+        evening: 0.8, // Peak shopping/dining
+        night: 0.4, // Late shopping/entertainment
+        lateNight: 0.1, // Closing/cleanup
       },
       industrial: {
-        morning: 0.3,    // Shift start
-        day: 0.6,        // Day shift
-        midday: 0.6,     // Continued operations
-        afternoon: 0.6,  // Shift continuation
-        evening: 0.4,    // Evening shift
-        night: 0.4,      // Night shift
-        lateNight: 0.3   // Reduced operations
-      }
+        morning: 0.3, // Shift start
+        day: 0.6, // Day shift
+        midday: 0.6, // Continued operations
+        afternoon: 0.6, // Shift continuation
+        evening: 0.4, // Evening shift
+        night: 0.4, // Night shift
+        lateNight: 0.3, // Reduced operations
+      },
     };
 
     // Determine time period
@@ -1875,11 +1888,11 @@ export class BuildingSystem {
     else period = 'lateNight';
 
     const basePercentage = basePercentages[type][period];
-    
+
     // Add per-building variation (-20% to +20%)
     const variation = ((hash % 40) - 20) / 100; // -0.2 to +0.2
     const finalPercentage = Math.max(0, Math.min(1, basePercentage + variation));
-    
+
     return finalPercentage;
   }
 

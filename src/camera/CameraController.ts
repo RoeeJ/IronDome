@@ -141,7 +141,7 @@ export class CameraController {
         break;
     }
 
-    debug.log(`Camera mode changed from ${previousMode} to ${mode}`);
+    // Removed camera mode change logging
   }
 
   private setupCinematicPath() {
@@ -257,7 +257,7 @@ export class CameraController {
 
       if (this.lingerTimer <= 0) {
         this.isLingering = false;
-        debug.log('Linger complete, searching for new target...');
+        // Linger complete, searching for new target
         // Will find new target on next update
       }
       return;

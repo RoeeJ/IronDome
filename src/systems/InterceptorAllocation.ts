@@ -20,7 +20,10 @@ interface BatteryCapability {
 }
 
 interface AllocationResult {
-  allocations: Map<string, { battery: IronDomeBattery; interceptorCount: number; batteryIndex?: number }>;
+  allocations: Map<
+    string,
+    { battery: IronDomeBattery; interceptorCount: number; batteryIndex?: number }
+  >;
   unassignedThreats: Threat[];
   efficiency: number;
 }
@@ -36,7 +39,7 @@ export class InterceptorAllocation {
   optimizeAllocation(threats: Threat[], batteries: IronDomeBattery[]): AllocationResult {
     // Store batteries for threat analysis
     this.batteries = batteries;
-    
+
     // Create a map to track battery indices
     const batteryIndexMap = new Map<IronDomeBattery, number>();
     batteries.forEach((battery, index) => {
@@ -51,14 +54,7 @@ export class InterceptorAllocation {
     // Step 2: Assess battery capabilities
     const batteryCapabilities = this.assessBatteries(batteries, threats);
 
-    debug.module('InterceptorAllocation').log(
-      `Battery capabilities:`,
-      batteryCapabilities.map(cap => ({
-        batteryInterceptors: cap.availableInterceptors,
-        coverage: cap.coverage.size,
-        successRate: cap.successRate,
-      }))
-    );
+    // Removed excessive battery capabilities logging
 
     // Step 3: Use dynamic programming for optimal allocation
     const allocations = this.dynamicAllocation(threatMetrics, batteryCapabilities, batteryIndexMap);
@@ -70,11 +66,7 @@ export class InterceptorAllocation {
     // Calculate efficiency metric
     const efficiency = this.calculateAllocationEfficiency(allocations, threatMetrics);
 
-    debug
-      .module('InterceptorAllocation')
-      .log(
-        `Allocation complete: ${allocations.size} allocated, ${unassignedThreats.length} unassigned`
-      );
+    // Removed excessive allocation complete logging
 
     return { allocations, unassignedThreats, efficiency };
   }
@@ -111,22 +103,22 @@ export class InterceptorAllocation {
     const altitude = threatPos.y;
     if (altitude < 500) priority += 10;
     else if (altitude < 1000) priority += 5;
-    
+
     // CRITICAL: Battery proximity factor (0-100+ points)
     // Check if threat is approaching any battery
     let minDistanceToBattery = Infinity;
     let closestBattery: IronDomeBattery | null = null;
-    
+
     for (const battery of this.batteries) {
       const batteryPos = battery.getPosition();
       const distance = threatPos.distanceTo(batteryPos);
-      
+
       if (distance < minDistanceToBattery) {
         minDistanceToBattery = distance;
         closestBattery = battery;
       }
     }
-    
+
     // Exponentially increase priority as threat gets closer to batteries
     if (minDistanceToBattery < 200) {
       // Critical range - battery in immediate danger
@@ -141,7 +133,7 @@ export class InterceptorAllocation {
       // Low danger range
       priority += 20;
     }
-    
+
     // Additional priority if threat is on collision course with battery
     if (closestBattery && minDistanceToBattery < 400) {
       const impactPoint = threat.getImpactPoint();
@@ -171,7 +163,6 @@ export class InterceptorAllocation {
       Math.ceil(requiredForHighPk * (1 + difficulty)),
       4 // Cap at 4
     );
-
 
     return {
       threat,
@@ -212,7 +203,7 @@ export class InterceptorAllocation {
         successRate: this.getBatterySuccessRate(battery),
       };
     });
-    
+
     return batteryCapabilities;
   }
 
