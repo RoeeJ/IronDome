@@ -26,7 +26,7 @@ export class InstancedProjectileRenderer {
     this.scene = scene;
     this.maxProjectiles = maxProjectiles;
     this.camera = camera || scene.userData.camera;
-    
+
     // Initialize LOD system if camera available
     if (this.camera) {
       this.lodSystem = SimpleLODSystem.getInstance(this.camera);
@@ -128,7 +128,7 @@ export class InstancedProjectileRenderer {
       let scale = 1;
       if (this.camera) {
         const distance = position.distanceTo(this.camera.position);
-        
+
         // Cull very distant interceptors
         if (distance > this.MAX_RENDER_DISTANCE) {
           scale = 0; // Hide by scaling to 0
@@ -137,7 +137,7 @@ export class InstancedProjectileRenderer {
           scale = 0.8;
         }
       }
-      
+
       this.dummy.scale.set(scale, scale, scale);
       this.dummy.updateMatrix();
 

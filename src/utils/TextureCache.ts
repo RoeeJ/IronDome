@@ -20,12 +20,15 @@ export class TextureCache {
   /**
    * Get or create a particle texture for trails/effects
    */
-  getParticleTexture(size: number = 64, colors: { inner: string; outer: string } = {
-    inner: 'rgba(255,255,255,1)',
-    outer: 'rgba(255,200,100,0)'
-  }): THREE.Texture {
+  getParticleTexture(
+    size: number = 64,
+    colors: { inner: string; outer: string } = {
+      inner: 'rgba(255,255,255,1)',
+      outer: 'rgba(255,200,100,0)',
+    }
+  ): THREE.Texture {
     const key = `particle_${size}_${colors.inner}_${colors.outer}`;
-    
+
     let texture = this.textures.get(key);
     if (!texture) {
       const canvas = document.createElement('canvas');
@@ -34,8 +37,12 @@ export class TextureCache {
       const context = canvas.getContext('2d')!;
 
       const gradient = context.createRadialGradient(
-        size / 2, size / 2, 0,
-        size / 2, size / 2, size / 2
+        size / 2,
+        size / 2,
+        0,
+        size / 2,
+        size / 2,
+        size / 2
       );
       gradient.addColorStop(0, colors.inner);
       gradient.addColorStop(1, colors.outer);
@@ -56,7 +63,7 @@ export class TextureCache {
    */
   getExplosionTexture(size: number = 128): THREE.Texture {
     const key = `explosion_${size}`;
-    
+
     let texture = this.textures.get(key);
     if (!texture) {
       const canvas = document.createElement('canvas');
@@ -69,10 +76,7 @@ export class TextureCache {
       const centerY = size / 2;
       const radius = size / 2;
 
-      const gradient = context.createRadialGradient(
-        centerX, centerY, 0,
-        centerX, centerY, radius
-      );
+      const gradient = context.createRadialGradient(centerX, centerY, 0, centerX, centerY, radius);
       gradient.addColorStop(0, 'rgba(255,255,255,1)');
       gradient.addColorStop(0.1, 'rgba(255,200,100,0.8)');
       gradient.addColorStop(0.4, 'rgba(255,100,0,0.4)');
@@ -94,7 +98,7 @@ export class TextureCache {
    */
   getGradientTexture(width: number, height: number, colors: string[]): THREE.Texture {
     const key = `gradient_${width}_${height}_${colors.join('_')}`;
-    
+
     let texture = this.textures.get(key);
     if (!texture) {
       const canvas = document.createElement('canvas');
@@ -124,7 +128,7 @@ export class TextureCache {
   getStats(): { textureCount: number; keys: string[] } {
     return {
       textureCount: this.textures.size,
-      keys: Array.from(this.textures.keys())
+      keys: Array.from(this.textures.keys()),
     };
   }
 

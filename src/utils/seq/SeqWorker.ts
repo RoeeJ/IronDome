@@ -82,8 +82,8 @@ class SeqWorkerHandler {
   private async sendBatch(events: SeqLogEvent[]) {
     if (!this.config) return;
 
-    const endpoint = this.config.useProxy 
-      ? this.config.proxyEndpoint! 
+    const endpoint = this.config.useProxy
+      ? this.config.proxyEndpoint!
       : `${this.config.endpoint}/api/events/raw`;
 
     const headers: Record<string, string> = {
@@ -95,10 +95,10 @@ class SeqWorkerHandler {
     }
 
     const chunks = this.splitIntoChunks(events);
-    
+
     for (const chunk of chunks) {
       const body = chunk.map(e => JSON.stringify(e)).join('\n');
-      
+
       try {
         const response = await fetch(endpoint, {
           method: 'POST',

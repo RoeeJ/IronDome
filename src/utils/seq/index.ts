@@ -6,7 +6,7 @@ import { SeqEnabledLogger } from './SeqEnabledLogger';
  */
 export function createLogger(): DebugLogger {
   // Check if Seq is enabled via environment variables
-  const seqEnabled = 
+  const seqEnabled =
     (import.meta as any).env?.VITE_SEQ_ENABLED === 'true' ||
     (window as any).__ENV__?.SEQ_ENABLED === 'true' ||
     false;

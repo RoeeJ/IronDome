@@ -310,9 +310,18 @@ export class ProximityFuseOptimizer {
 
       debug.category('Optimization', 'Performance:');
       debug.category('Optimization', `  Hit Rate: ${(performance.hitRate * 100).toFixed(1)}%`);
-      debug.category('Optimization', `  Avg Kill Probability: ${(performance.avgKillProbability * 100).toFixed(1)}%`);
-      debug.category('Optimization', `  Interceptors per Kill: ${performance.avgInterceptorsPerKill.toFixed(2)}`);
-      debug.category('Optimization', `  Avg Detonation Distance: ${performance.avgDetonationDistance.toFixed(1)}m`);
+      debug.category(
+        'Optimization',
+        `  Avg Kill Probability: ${(performance.avgKillProbability * 100).toFixed(1)}%`
+      );
+      debug.category(
+        'Optimization',
+        `  Interceptors per Kill: ${performance.avgInterceptorsPerKill.toFixed(2)}`
+      );
+      debug.category(
+        'Optimization',
+        `  Avg Detonation Distance: ${performance.avgDetonationDistance.toFixed(1)}m`
+      );
 
       // Calculate efficiency score
       const efficiency =

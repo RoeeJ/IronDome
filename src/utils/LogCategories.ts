@@ -4,46 +4,46 @@
  */
 
 export enum LogVerbosity {
-  CRITICAL = 0,  // Errors, crashes, major issues
-  HIGH = 1,      // Important events (battery fire, interception, etc)
-  MEDIUM = 2,    // Game state changes, spawning
-  LOW = 3,       // Detailed tracking
-  VERBOSE = 4,   // Frame-by-frame updates
+  CRITICAL = 0, // Errors, crashes, major issues
+  HIGH = 1, // Important events (battery fire, interception, etc)
+  MEDIUM = 2, // Game state changes, spawning
+  LOW = 3, // Detailed tracking
+  VERBOSE = 4, // Frame-by-frame updates
 }
 
 export const LOG_CATEGORY_VERBOSITY: Record<string, LogVerbosity> = {
   // Critical - Always log
-  'Error': LogVerbosity.CRITICAL,
-  'Fatal': LogVerbosity.CRITICAL,
-  'Crash': LogVerbosity.CRITICAL,
-  
+  Error: LogVerbosity.CRITICAL,
+  Fatal: LogVerbosity.CRITICAL,
+  Crash: LogVerbosity.CRITICAL,
+
   // High - Important game events
-  'Battery': LogVerbosity.HIGH,
-  'Interception': LogVerbosity.HIGH,
-  'Explosion': LogVerbosity.HIGH,
-  'ThreatSpawn': LogVerbosity.HIGH,
-  'GameState': LogVerbosity.HIGH,
-  
+  Battery: LogVerbosity.HIGH,
+  Interception: LogVerbosity.HIGH,
+  Explosion: LogVerbosity.HIGH,
+  ThreatSpawn: LogVerbosity.HIGH,
+  GameState: LogVerbosity.HIGH,
+
   // Medium - Normal operations
-  'ThreatManager': LogVerbosity.MEDIUM,
-  'Radar': LogVerbosity.MEDIUM,
-  'BuildingSystem': LogVerbosity.MEDIUM,
-  'ResourceManager': LogVerbosity.MEDIUM,
-  'SoundSystem': LogVerbosity.MEDIUM,
-  
+  ThreatManager: LogVerbosity.MEDIUM,
+  Radar: LogVerbosity.MEDIUM,
+  BuildingSystem: LogVerbosity.MEDIUM,
+  ResourceManager: LogVerbosity.MEDIUM,
+  SoundSystem: LogVerbosity.MEDIUM,
+
   // Low - Detailed but not frame-by-frame
-  'Trajectory': LogVerbosity.LOW,
-  'Physics': LogVerbosity.LOW,
-  'Rendering': LogVerbosity.LOW,
-  'Memory': LogVerbosity.LOW,
-  
+  Trajectory: LogVerbosity.LOW,
+  Physics: LogVerbosity.LOW,
+  Rendering: LogVerbosity.LOW,
+  Memory: LogVerbosity.LOW,
+
   // Verbose - Frame-by-frame updates (usually disabled)
-  'ProximityFuse': LogVerbosity.VERBOSE,
-  'Guidance': LogVerbosity.VERBOSE,
-  'LaunchEffects': LogVerbosity.VERBOSE,
-  'WindowUpdate': LogVerbosity.VERBOSE,
-  'MouseMove': LogVerbosity.VERBOSE,
-  'CameraUpdate': LogVerbosity.VERBOSE,
+  ProximityFuse: LogVerbosity.VERBOSE,
+  Guidance: LogVerbosity.VERBOSE,
+  LaunchEffects: LogVerbosity.VERBOSE,
+  WindowUpdate: LogVerbosity.VERBOSE,
+  MouseMove: LogVerbosity.VERBOSE,
+  CameraUpdate: LogVerbosity.VERBOSE,
 };
 
 // Default verbosity level for Seq logging

@@ -181,7 +181,7 @@ export class LaunchEffectsSystem {
     // Use cached smoke texture to prevent shader program explosion
     const smokeTexture = this.textureCache.getParticleTexture(64, {
       inner: 'rgba(100,100,100,0.8)',
-      outer: 'rgba(100,100,100,0)'
+      outer: 'rgba(100,100,100,0)',
     });
 
     const material = this.materialCache.getPointsMaterial({
@@ -387,7 +387,6 @@ export class LaunchEffectsSystem {
 
     this.activeEffects.push(effect);
   }
-
 
   update(): void {
     // Update all active effects

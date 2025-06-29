@@ -26,16 +26,16 @@ export class SimpleLODSystem {
   private camera: THREE.Camera;
   private objects = new Map<string, LODObject>();
   private lastUpdateTime = 0;
-  
+
   // Default LOD configuration
   private config: LODConfig = {
     distances: [0, 50, 150, 300, 500], // LOD levels at these distances
     particleReduction: [1.0, 0.7, 0.4, 0.2, 0.0], // Particle multipliers
-    effectReduction: [1.0, 0.8, 0.5, 0.3, 0.0], // Effect quality multipliers  
+    effectReduction: [1.0, 0.8, 0.5, 0.3, 0.0], // Effect quality multipliers
     shadowDistance: 150, // Only cast shadows within 150m
     updateInterval: 100, // Update every 100ms
   };
-  
+
   // Performance metrics
   private stats = {
     totalObjects: 0,
@@ -65,7 +65,7 @@ export class SimpleLODSystem {
       currentLOD: 0,
       lastUpdate: 0,
     });
-    
+
     this.stats.totalObjects = this.objects.size;
   }
 
@@ -122,27 +122,27 @@ export class SimpleLODSystem {
   update(): void {
     const now = Date.now();
     if (now - this.lastUpdateTime < this.config.updateInterval) return;
-    
+
     this.lastUpdateTime = now;
     const cameraPos = this.camera.position;
-    
+
     // Reset stats
     this.stats.lodCounts.fill(0);
     this.stats.particleSavings = 0;
-    
+
     this.objects.forEach(lodObject => {
       // Skip if recently updated
       if (now - lodObject.lastUpdate < this.config.updateInterval * 2) return;
-      
+
       const distance = lodObject.object.position.distanceTo(cameraPos);
       const newLOD = this.calculateLODLevel(distance);
-      
+
       // Only update if LOD changed
       if (newLOD !== lodObject.currentLOD) {
         this.applyLODLevel(lodObject, newLOD, distance);
         lodObject.currentLOD = newLOD;
       }
-      
+
       lodObject.lastUpdate = now;
       this.stats.lodCounts[newLOD]++;
     });
@@ -159,28 +159,28 @@ export class SimpleLODSystem {
 
   private applyLODLevel(lodObject: LODObject, level: number, distance: number): void {
     const object = lodObject.object;
-    
+
     // Update visibility based on LOD
     if (level >= this.config.particleReduction.length - 1) {
       // Furthest LOD - hide object
       object.visible = false;
       return;
     }
-    
+
     object.visible = true;
-    
+
     // Update shadow casting
     object.traverse(child => {
       if (child instanceof THREE.Mesh) {
         child.castShadow = distance <= this.config.shadowDistance;
-        
+
         // Reduce geometry detail for far objects
         if (level >= 3 && child.geometry instanceof THREE.BufferGeometry) {
           // Could implement geometry simplification here
         }
       }
     });
-    
+
     // Handle specific object types
     if (object.userData.type === 'explosion') {
       this.updateExplosionLOD(object, level);
@@ -197,7 +197,7 @@ export class SimpleLODSystem {
       const baseCount = object.userData.baseParticleCount || 100;
       const newCount = this.calculateParticleCount(baseCount, level * 100);
       object.userData.particleSystem.setParticleCount(newCount);
-      
+
       this.stats.particleSavings += baseCount - newCount;
     }
   }
@@ -209,7 +209,7 @@ export class SimpleLODSystem {
     } else if (object.userData.trail) {
       object.userData.trail.visible = true;
     }
-    
+
     // Disable exhaust effects for very distant projectiles
     if (level >= 3 && object.userData.exhaust) {
       object.userData.exhaust.visible = false;
@@ -225,7 +225,7 @@ export class SimpleLODSystem {
         }
       });
     }
-    
+
     // Use simpler material for very distant buildings
     if (level >= 3) {
       object.traverse(child => {
@@ -247,14 +247,14 @@ export class SimpleLODSystem {
   } {
     let shadowedObjects = 0;
     const cameraPos = this.camera.position;
-    
+
     this.objects.forEach(lodObject => {
       const distance = lodObject.object.position.distanceTo(cameraPos);
       if (distance <= this.config.shadowDistance) {
         shadowedObjects++;
       }
     });
-    
+
     return {
       totalObjects: this.stats.totalObjects,
       lodDistribution: [...this.stats.lodCounts],
@@ -275,7 +275,7 @@ export class SimpleLODSystem {
    */
   forceUpdateAll(): void {
     const cameraPos = this.camera.position;
-    
+
     this.objects.forEach(lodObject => {
       const distance = lodObject.object.position.distanceTo(cameraPos);
       const newLOD = this.calculateLODLevel(distance);

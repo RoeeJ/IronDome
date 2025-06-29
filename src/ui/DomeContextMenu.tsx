@@ -63,7 +63,7 @@ export const DomeContextMenu: React.FC<DomeContextMenuProps> = ({
       setTimeout(() => {
         updatePlacementInfo();
         setRefreshKey(prev => prev + 1);
-        
+
         // Force re-fetch battery reference
         const newBattery = placementSystem.getBattery(batteryId);
         if (newBattery) {

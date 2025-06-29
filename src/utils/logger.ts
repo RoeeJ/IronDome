@@ -1,6 +1,6 @@
 /**
  * Central logger initialization with optional Seq support
- * 
+ *
  * This module checks environment variables and creates the appropriate logger instance.
  * Use this instead of importing DebugLogger directly to get Seq support when enabled.
  */
@@ -10,7 +10,7 @@ import { SeqEnabledLogger } from './seq/SeqEnabledLogger';
 import { LogVerbosity } from './LogCategories';
 
 // Check if Seq is enabled via environment variables
-const seqEnabled = 
+const seqEnabled =
   (typeof Bun !== 'undefined' && Bun.env.VITE_SEQ_ENABLED === 'true') ||
   (typeof process !== 'undefined' && process.env.VITE_SEQ_ENABLED === 'true') ||
   (window as any).__ENV__?.SEQ_ENABLED === 'true' ||
@@ -46,7 +46,11 @@ export function setSeqVerbosity(level: number): void {
 }
 
 // Export structured logging helpers for Seq
-export function logStructured(template: string, properties: Record<string, any>, level?: any): void {
+export function logStructured(
+  template: string,
+  properties: Record<string, any>,
+  level?: any
+): void {
   const logger = getLogger() as any;
   if (logger.structured) {
     logger.structured(template, properties, level);
@@ -91,51 +95,52 @@ export function getSeqConfig(): SeqConfig {
 // Test function to verify Seq is working
 export async function testSeq(): Promise<void> {
   console.log('=== Testing Seq Integration ===');
-  
+
   const config = getSeqConfig();
   console.log('Seq Config:', config);
-  
+
   const logger = getLogger();
   console.log('Logger type:', logger.constructor.name);
   console.log('Logger instance:', logger);
-  
+
   // Check if Web Worker is being used
   if ((logger as any).seqTransport) {
     const transport = (logger as any).seqTransport;
     console.log('Transport type:', transport.constructor.name);
     console.log('Web Worker support:', 'Worker' in globalThis);
   }
-  
+
   // Test various log methods
   console.log('Sending test logs...');
-  
+
   logger.log('Test log message from testSeq()');
   logger.warn('Test warning message');
   logger.error('Test error message', new Error('Test error'));
   logger.category('TestCategory', 'Test category message');
   logger.performance('TestOperation', 123.45, 'ms');
-  
+
   // Test structured logging if available
   if ((logger as any).structured) {
-    (logger as any).structured(
-      'Test structured log: User {UserId} performed {Action}',
-      { UserId: 'test-user', Action: 'test-action', Timestamp: new Date().toISOString() }
-    );
+    (logger as any).structured('Test structured log: User {UserId} performed {Action}', {
+      UserId: 'test-user',
+      Action: 'test-action',
+      Timestamp: new Date().toISOString(),
+    });
   }
-  
+
   // Test high volume logging to verify no main thread blocking
   console.log('Testing high volume logging (should not block main thread)...');
   for (let i = 0; i < 100; i++) {
     logger.category('PerformanceTest', `High volume log ${i}`, { iteration: i });
   }
-  
+
   // Force flush if available
   if ((logger as any).flush) {
     console.log('Flushing logs...');
     await (logger as any).flush();
     console.log('Logs flushed');
   }
-  
+
   console.log('Test complete - check Seq dashboard and verify no frame drops');
 }
 

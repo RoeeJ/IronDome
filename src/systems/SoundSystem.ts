@@ -136,10 +136,7 @@ export class SoundSystem {
             this.sounds.set(key, buffer);
             debug.log(`Sound loaded: ${key}`);
 
-            // Start BGM if it's loaded and enabled
-            if (key === 'bgm_picaroon' && this.bgmEnabled && !this.bgmInstance) {
-              this.playBackgroundMusic();
-            }
+            // Don't auto-start BGM here - let main.ts handle initial playback
           },
           undefined,
           error => {
@@ -294,9 +291,15 @@ export class SoundSystem {
         if (sound.audio.isPlaying) {
           sound.audio.stop();
         }
-        sound.audio.disconnect();
+        // Only disconnect if the audio has a source (is connected)
+        if (sound.audio.source) {
+          sound.audio.disconnect();
+        }
       } catch (error) {
-        debug.error('Error stopping sound:', error);
+        // Silently ignore disconnect errors - they're harmless
+        if (error instanceof Error && !error.message.includes('disconnect')) {
+          debug.error('Error stopping sound:', error);
+        }
       }
       this.activeSounds.delete(soundId);
     }
@@ -418,7 +421,16 @@ export class SoundSystem {
   }
 
   playBackgroundMusic() {
+    // Don't start if disabled or already playing
     if (!this.bgmEnabled || this.bgmInstance) return;
+
+    // Double-check that BGM isn't already in active sounds
+    for (const [, sound] of this.activeSounds) {
+      if (sound.category === 'bgm' && sound.audio.isPlaying) {
+        this.bgmInstance = sound;
+        return;
+      }
+    }
 
     const bgmId = this.play('bgm_picaroon', 'bgm', {
       volume: 1.0, // Don't multiply by bgmVolume here, it's already applied in play()
@@ -434,8 +446,9 @@ export class SoundSystem {
 
   stopBackgroundMusic(fadeOut: number = 2000) {
     if (this.bgmInstance) {
-      this.stop(this.bgmInstance.id, fadeOut);
-      this.bgmInstance = null;
+      const bgmId = this.bgmInstance.id;
+      this.bgmInstance = null; // Clear reference immediately to prevent race conditions
+      this.stop(bgmId, fadeOut);
     }
   }
 

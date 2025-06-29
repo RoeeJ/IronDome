@@ -114,9 +114,10 @@ export class MemoryMonitor {
     }
 
     // Log periodic status
-    debug.category('MemoryMonitor', 
+    debug.category(
+      'MemoryMonitor',
       `Memory: ${(stats.usedJSSize / 1024 / 1024).toFixed(1)}MB (${stats.usedJSPercent.toFixed(1)}%), ` +
-      `Growth: ${memoryGrowth > 0 ? '+' : ''}${(memoryGrowth / 1024 / 1024).toFixed(2)}MB`
+        `Growth: ${memoryGrowth > 0 ? '+' : ''}${(memoryGrowth / 1024 / 1024).toFixed(2)}MB`
     );
 
     // Check for warnings
@@ -126,7 +127,7 @@ export class MemoryMonitor {
         usedPercent: stats.usedJSPercent,
         usedMB: stats.usedJSSize / 1024 / 1024,
         totalMB: stats.totalJSSize / 1024 / 1024,
-        consecutiveWarnings: this.consecutiveHighMemoryWarnings
+        consecutiveWarnings: this.consecutiveHighMemoryWarnings,
       });
 
       if (this.consecutiveHighMemoryWarnings >= MemoryMonitor.MAX_CONSECUTIVE_WARNINGS) {
@@ -137,7 +138,7 @@ export class MemoryMonitor {
       debug.warn('[MemoryMonitor] High memory usage detected', {
         usedPercent: stats.usedJSPercent,
         usedMB: stats.usedJSSize / 1024 / 1024,
-        growthMB: memoryGrowth / 1024 / 1024
+        growthMB: memoryGrowth / 1024 / 1024,
       });
     } else {
       this.consecutiveHighMemoryWarnings = 0;
@@ -147,7 +148,7 @@ export class MemoryMonitor {
     if (memoryGrowth > 10 * 1024 * 1024) {
       debug.error('[MemoryMonitor] Rapid memory growth detected!', {
         growthMB: memoryGrowth / 1024 / 1024,
-        currentMB: stats.usedJSSize / 1024 / 1024
+        currentMB: stats.usedJSSize / 1024 / 1024,
       });
     }
   }
@@ -165,7 +166,7 @@ export class MemoryMonitor {
             usedJSHeapSize: memory.usedJSHeapSize,
             totalJSHeapSize: memory.totalJSHeapSize,
             jsHeapSizeLimit: memory.jsHeapSizeLimit,
-          }
+          },
         };
       }
 
@@ -180,11 +181,13 @@ export class MemoryMonitor {
 
   private triggerEmergencyCleanup(): void {
     debug.error('[MemoryMonitor] TRIGGERING EMERGENCY CLEANUP - WebGL crash imminent!');
-    
+
     // Emit global cleanup event
-    window.dispatchEvent(new CustomEvent('emergency-memory-cleanup', {
-      detail: { reason: 'Memory usage critical', stats: this.lastStats }
-    }));
+    window.dispatchEvent(
+      new CustomEvent('emergency-memory-cleanup', {
+        detail: { reason: 'Memory usage critical', stats: this.lastStats },
+      })
+    );
 
     // Force garbage collection if available
     if ('gc' in window) {

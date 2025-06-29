@@ -56,11 +56,11 @@ export class BlastPhysics {
       // Get normalized velocities
       const interceptorDir = interceptorVelocity.clone().normalize();
       const targetDir = targetVelocity.clone().normalize();
-      
+
       // Calculate angle between trajectories (0 = head-on, 180 = tail-chase)
       const dotProduct = -interceptorDir.dot(targetDir); // Negative because opposite directions = head-on
       const angle = Math.acos(Math.max(-1, Math.min(1, dotProduct))) * (180 / Math.PI);
-      
+
       // Apply directional multiplier: 1.5x for head-on (< 30°), scaling down to 1.0x at 90°
       if (angle < 30) {
         directionalMultiplier = 1.5;
@@ -69,7 +69,7 @@ export class BlastPhysics {
       } else if (angle < 90) {
         directionalMultiplier = 1.1;
       }
-      
+
       debug.category(
         'BlastPhysics',
         `Directional analysis: angle=${angle.toFixed(1)}°, multiplier=${directionalMultiplier}x`

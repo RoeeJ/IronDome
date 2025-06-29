@@ -1625,7 +1625,7 @@ function animate() {
   const rawDeltaTime = clock.getDelta();
   // Clamp deltaTime to prevent large jumps when tab regains focus
   const deltaTime = Math.min(rawDeltaTime, 0.1); // Max 100ms per frame
-  let currentTime = clock.getElapsedTime();
+  const currentTime = clock.getElapsedTime();
   const fps = 1 / deltaTime;
 
   // CHAINSAW: Removed performance monitoring overhead

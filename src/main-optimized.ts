@@ -44,9 +44,9 @@ const scene = new THREE.Scene();
 const textureCache = TextureCache.getInstance();
 const gradientTexture = textureCache.getGradientTexture(1, 512, [
   '#0a1929', // Very dark blue at top
-  '#1e3c72', // Dark blue  
+  '#1e3c72', // Dark blue
   '#2a5298', // Medium blue
-  '#5a7ba6'  // Lighter blue at horizon
+  '#5a7ba6', // Lighter blue at horizon
 ]);
 
 // Apply gradient as background

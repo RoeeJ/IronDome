@@ -38,10 +38,8 @@ export class SeqTransport {
       proxyEndpoint: config.proxyEndpoint || '/api/logs/seq',
     };
 
-
     // Validate configuration
     this.isEnabled = this.validateConfig();
-    
   }
 
   private validateConfig(): boolean {
@@ -65,11 +63,13 @@ export class SeqTransport {
     }
 
     const seqEvent = this.transformToSeqFormat(event);
-    
+
     // Check event size
     const eventSize = JSON.stringify(seqEvent).length;
     if (eventSize > this.MAX_EVENT_SIZE) {
-      console.warn(`[SeqTransport] Event too large (${(eventSize / 1024).toFixed(1)}KB), truncating`);
+      console.warn(
+        `[SeqTransport] Event too large (${(eventSize / 1024).toFixed(1)}KB), truncating`
+      );
       // Truncate large properties
       if (seqEvent['@x'] && seqEvent['@x'].length > 1000) {
         seqEvent['@x'] = seqEvent['@x'].substring(0, 1000) + '... (truncated)';
@@ -80,7 +80,7 @@ export class SeqTransport {
         }
       });
     }
-    
+
     this.logBuffer.push(seqEvent);
 
     // Check if we should send immediately
@@ -180,8 +180,8 @@ export class SeqTransport {
   }
 
   private async sendBatch(events: SeqLogEvent[]): Promise<void> {
-    const endpoint = this.config.useProxy 
-      ? this.config.proxyEndpoint! 
+    const endpoint = this.config.useProxy
+      ? this.config.proxyEndpoint!
       : `${this.config.endpoint}/api/events/raw`;
 
     const headers: HeadersInit = {
@@ -194,10 +194,10 @@ export class SeqTransport {
 
     // Split into chunks if payload is too large
     const chunks = this.splitIntoChunks(events);
-    
+
     for (const chunk of chunks) {
       const body = chunk.map(e => JSON.stringify(e)).join('\n');
-      
+
       try {
         const response = await fetch(endpoint, {
           method: 'POST',
@@ -219,7 +219,9 @@ export class SeqTransport {
             continue;
           }
           const responseText = await response.text();
-          throw new Error(`Seq request failed: ${response.status} ${response.statusText} - ${responseText}`);
+          throw new Error(
+            `Seq request failed: ${response.status} ${response.statusText} - ${responseText}`
+          );
         }
       } catch (error) {
         throw error;
@@ -287,13 +289,13 @@ export class SeqTransport {
     const flushOnUnload = () => {
       // Use sendBeacon for reliability during page unload
       if (this.logBuffer.length > 0 && 'sendBeacon' in navigator) {
-        const endpoint = this.config.useProxy 
-          ? this.config.proxyEndpoint! 
+        const endpoint = this.config.useProxy
+          ? this.config.proxyEndpoint!
           : `${this.config.endpoint}/api/events/raw`;
-        
+
         const body = this.logBuffer.map(e => JSON.stringify(e)).join('\n');
         const blob = new Blob([body], { type: 'application/vnd.serilog.clef' });
-        
+
         navigator.sendBeacon(endpoint, blob);
       }
     };

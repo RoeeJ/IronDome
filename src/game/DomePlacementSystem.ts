@@ -132,26 +132,30 @@ export class DomePlacementSystem {
 
     // On first call (previousMode undefined), just set the mode and restore placements
     if (previousMode === undefined || this.placedDomes.size === 0) {
-      debug.log(`Initial setSandboxMode call - setting to ${isSandbox ? 'sandbox' : 'game'} mode and restoring placements`);
+      debug.log(
+        `Initial setSandboxMode call - setting to ${isSandbox ? 'sandbox' : 'game'} mode and restoring placements`
+      );
       this.restoreSavedPlacements();
       return;
     }
 
     // Always reconfigure existing batteries when mode changes
     if (previousMode !== isSandbox) {
-      debug.log(`Mode changed from ${previousMode ? 'sandbox' : 'game'} to ${isSandbox ? 'sandbox' : 'game'}, reconfiguring all batteries`);
-      
+      debug.log(
+        `Mode changed from ${previousMode ? 'sandbox' : 'game'} to ${isSandbox ? 'sandbox' : 'game'}, reconfiguring all batteries`
+      );
+
       // First reconfigure all existing batteries
       this.placedDomes.forEach((dome, id) => {
         debug.log(`Reconfiguring battery ${id} for ${isSandbox ? 'sandbox' : 'game'} mode`);
         dome.battery.setResourceManagement(!isSandbox);
-        
+
         // In sandbox mode, reset interceptor stock to ensure batteries work
         if (isSandbox) {
           dome.battery.resetInterceptorStock();
         }
       });
-      
+
       // Only clear and reset if there are issues or if explicitly needed
       if (this.placedDomes.size === 0) {
         // Place initial battery at center if none exist
@@ -257,9 +261,11 @@ export class DomePlacementSystem {
         this.placeBatteryAt(position, placement.id, placement.level);
       });
     }
-    
+
     // Ensure all batteries are configured for the current mode after restoration
-    debug.log(`After restoring placements, ensuring all batteries are in ${this.isSandboxMode ? 'sandbox' : 'game'} mode`);
+    debug.log(
+      `After restoring placements, ensuring all batteries are in ${this.isSandboxMode ? 'sandbox' : 'game'} mode`
+    );
     this.placedDomes.forEach((dome, id) => {
       dome.battery.setResourceManagement(!this.isSandboxMode);
       if (this.isSandboxMode) {
@@ -466,7 +472,9 @@ export class DomePlacementSystem {
     });
 
     // Configure battery
-    debug.log(`Configuring battery ${batteryId}: isSandboxMode=${this.isSandboxMode}, setting resourceManagement=${!this.isSandboxMode}`);
+    debug.log(
+      `Configuring battery ${batteryId}: isSandboxMode=${this.isSandboxMode}, setting resourceManagement=${!this.isSandboxMode}`
+    );
     battery.setResourceManagement(!this.isSandboxMode);
     battery.setLaunchOffset(new THREE.Vector3(-2, 14.5, -0.1));
     battery.setLaunchDirection(new THREE.Vector3(0.3, 1.5, 0.1).normalize()); // More vertical launch angle

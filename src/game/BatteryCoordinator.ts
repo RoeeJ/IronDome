@@ -140,10 +140,10 @@ export class BatteryCoordinator {
     const maxEngagements = Math.ceil(status.battery.getConfig().launcherCount / 4); // Can handle multiple threats
     const loadFactor = Math.max(0.1, 1 - status.activeEngagements / maxEngagements);
     score *= loadFactor;
-    
+
     // 3. Available interceptors bonus
     const availableRatio = status.availableInterceptors / status.battery.getConfig().launcherCount;
-    score *= (0.5 + 0.5 * availableRatio); // 50% base + 50% based on availability
+    score *= 0.5 + 0.5 * availableRatio; // 50% base + 50% based on availability
 
     // 4. Time to impact check (simple pass/fail)
     const interceptTime = distance / battery.getConfig().interceptorSpeed;
@@ -151,17 +151,17 @@ export class BatteryCoordinator {
     if (interceptTime >= threatTimeToImpact) {
       return 0; // Can't intercept in time
     }
-    
+
     // 5. Time urgency bonus - prioritize batteries that can intercept sooner
     const timeRatio = interceptTime / threatTimeToImpact;
-    score *= (2 - timeRatio); // Higher score for faster interception
+    score *= 2 - timeRatio; // Higher score for faster interception
 
     // 6. Recent firing penalty (reduced - batteries should be able to fire rapidly)
     const timeSinceLastFire = Date.now() - status.lastFiredTime;
     if (timeSinceLastFire < 200) {
       score *= 0.9; // Smaller penalty
     }
-    
+
     // 7. CRITICAL: Self-defense bonus - prioritize threats approaching this battery
     const impactPoint = threat.getImpactPoint();
     if (impactPoint && distance < 400) {
@@ -187,7 +187,7 @@ export class BatteryCoordinator {
   assignThreatToBattery(threatId: string, batteryId: string, interceptorCount: number): void {
     // Update existing assignment or create new one
     const existingAssignment = this.threatAssignments.get(threatId);
-    
+
     if (existingAssignment) {
       // Update interceptor count
       existingAssignment.interceptorCount += interceptorCount;

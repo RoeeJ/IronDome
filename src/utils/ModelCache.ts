@@ -145,7 +145,7 @@ export class ModelCache {
         newGroup.rotation.copy(original.rotation);
         newGroup.scale.copy(original.scale);
         newGroup.visible = original.visible;
-        
+
         // Recursively add children to preserve hierarchy
         original.children.forEach(child => {
           const newChild = createInstanceRecursive(child);
@@ -153,14 +153,14 @@ export class ModelCache {
             newGroup.add(newChild);
           }
         });
-        
+
         return newGroup;
       }
-      
+
       // Skip other types (lights, cameras, etc.)
       return null;
     };
-    
+
     // Create instance preserving full hierarchy
     const instance = createInstanceRecursive(originalModel) as THREE.Group;
     return instance;

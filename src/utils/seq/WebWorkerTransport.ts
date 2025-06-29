@@ -42,7 +42,7 @@ export class WebWorkerTransport {
     };
 
     this.isEnabled = this.validateConfig();
-    
+
     if (this.isEnabled) {
       // PERFORMANCE: Defer worker initialization to avoid blocking startup
       setTimeout(() => this.initializeWorker(), 1000);
@@ -75,18 +75,18 @@ export class WebWorkerTransport {
         ${this.getWorkerCode()}
         new SeqWorkerHandler();
       `;
-      
+
       const blob = new Blob([workerCode], { type: 'application/javascript' });
       const workerUrl = URL.createObjectURL(blob);
       this.worker = new Worker(workerUrl);
-      
+
       // Clean up the blob URL after worker is created
       URL.revokeObjectURL(workerUrl);
-      
+
       // Initialize worker with config
       const message: WorkerMessage = {
         type: 'init',
-        config: this.config
+        config: this.config,
       };
       this.worker.postMessage(message);
 
@@ -246,11 +246,13 @@ export class WebWorkerTransport {
     }
 
     const seqEvent = this.transformToSeqFormat(event);
-    
+
     // Check event size
     const eventSize = JSON.stringify(seqEvent).length;
     if (eventSize > this.MAX_EVENT_SIZE) {
-      console.warn(`[WebWorkerTransport] Event too large (${(eventSize / 1024).toFixed(1)}KB), truncating`);
+      console.warn(
+        `[WebWorkerTransport] Event too large (${(eventSize / 1024).toFixed(1)}KB), truncating`
+      );
       this.truncateEvent(seqEvent);
     }
 
@@ -262,7 +264,7 @@ export class WebWorkerTransport {
         this.logBuffer = [];
         const message: WorkerMessage = {
           type: 'log',
-          events: batch
+          events: batch,
         };
         this.worker.postMessage(message);
       } else {
@@ -357,7 +359,7 @@ export class WebWorkerTransport {
     if (this.worker) {
       const message: WorkerMessage = {
         type: 'log', // Use 'log' type for consistency
-        events: batch
+        events: batch,
       };
       this.worker.postMessage(message);
     }
@@ -401,7 +403,7 @@ export class WebWorkerTransport {
       clearTimeout(this.batchTimer);
     }
     this.flush();
-    
+
     if (this.worker) {
       this.worker.terminate();
       this.worker = null;

@@ -94,7 +94,7 @@ export class ExhaustTrailSystem {
     // Set texture from shared cache
     this.particleMaterial.map = TextureCache.getInstance().getParticleTexture(64, {
       inner: 'rgba(255,255,255,1)',
-      outer: 'rgba(255,200,100,0)'
+      outer: 'rgba(255,200,100,0)',
     });
 
     // NOTE: Removed onBeforeCompile to prevent unique shader creation
@@ -104,7 +104,6 @@ export class ExhaustTrailSystem {
     this.particleSystem.frustumCulled = true; // Enable frustum culling
     this.scene.add(this.particleSystem);
   }
-
 
   emit(
     position: THREE.Vector3,

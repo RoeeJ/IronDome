@@ -38,7 +38,7 @@ export class InstancedThreatRenderer {
     this.scene = scene;
     this.maxThreatsPerType = maxThreatsPerType;
     this.camera = camera || scene.userData.camera;
-    
+
     // Initialize LOD system if camera available
     if (this.camera) {
       this.lodSystem = SimpleLODSystem.getInstance(this.camera);
@@ -211,11 +211,11 @@ export class InstancedThreatRenderer {
       // Scale based on threat config and LOD
       const config = THREAT_CONFIGS[type];
       let scale = config.radius ? config.radius * 2 : 1;
-      
+
       // Apply LOD-based culling and scaling
       if (this.camera) {
         const distance = position.distanceTo(this.camera.position);
-        
+
         // Cull very distant threats
         if (distance > this.MAX_RENDER_DISTANCE) {
           scale = 0; // Hide by scaling to 0
@@ -223,13 +223,13 @@ export class InstancedThreatRenderer {
           // Slightly reduce scale for distant threats
           scale *= 0.8;
         }
-        
+
         // Update shadow casting based on distance
         if (distance > 150 && mesh.castShadow) {
           mesh.castShadow = false;
         }
       }
-      
+
       this.dummy.scale.set(scale, scale, scale);
 
       this.dummy.updateMatrix();

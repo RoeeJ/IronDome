@@ -1,12 +1,12 @@
 import { DebugLogger } from '../DebugLogger';
 import { WebWorkerTransport } from './WebWorkerTransport';
 import { LogLevel, LogEvent, ILogTransport } from './types';
-import { 
-  LogVerbosity, 
-  LOG_CATEGORY_VERBOSITY, 
+import {
+  LogVerbosity,
+  LOG_CATEGORY_VERBOSITY,
   DEFAULT_SEQ_VERBOSITY,
   RATE_LIMITED_CATEGORIES,
-  RATE_LIMIT_PER_SECOND 
+  RATE_LIMIT_PER_SECOND,
 } from '../LogCategories';
 
 /**
@@ -34,9 +34,9 @@ export class SeqEnabledLogger extends DebugLogger {
 
   private initializeSeq(): void {
     // Check for Seq configuration in environment
-    const seqEnabled = this.getEnvVar('VITE_SEQ_ENABLED') === 'true' || 
-                      this.getEnvVar('SEQ_ENABLED') === 'true';
-    
+    const seqEnabled =
+      this.getEnvVar('VITE_SEQ_ENABLED') === 'true' || this.getEnvVar('SEQ_ENABLED') === 'true';
+
     if (!seqEnabled) {
       return;
     }
@@ -44,10 +44,17 @@ export class SeqEnabledLogger extends DebugLogger {
     const config = {
       endpoint: this.getEnvVar('VITE_SEQ_ENDPOINT') || this.getEnvVar('SEQ_ENDPOINT') || '',
       apiKey: this.getEnvVar('VITE_SEQ_API_KEY') || this.getEnvVar('SEQ_API_KEY'),
-      batchSize: parseInt(this.getEnvVar('VITE_SEQ_BATCH_SIZE') || this.getEnvVar('SEQ_BATCH_SIZE') || '100'),
-      batchTimeout: parseInt(this.getEnvVar('VITE_SEQ_BATCH_TIMEOUT') || this.getEnvVar('SEQ_BATCH_TIMEOUT') || '2000'),
-      useProxy: this.getEnvVar('VITE_SEQ_USE_PROXY') === 'true' || this.getEnvVar('SEQ_USE_PROXY') === 'true',
-      proxyEndpoint: this.getEnvVar('VITE_SEQ_PROXY_ENDPOINT') || this.getEnvVar('SEQ_PROXY_ENDPOINT'),
+      batchSize: parseInt(
+        this.getEnvVar('VITE_SEQ_BATCH_SIZE') || this.getEnvVar('SEQ_BATCH_SIZE') || '100'
+      ),
+      batchTimeout: parseInt(
+        this.getEnvVar('VITE_SEQ_BATCH_TIMEOUT') || this.getEnvVar('SEQ_BATCH_TIMEOUT') || '2000'
+      ),
+      useProxy:
+        this.getEnvVar('VITE_SEQ_USE_PROXY') === 'true' ||
+        this.getEnvVar('SEQ_USE_PROXY') === 'true',
+      proxyEndpoint:
+        this.getEnvVar('VITE_SEQ_PROXY_ENDPOINT') || this.getEnvVar('SEQ_PROXY_ENDPOINT'),
     };
 
     try {
@@ -55,7 +62,9 @@ export class SeqEnabledLogger extends DebugLogger {
       this.transports.push(this.seqTransport);
       this.structuredLoggingEnabled = true;
       this.seqTransport.setupUnloadHandler();
-      console.log('[SeqEnabledLogger] Initialized WebWorker-based Seq transport for off-main-thread logging');
+      console.log(
+        '[SeqEnabledLogger] Initialized WebWorker-based Seq transport for off-main-thread logging'
+      );
     } catch (error) {
       console.error('[SeqEnabledLogger] Failed to initialize Seq transport:', error);
     }
@@ -66,7 +75,7 @@ export class SeqEnabledLogger extends DebugLogger {
     const bunEnv = typeof Bun !== 'undefined' ? Bun.env[key] : undefined;
     const processEnv = typeof process !== 'undefined' ? process.env[key] : undefined;
     const windowEnv = (window as any).__ENV__?.[key];
-    
+
     return bunEnv || processEnv || windowEnv;
   }
 
@@ -100,7 +109,7 @@ export class SeqEnabledLogger extends DebugLogger {
       // Reset the rate limiter
       this.rateLimiters.set(category, {
         count: 1,
-        resetTime: now + 1000 // Reset every second
+        resetTime: now + 1000, // Reset every second
       });
       return true;
     }
@@ -120,7 +129,7 @@ export class SeqEnabledLogger extends DebugLogger {
   // Override base methods to add Seq support
   log(...args: any[]): void {
     super.log(...args);
-    
+
     if (this.shouldLogToSeq(undefined, LogLevel.Info)) {
       this.logToTransports({
         timestamp: new Date(),
@@ -134,7 +143,7 @@ export class SeqEnabledLogger extends DebugLogger {
 
   warn(...args: any[]): void {
     super.warn(...args);
-    
+
     if (this.shouldLogToSeq(undefined, LogLevel.Warn)) {
       this.logToTransports({
         timestamp: new Date(),
@@ -148,7 +157,7 @@ export class SeqEnabledLogger extends DebugLogger {
 
   error(...args: any[]): void {
     super.error(...args);
-    
+
     // Always log errors to Seq
     if (this.structuredLoggingEnabled) {
       const error = args.find(arg => arg instanceof Error);
@@ -165,7 +174,7 @@ export class SeqEnabledLogger extends DebugLogger {
 
   category(category: string, ...args: any[]): void {
     super.category(category, ...args);
-    
+
     if (this.shouldLogToSeq(category, LogLevel.Info)) {
       this.logToTransports({
         timestamp: new Date(),
@@ -180,7 +189,7 @@ export class SeqEnabledLogger extends DebugLogger {
 
   performance(label: string, value: number, unit: string = 'ms'): void {
     super.performance(label, value, unit);
-    
+
     if (this.structuredLoggingEnabled) {
       this.logToTransports({
         timestamp: new Date(),
@@ -203,7 +212,7 @@ export class SeqEnabledLogger extends DebugLogger {
 
   asset(action: string, asset: string, details?: any): void {
     super.asset(action, asset, details);
-    
+
     if (this.structuredLoggingEnabled) {
       this.logToTransports({
         timestamp: new Date(),
@@ -230,14 +239,21 @@ export class SeqEnabledLogger extends DebugLogger {
   /**
    * Log structured data directly (Seq-specific feature)
    */
-  structured(template: string, properties: Record<string, any>, level: LogLevel = LogLevel.Info): void {
+  structured(
+    template: string,
+    properties: Record<string, any>,
+    level: LogLevel = LogLevel.Info
+  ): void {
     const message = this.renderTemplate(template, properties);
-    
+
     // Log to console if debug enabled
     if (this.isEnabled()) {
-      const logFn = level >= LogLevel.Error ? console.error : 
-                   level >= LogLevel.Warn ? console.warn : 
-                   console.log;
+      const logFn =
+        level >= LogLevel.Error
+          ? console.error
+          : level >= LogLevel.Warn
+            ? console.warn
+            : console.log;
       logFn(`[IronDome]`, message, properties);
     }
 
@@ -262,16 +278,18 @@ export class SeqEnabledLogger extends DebugLogger {
   }
 
   private formatMessage(args: any[]): string {
-    return args.map(arg => {
-      if (typeof arg === 'object' && arg !== null) {
-        try {
-          return JSON.stringify(arg);
-        } catch {
-          return String(arg);
+    return args
+      .map(arg => {
+        if (typeof arg === 'object' && arg !== null) {
+          try {
+            return JSON.stringify(arg);
+          } catch {
+            return String(arg);
+          }
         }
-      }
-      return String(arg);
-    }).join(' ');
+        return String(arg);
+      })
+      .join(' ');
   }
 
   private extractTemplate(args: any[]): string | undefined {
@@ -314,11 +332,7 @@ export class SeqEnabledLogger extends DebugLogger {
    * Flush all pending logs
    */
   async flush(): Promise<void> {
-    await Promise.all(
-      this.transports.map(transport => 
-        transport.flush?.() || Promise.resolve()
-      )
-    );
+    await Promise.all(this.transports.map(transport => transport.flush?.() || Promise.resolve()));
   }
 
   /**
@@ -396,7 +410,11 @@ export class SeqModuleLogger {
   /**
    * Log structured data with module context
    */
-  structured(template: string, properties: Record<string, any>, level: LogLevel = LogLevel.Info): void {
+  structured(
+    template: string,
+    properties: Record<string, any>,
+    level: LogLevel = LogLevel.Info
+  ): void {
     const enhancedProperties = { ...properties, module: this.moduleName };
     (this.logger as any).structured(template, enhancedProperties, level);
   }

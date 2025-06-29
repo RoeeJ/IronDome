@@ -43,22 +43,22 @@ export const MobileGameUI: React.FC<MobileGameUIProps> = ({
 
     updateState();
     const interval = setInterval(updateState, 100);
-    
+
     // Event listeners
     const handleWaveProgress = (data: any) => {
       setWaveProgress({ destroyed: data.destroyed, total: data.total });
     };
-    
+
     const handleWaveStarted = (data: any) => {
       setCurrentWave(data.waveNumber);
       setIsWaveActive(true);
       setWaveProgress({ destroyed: 0, total: data.totalThreats || 0 });
     };
-    
+
     const handleWaveCompleted = () => {
       setIsWaveActive(false);
     };
-    
+
     // Sync auto intercept state
     const controls = (window as any).__simulationControls;
     if (controls) {
@@ -80,7 +80,7 @@ export const MobileGameUI: React.FC<MobileGameUIProps> = ({
   const vibrate = (pattern: number | number[]) => {
     if ('vibrate' in navigator) navigator.vibrate(pattern);
   };
-  
+
   const showNotification = (message: string) => {
     if ((window as any).showNotification) {
       (window as any).showNotification(message);
@@ -487,26 +487,26 @@ export const MobileGameUI: React.FC<MobileGameUIProps> = ({
               <span className="hud-icon">💰</span>
               <span className="hud-value">{credits}</span>
             </div>
-            
+
             <div className="wave-display">
               <span className="wave-number">Wave {currentWave}</span>
               {isWaveActive && waveProgress.total > 0 && (
                 <div className="wave-progress">
-                  <div 
-                    className="wave-progress-bar" 
+                  <div
+                    className="wave-progress-bar"
                     style={{ width: `${(waveProgress.destroyed / waveProgress.total) * 100}%` }}
                   />
                 </div>
               )}
             </div>
-            
+
             <div className="hud-item">
               <span className="hud-icon">🚀</span>
               <span className={`hud-value ${interceptors < 10 ? 'interceptor-warning' : ''}`}>
                 {interceptors}
               </span>
             </div>
-            
+
             <div className="hud-item">
               <span className="hud-icon">⭐</span>
               <span className="hud-value">{score}</span>
@@ -515,7 +515,7 @@ export const MobileGameUI: React.FC<MobileGameUIProps> = ({
         </div>
 
         {/* Menu button */}
-        <button 
+        <button
           className="menu-btn"
           onClick={() => {
             vibrate(10);
@@ -524,7 +524,6 @@ export const MobileGameUI: React.FC<MobileGameUIProps> = ({
         >
           ☰
         </button>
-
 
         {/* Bottom action bar */}
         <div className="mobile-actions">
@@ -554,9 +553,7 @@ export const MobileGameUI: React.FC<MobileGameUIProps> = ({
               disabled={!placementSystem.canPlaceNewDome()}
             >
               <span className="action-icon">🛡️</span>
-              <span className="action-label">
-                {placementMode ? 'Cancel' : 'Dome'}
-              </span>
+              <span className="action-label">{placementMode ? 'Cancel' : 'Dome'}</span>
             </button>
 
             <button
@@ -571,9 +568,7 @@ export const MobileGameUI: React.FC<MobileGameUIProps> = ({
               }}
             >
               <span className="action-icon">{autoIntercept ? '🤖' : '🎯'}</span>
-              <span className="action-label">
-                {autoIntercept ? 'Auto' : 'Manual'}
-              </span>
+              <span className="action-label">{autoIntercept ? 'Auto' : 'Manual'}</span>
             </button>
 
             {isGameMode && (
@@ -588,7 +583,7 @@ export const MobileGameUI: React.FC<MobileGameUIProps> = ({
                 <span className="action-label">Shop</span>
               </button>
             )}
-            
+
             {!isGameMode && (
               <button
                 className="action-btn"
@@ -614,8 +609,9 @@ export const MobileGameUI: React.FC<MobileGameUIProps> = ({
         </div>
 
         {/* Slide-out menu */}
-        <div className={`menu-overlay ${showMenu ? 'open' : ''}`} 
-          onClick={() => setShowMenu(false)} 
+        <div
+          className={`menu-overlay ${showMenu ? 'open' : ''}`}
+          onClick={() => setShowMenu(false)}
         />
         <div className={`mobile-menu ${showMenu ? 'open' : ''}`}>
           <div className="menu-header">
@@ -628,45 +624,55 @@ export const MobileGameUI: React.FC<MobileGameUIProps> = ({
             <div className="menu-section">
               <div className="menu-section-title">Game</div>
               {isGameMode && (
-                <div className="menu-item" onClick={() => {
-                  vibrate(20);
-                  // Use the same new game logic as desktop UI
-                  const placementSystem = (window as any).__domePlacementSystem;
-                  if (placementSystem) {
-                    // Remove all batteries
-                    const allBatteries = placementSystem.getAllBatteries();
-                    const batteryIds = [];
-                    allBatteries.forEach((battery: any) => {
-                      const batteryId = placementSystem.getBatteryId(battery);
-                      if (batteryId) batteryIds.push(batteryId);
-                    });
-                    batteryIds.forEach((id: string) => {
-                      placementSystem.removeBattery(id);
-                    });
-                    
-                    // Clear game state
-                    gameState.startNewGame();
-                    
-                    // Create initial battery
-                    const THREE = (window as any).THREE;
-                    if (THREE) {
-                      placementSystem.placeBatteryAt(new THREE.Vector3(0, 0, 0), 'battery_initial', 1);
+                <div
+                  className="menu-item"
+                  onClick={() => {
+                    vibrate(20);
+                    // Use the same new game logic as desktop UI
+                    const placementSystem = (window as any).__domePlacementSystem;
+                    if (placementSystem) {
+                      // Remove all batteries
+                      const allBatteries = placementSystem.getAllBatteries();
+                      const batteryIds = [];
+                      allBatteries.forEach((battery: any) => {
+                        const batteryId = placementSystem.getBatteryId(battery);
+                        if (batteryId) batteryIds.push(batteryId);
+                      });
+                      batteryIds.forEach((id: string) => {
+                        placementSystem.removeBattery(id);
+                      });
+
+                      // Clear game state
+                      gameState.startNewGame();
+
+                      // Create initial battery
+                      const THREE = (window as any).THREE;
+                      if (THREE) {
+                        placementSystem.placeBatteryAt(
+                          new THREE.Vector3(0, 0, 0),
+                          'battery_initial',
+                          1
+                        );
+                      }
                     }
-                  }
-                  
-                  waveManager.startGame();
-                  setShowMenu(false);
-                  showNotification('New game started!');
-                }}>
+
+                    waveManager.startGame();
+                    setShowMenu(false);
+                    showNotification('New game started!');
+                  }}
+                >
                   <span>New Game</span>
                   <span>🔄</span>
                 </div>
               )}
-              <div className="menu-item" onClick={() => {
-                vibrate(10);
-                setShowHelp(true);
-                setShowMenu(false);
-              }}>
+              <div
+                className="menu-item"
+                onClick={() => {
+                  vibrate(10);
+                  setShowHelp(true);
+                  setShowMenu(false);
+                }}
+              >
                 <span>Help</span>
                 <span>❓</span>
               </div>
@@ -674,20 +680,26 @@ export const MobileGameUI: React.FC<MobileGameUIProps> = ({
 
             <div className="menu-section">
               <div className="menu-section-title">Camera</div>
-              <div className="menu-item" onClick={() => {
-                vibrate(10);
-                const controller = (window as any).__cameraController;
-                if (controller) controller.setMode('orbit');
-                setShowMenu(false);
-              }}>
+              <div
+                className="menu-item"
+                onClick={() => {
+                  vibrate(10);
+                  const controller = (window as any).__cameraController;
+                  if (controller) controller.setMode('orbit');
+                  setShowMenu(false);
+                }}
+              >
                 <span>Orbit View</span>
               </div>
-              <div className="menu-item" onClick={() => {
-                vibrate(10);
-                const controller = (window as any).__cameraController;
-                if (controller) controller.setMode('tactical');
-                setShowMenu(false);
-              }}>
+              <div
+                className="menu-item"
+                onClick={() => {
+                  vibrate(10);
+                  const controller = (window as any).__cameraController;
+                  if (controller) controller.setMode('tactical');
+                  setShowMenu(false);
+                }}
+              >
                 <span>Tactical View</span>
               </div>
             </div>
@@ -699,15 +711,15 @@ export const MobileGameUI: React.FC<MobileGameUIProps> = ({
           <>
             <div className="menu-overlay open" onClick={() => setShowShop(false)} />
             <div className="shop-modal">
-              <h2 style={{color: 'white', textAlign: 'center', marginBottom: '10px'}}>
+              <h2 style={{ color: 'white', textAlign: 'center', marginBottom: '10px' }}>
                 Supply Shop
               </h2>
               <div className="shop-grid">
                 <div className="shop-item-card">
                   <div className="shop-item-icon">🚀</div>
                   <div className="shop-item-name">Interceptors</div>
-                  <div style={{fontSize: '12px', color: '#888'}}>+50 units</div>
-                  <button 
+                  <div style={{ fontSize: '12px', color: '#888' }}>+50 units</div>
+                  <button
                     className="shop-buy-btn"
                     onClick={() => {
                       const resourceManager = (window as any).__resourceManager;
@@ -730,8 +742,8 @@ export const MobileGameUI: React.FC<MobileGameUIProps> = ({
                 <div className="shop-item-card">
                   <div className="shop-item-icon">🛡️</div>
                   <div className="shop-item-name">Dome Slot</div>
-                  <div style={{fontSize: '12px', color: '#888'}}>+1 battery</div>
-                  <button 
+                  <div style={{ fontSize: '12px', color: '#888' }}>+1 battery</div>
+                  <button
                     className="shop-buy-btn"
                     onClick={() => {
                       const resourceManager = (window as any).__resourceManager;
@@ -754,12 +766,12 @@ export const MobileGameUI: React.FC<MobileGameUIProps> = ({
                 <div className="shop-item-card">
                   <div className="shop-item-icon">🔧</div>
                   <div className="shop-item-name">Auto-Repair</div>
-                  <div style={{fontSize: '12px', color: '#888'}}>
-                    {gameState.getAutoRepairLevel() === 0 
-                      ? 'Auto fix' 
+                  <div style={{ fontSize: '12px', color: '#888' }}>
+                    {gameState.getAutoRepairLevel() === 0
+                      ? 'Auto fix'
                       : `Lvl ${gameState.getAutoRepairLevel()}/3`}
                   </div>
-                  <button 
+                  <button
                     className="shop-buy-btn"
                     onClick={() => {
                       const currentLevel = gameState.getAutoRepairLevel();
@@ -773,8 +785,10 @@ export const MobileGameUI: React.FC<MobileGameUIProps> = ({
                         gameState.upgradeAutoRepair();
                         vibrate(30);
                         SoundSystem.getInstance().playUI('success');
-                        showNotification(`Auto-repair upgraded to level ${gameState.getAutoRepairLevel()}!`);
-                        
+                        showNotification(
+                          `Auto-repair upgraded to level ${gameState.getAutoRepairLevel()}!`
+                        );
+
                         // Apply auto-repair rate to all batteries
                         const repairRates = [0, 0.5, 1.0, 2.0];
                         const newRate = repairRates[gameState.getAutoRepairLevel()];
@@ -788,12 +802,15 @@ export const MobileGameUI: React.FC<MobileGameUIProps> = ({
                       }
                     }}
                     disabled={
-                      gameState.getAutoRepairLevel() >= 3 || 
-                      credits < ((window as any).__resourceManager?.getCosts()?.autoRepair((gameState.getAutoRepairLevel() || 0) + 1) || 999999)
+                      gameState.getAutoRepairLevel() >= 3 ||
+                      credits <
+                        ((window as any).__resourceManager
+                          ?.getCosts()
+                          ?.autoRepair((gameState.getAutoRepairLevel() || 0) + 1) || 999999)
                     }
                   >
-                    {gameState.getAutoRepairLevel() >= 3 
-                      ? 'MAX' 
+                    {gameState.getAutoRepairLevel() >= 3
+                      ? 'MAX'
                       : `$${(window as any).__resourceManager?.getCosts()?.autoRepair((gameState.getAutoRepairLevel() || 0) + 1) || '???'}`}
                   </button>
                 </div>
@@ -803,11 +820,7 @@ export const MobileGameUI: React.FC<MobileGameUIProps> = ({
         )}
 
         {/* Help Modal */}
-        <HelpModal
-          isOpen={showHelp}
-          onClose={() => setShowHelp(false)}
-          isGameMode={isGameMode}
-        />
+        <HelpModal isOpen={showHelp} onClose={() => setShowHelp(false)} isGameMode={isGameMode} />
       </div>
     </>
   );

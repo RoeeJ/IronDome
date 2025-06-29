@@ -58,14 +58,14 @@ export function calculateTimeToImpact(
   const a = -0.5 * gravity;
   const b = initialVelocity.y;
   const c = initialPosition.y;
-  
+
   const discriminant = b * b - 4 * a * c;
   if (discriminant < 0) return null;
-  
+
   const sqrtDisc = Math.sqrt(discriminant);
   const t1 = (-b + sqrtDisc) / (2 * a);
   const t2 = (-b - sqrtDisc) / (2 * a);
-  
+
   // Return the positive time that's greater than 0
   const validTimes = [t1, t2].filter(t => t > 0);
   return validTimes.length > 0 ? Math.min(...validTimes) : null;
@@ -81,7 +81,7 @@ export function calculateImpactPoint(
 ): THREE.Vector3 | null {
   const impactTime = calculateTimeToImpact(initialPosition, initialVelocity, gravity);
   if (!impactTime) return null;
-  
+
   return new THREE.Vector3(
     initialPosition.x + initialVelocity.x * impactTime,
     0,
@@ -100,13 +100,13 @@ export function calculateTrajectoryPoints(
   gravity: number = GRAVITY
 ): THREE.Vector3[] {
   const points: THREE.Vector3[] = [];
-  
+
   for (let t = 0; t <= maxTime; t += timeStep) {
     const pos = calculateBallisticPosition(initialPosition, initialVelocity, t, gravity);
     if (pos.y < 0) break; // Stop at ground
     points.push(pos);
   }
-  
+
   return points;
 }
 
@@ -124,18 +124,18 @@ export function calculateLaunchAngles(
   const g = gravity;
   const x = horizontalRange;
   const y = heightDifference;
-  
+
   // Quadratic formula for launch angle
   const discriminant = v2 * v2 - g * (g * x * x + 2 * y * v2);
   if (discriminant < 0) return null; // Out of range
-  
+
   const sqrtDisc = Math.sqrt(discriminant);
   const angle1 = Math.atan((v2 + sqrtDisc) / (g * x));
   const angle2 = Math.atan((v2 - sqrtDisc) / (g * x));
-  
+
   return {
     lowAngle: Math.min(angle1, angle2),
-    highAngle: Math.max(angle1, angle2)
+    highAngle: Math.max(angle1, angle2),
   };
 }
 
@@ -149,7 +149,7 @@ export function launchParametersToVelocity(
 ): THREE.Vector3 {
   const horizontalSpeed = launchSpeed * Math.cos(elevationAngle);
   const verticalSpeed = launchSpeed * Math.sin(elevationAngle);
-  
+
   return new THREE.Vector3(
     horizontalSpeed * Math.cos(azimuthAngle),
     verticalSpeed,
@@ -170,14 +170,14 @@ export function calculateDragAffectedVelocity(
 ): THREE.Vector3 {
   const speed = currentVelocity.length();
   if (speed < 0.001) return currentVelocity.clone();
-  
+
   // Drag force: F = 0.5 * Cd * ρ * A * v²
   const dragMagnitude = 0.5 * dragCoefficient * airDensity * crossSectionArea * speed * speed;
-  
+
   // Drag acceleration (opposite to velocity direction)
   const dragAcceleration = dragMagnitude / mass;
   const dragDirection = currentVelocity.clone().normalize().multiplyScalar(-1);
-  
+
   // Update velocity
   const dragDelta = dragDirection.multiplyScalar(dragAcceleration * deltaTime);
   return currentVelocity.clone().add(dragDelta);

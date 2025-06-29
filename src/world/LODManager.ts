@@ -157,7 +157,11 @@ export class LODManager {
     meshes.medium = mediumMesh;
 
     // Low detail - box (SHARED)
-    const lowGeometry = GeometryFactory.getInstance().getBox(radius * 1.5, radius * 5, radius * 1.5);
+    const lowGeometry = GeometryFactory.getInstance().getBox(
+      radius * 1.5,
+      radius * 5,
+      radius * 1.5
+    );
     const lowMesh = new THREE.Mesh(lowGeometry, material); // REUSE material
     lowMesh.rotation.x = Math.PI / 2;
     meshes.low = lowMesh;

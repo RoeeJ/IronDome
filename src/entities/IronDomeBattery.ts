@@ -1702,7 +1702,7 @@ export class IronDomeBattery extends EventEmitter {
 
         // If model is too small or too large, scale it
         const targetHeight = 4;
-        let scaleFactor = targetHeight / size.y; // Always calculate scale factor
+        const scaleFactor = targetHeight / size.y; // Always calculate scale factor
         if (Math.abs(scaleFactor - 1) > 0.01) {
           // Only apply if significantly different from 1
           object.scale.set(scaleFactor, scaleFactor, scaleFactor);

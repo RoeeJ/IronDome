@@ -45,7 +45,7 @@ export class InstancedExplosionRenderer {
 
     // Use cached materials to prevent shader recompilation
     const materialCache = MaterialCache.getInstance();
-    
+
     this.explosionMaterial = materialCache.getMeshBasicMaterial({
       color: 0xffaa00,
       transparent: true,
@@ -433,7 +433,8 @@ export class InstancedExplosionRenderer {
     ring.renderOrder = -1; // Render dust ring way behind explosion
     this.scene.add(ring);
 
-    debug.category('Visual',
+    debug.category(
+      'Visual',
       `Created explosion dust ring at ${position.x.toFixed(1)}, ${position.z.toFixed(1)}`
     );
 
@@ -446,7 +447,8 @@ export class InstancedExplosionRenderer {
           this.scene.remove(ring);
           ringGeometry.dispose();
           ringMaterial.dispose();
-          debug.category('Visual',
+          debug.category(
+            'Visual',
             `Removed explosion dust ring from ${position.x.toFixed(1)}, ${position.z.toFixed(1)}`
           );
           return false;
@@ -467,13 +469,16 @@ export class InstancedExplosionRenderer {
   private getSmokeTexture(): THREE.Texture {
     return this.textureCache.getParticleTexture(64, {
       inner: 'rgba(100,100,100,0.8)',
-      outer: 'rgba(100,100,100,0)'
+      outer: 'rgba(100,100,100,0)',
     });
   }
 
   // Debug method to clean up any leftover dust rings
   cleanupOrphanedDustRings(): void {
-    debug.category('Cleanup', `Cleaning up orphaned dust rings. Active effects: ${this.activeEffects.length}`);
+    debug.category(
+      'Cleanup',
+      `Cleaning up orphaned dust rings. Active effects: ${this.activeEffects.length}`
+    );
 
     // Force all effects to complete their cleanup
     this.activeEffects.forEach(effect => {

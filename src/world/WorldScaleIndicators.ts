@@ -225,7 +225,8 @@ export class WorldScaleIndicators {
         const buildingPos = new THREE.Vector3();
         let attempts = 0;
 
-        while (!validPosition && attempts < 50) { // More attempts for better placement
+        while (!validPosition && attempts < 50) {
+          // More attempts for better placement
           // Use noise-based placement for more organic city layout
           const angle = Math.random() * Math.PI * 2;
           const baseDistance =
@@ -276,7 +277,7 @@ export class WorldScaleIndicators {
         }
       }
     });
-    
+
     // CHAINSAW: No geometry merging - keeping individual buildings for collision detection
     debug.log('Buildings created - no merging needed for optimized system');
 
@@ -285,31 +286,28 @@ export class WorldScaleIndicators {
     this.indicators.add(this.buildings);
     // Trees and vehicles removed to eliminate cylinder/tube shapes
   }
-  
+
   /**
    * Optimize all static geometry after creation
    */
   optimizeGeometry(): void {
     debug.log('Optimizing world geometry...');
-    
+
     // Optimize distance markers (poles and rings)
     if (this.distanceMarkers.children.length > 0) {
-      const optimizedMarkers = WorldGeometryOptimizer.optimizeStaticGeometry(
-        this.distanceMarkers,
-        {
-          mergeByMaterial: true,
-          castShadows: false
-        }
-      );
-      
+      const optimizedMarkers = WorldGeometryOptimizer.optimizeStaticGeometry(this.distanceMarkers, {
+        mergeByMaterial: true,
+        castShadows: false,
+      });
+
       // Replace with optimized version
       this.indicators.remove(this.distanceMarkers);
       this.distanceMarkers = optimizedMarkers;
       this.indicators.add(this.distanceMarkers);
-      
+
       debug.log(`Optimized distance markers: ${this.distanceMarkers.children.length} draw calls`);
     }
-    
+
     // Report optimization stats
     const stats = WorldGeometryOptimizer.analyzeScene(this.scene);
     debug.log('Scene optimization analysis:', stats);
@@ -424,12 +422,12 @@ export class WorldScaleIndicators {
       // Each particle gets different speed and slight direction variation
       const speedVariation = 0.5 + Math.random() * 1.0; // 50% to 150% of base speed
       const angleVariation = (Math.random() - 0.5) * 0.3; // ±15 degrees variation
-      
+
       this.windParticleVelocities.push(
         new THREE.Vector3(
-          (Math.random() - 0.5) * 2.0,  // More random drift
-          (Math.random() - 0.5) * 0.5,  // Some vertical movement
-          (Math.random() - 0.5) * 2.0   // More random drift
+          (Math.random() - 0.5) * 2.0, // More random drift
+          (Math.random() - 0.5) * 0.5, // Some vertical movement
+          (Math.random() - 0.5) * 2.0 // More random drift
         ).multiplyScalar(speedVariation)
       );
     }
@@ -515,11 +513,12 @@ export class WorldScaleIndicators {
           // Blend global wind with particle's individual movement for more natural flow
           // Each particle responds differently to wind based on its "weight"
           const particleWeight = 0.3 + (i % 7) * 0.1; // Different particles have different wind response
-          
+
           positions[i3] += (windVector.x * particleWeight + velocity.x) * clampedDeltaTime * 10;
-          positions[i3 + 1] += (windVector.y * 0.1 * particleWeight + velocity.y) * clampedDeltaTime * 10;
+          positions[i3 + 1] +=
+            (windVector.y * 0.1 * particleWeight + velocity.y) * clampedDeltaTime * 10;
           positions[i3 + 2] += (windVector.z * particleWeight + velocity.z) * clampedDeltaTime * 10;
-          
+
           // Add some swirling motion based on position
           const swirl = Math.sin(positions[i3] * 0.01 + this.time * 0.5) * 0.2;
           positions[i3 + 2] += swirl * clampedDeltaTime * 10;
@@ -599,44 +598,52 @@ export class WorldScaleIndicators {
 
     this.scene.remove(this.indicators);
   }
-  
+
   /**
    * Update visibility of different indicator types dynamically
    */
   updateVisibility(config: Partial<ScaleIndicatorConfig>): void {
     // Update internal config
     Object.assign(this.config, config);
-    
+
     // Toggle grid visibility
     if (this.grid) {
       this.grid.visible = config.showGrid !== undefined ? config.showGrid : this.config.showGrid;
     }
-    
+
     // Toggle distance markers
     if (this.distanceMarkers) {
-      this.distanceMarkers.visible = config.showDistanceMarkers !== undefined ? 
-        config.showDistanceMarkers : this.config.showDistanceMarkers;
+      this.distanceMarkers.visible =
+        config.showDistanceMarkers !== undefined
+          ? config.showDistanceMarkers
+          : this.config.showDistanceMarkers;
     }
-    
+
     // Toggle reference objects (buildings)
     if (this.buildings) {
-      this.buildings.visible = config.showReferenceObjects !== undefined ? 
-        config.showReferenceObjects : this.config.showReferenceObjects;
+      this.buildings.visible =
+        config.showReferenceObjects !== undefined
+          ? config.showReferenceObjects
+          : this.config.showReferenceObjects;
     }
-    
+
     // Toggle wind particles
     if (this.windParticles) {
-      this.windParticles.visible = config.showWindParticles !== undefined ? 
-        config.showWindParticles : this.config.showWindParticles;
+      this.windParticles.visible =
+        config.showWindParticles !== undefined
+          ? config.showWindParticles
+          : this.config.showWindParticles;
     }
-    
+
     // Toggle altitude markers
     if (this.altitudeMarkers) {
-      this.altitudeMarkers.visible = config.showAltitudeMarkers !== undefined ? 
-        config.showAltitudeMarkers : this.config.showAltitudeMarkers;
+      this.altitudeMarkers.visible =
+        config.showAltitudeMarkers !== undefined
+          ? config.showAltitudeMarkers
+          : this.config.showAltitudeMarkers;
     }
   }
-  
+
   // Update building window lighting based on time of day
   updateTimeOfDay(hours: number) {
     // CHAINSAW: Using global buildingSystem from main.ts
