@@ -36,7 +36,7 @@ export class ThreatManager extends EventEmitter {
   private spawnConfigs: ThreatSpawnConfig[];
   private lastSpawnTime: number = 0;
   private nextSpawnTime: number = 0;
-  private isSpawning: boolean = false;
+  public isSpawning: boolean = false;
   private impactMarkers: THREE.Mesh[] = [];
   private launchEffects: LaunchEffectsSystem;
   private batteries: IronDomeBattery[] = [];
@@ -499,11 +499,23 @@ export class ThreatManager extends EventEmitter {
     const remainingCapacity = 50 - this.threats.length;
     if (remainingCapacity <= 0) return;
 
-    // Determine volley size, but limit by remaining capacity
-    const desiredSize =
+    // Determine volley size with scenario multiplier
+    const baseSize =
       launcher.volleySize.min +
       Math.floor(Math.random() * (launcher.volleySize.max - launcher.volleySize.min + 1));
-    const volleySize = Math.min(desiredSize, remainingCapacity, 5); // Cap at 5 per volley max
+
+    // Apply scenario volley size multiplier if active
+    let desiredSize = baseSize;
+    if (this.currentAttackParameters) {
+      const salvoConfig = AttackParameterConverter.getSalvoConfig(
+        this.currentAttackParameters.intensity
+      );
+      // Use the max size from salvo config as a multiplier guide
+      const multiplier = salvoConfig.maxSize / 5; // Normalize based on default max of 5
+      desiredSize = Math.floor(baseSize * multiplier);
+    }
+
+    const volleySize = Math.min(desiredSize, remainingCapacity, 8); // Increased cap for extreme scenarios
 
     // Fire the volley with staggered timing
     for (let i = 0; i < volleySize; i++) {
@@ -960,6 +972,10 @@ export class ThreatManager extends EventEmitter {
 
   getLaunchEffectsSystem(): LaunchEffectsSystem {
     return this.launchEffects;
+  }
+
+  getLauncherSystem(): ThreatLauncherSystem {
+    return this.launcherSystem;
   }
 
   clearAll(): void {
@@ -1568,7 +1584,8 @@ export class ThreatManager extends EventEmitter {
 
     // Configure threat mix
     if (scenario.parameters.threatMix) {
-      this.setThreatMix(scenario.parameters.threatMix);
+      // For now, just log - threat mix selection can be implemented later
+      debug.log(`Threat mix set to: ${scenario.parameters.threatMix}`);
     }
 
     // Configure salvo chance based on intensity
@@ -1585,6 +1602,9 @@ export class ThreatManager extends EventEmitter {
         this.batteries.length > 0 ? this.batteries[0].getPosition() : new THREE.Vector3(0, 0, 0);
       this.baseSpawnAngle = Math.atan2(targetPos.z, targetPos.x) + Math.PI;
     }
+
+    // Pass scenario parameters to launcher system
+    this.launcherSystem.setScenarioParameters(scenario.parameters);
 
     // Start the scenario manager
     this.scenarioManager.startScenario(scenario, {
@@ -1609,6 +1629,8 @@ export class ThreatManager extends EventEmitter {
   stopScenario(): void {
     this.currentAttackParameters = null;
     this.scenarioManager.stopScenario();
+    // Reset launcher system
+    this.launcherSystem.setScenarioParameters(null);
     // Reset to default spawn configs
     this.salvoChance = 0.3;
   }
@@ -1630,6 +1652,9 @@ export class ThreatManager extends EventEmitter {
     // Update salvo configuration
     const salvoConfig = AttackParameterConverter.getSalvoConfig(intensity);
     this.salvoChance = salvoConfig.chance;
+
+    // Update launcher system
+    this.launcherSystem.setScenarioParameters(this.currentAttackParameters);
   }
 
   /**
@@ -1645,6 +1670,9 @@ export class ThreatManager extends EventEmitter {
     } else {
       this.currentAttackParameters.pattern = pattern;
     }
+
+    // Update launcher system
+    this.launcherSystem.setScenarioParameters(this.currentAttackParameters);
   }
 
   /**

@@ -18,6 +18,7 @@ import { InterceptionOptimizer } from '../systems/InterceptionOptimizer';
 import { BlastPhysics } from '../systems/BlastPhysics';
 import { ExplosionManager, ExplosionType } from '../systems/ExplosionManager';
 import { SoundSystem } from '../systems/SoundSystem';
+import { MaterialCache } from '../utils/MaterialCache';
 
 interface Interception {
   interceptor: Projectile;
@@ -79,7 +80,7 @@ export class InterceptionSystem {
     this.batteryIdMap.set(battery, id);
     this.batteryCoordinator.registerBattery(id, battery);
   }
-  
+
   removeBattery(battery: IronDomeBattery, batteryId?: string): void {
     const index = this.batteries.indexOf(battery);
     if (index !== -1) {
@@ -97,7 +98,7 @@ export class InterceptionSystem {
     this.profiler = profiler;
   }
 
-  update(threats: Threat[]): Projectile[] {
+  update(threats: Threat[], manualModeOnly: boolean = false): Projectile[] {
     const deltaTime = 1 / 60;
 
     // Store threats for repurposing
@@ -118,8 +119,8 @@ export class InterceptionSystem {
 
     // Update batteries with threat information
     if (this.profiler) this.profiler.startSection('Battery Updates');
-    
-    this.batteries.forEach((battery) => {
+
+    this.batteries.forEach(battery => {
       battery.update(deltaTime, threats);
       // Update coordinator with current battery status using the correct ID
       const batteryId = this.batteryIdMap.get(battery);
@@ -191,7 +192,7 @@ export class InterceptionSystem {
         if (renderer) {
           renderer.removeProjectile(interceptor.id);
         }
-        
+
         // Remove from trail renderer
         const trailRenderer = (window as any).__instancedTrailRenderer;
         if (trailRenderer) {
@@ -204,10 +205,12 @@ export class InterceptionSystem {
     }
     if (this.profiler) this.profiler.endSection('Interceptor Updates');
 
-    // Check for new threats to intercept
-    if (this.profiler) this.profiler.startSection('Evaluate Threats');
-    this.evaluateThreats(threats);
-    if (this.profiler) this.profiler.endSection('Evaluate Threats');
+    // Check for new threats to intercept (only in auto mode)
+    if (!manualModeOnly) {
+      if (this.profiler) this.profiler.startSection('Evaluate Threats');
+      this.evaluateThreats(threats);
+      if (this.profiler) this.profiler.endSection('Evaluate Threats');
+    }
 
     // Check for successful interceptions
     if (this.profiler) this.profiler.startSection('Check Interceptions');
@@ -258,7 +261,6 @@ export class InterceptionSystem {
       this.batteries
     );
 
-
     // Process allocations
     allocationResult.allocations.forEach((allocation, threatId) => {
       // Check interceptor limit
@@ -274,23 +276,25 @@ export class InterceptionSystem {
       // But we need to match them with our ID map
       let batteryId: string | undefined;
       let actualBattery: IronDomeBattery = battery;
-      
+
       // First try direct lookup
       batteryId = this.batteryIdMap.get(battery);
-      
+
       // If not found, find the battery by matching position
       if (!batteryId) {
         for (const [mapBattery, mapId] of this.batteryIdMap.entries()) {
-          if (mapBattery === battery || 
-              (mapBattery.getPosition().equals(battery.getPosition()) && 
-               mapBattery.getInterceptorCount() === battery.getInterceptorCount())) {
+          if (
+            mapBattery === battery ||
+            (mapBattery.getPosition().equals(battery.getPosition()) &&
+              mapBattery.getInterceptorCount() === battery.getInterceptorCount())
+          ) {
             batteryId = mapId;
             actualBattery = mapBattery;
             break;
           }
         }
       }
-      
+
       if (!batteryId) {
         return;
       }
@@ -329,7 +333,7 @@ export class InterceptionSystem {
         if (renderer && interceptor.useInstancing) {
           renderer.addProjectile(interceptor);
         }
-        
+
         // Add trail to batched renderer
         const trailRenderer = (window as any).__instancedTrailRenderer;
         if (trailRenderer) {
@@ -405,9 +409,11 @@ export class InterceptionSystem {
         debug.category('Interception', `Firing ${interceptorsToFire} interceptor(s) at threat`);
 
         const batteryId = this.batteryIdMap.get(battery);
-        
+
         if (!batteryId) {
-          debug.module('Interception').warn(`Could not find battery ID for battery in legacy method`);
+          debug
+            .module('Interception')
+            .warn(`Could not find battery ID for battery in legacy method`);
           continue;
         }
 
@@ -611,6 +617,9 @@ export class InterceptionSystem {
 
     // Small explosion at threat position
     this.createExplosion(threat.getPosition(), 0.8);
+
+    // Play explosion sound
+    SoundSystem.getInstance().playExplosion('intercept', threat.getPosition());
   }
 
   private repurposeInterceptors(destroyedThreat: Threat): void {
@@ -690,7 +699,7 @@ export class InterceptionSystem {
     if (renderer) {
       renderer.removeProjectile(interception.interceptor.id);
     }
-    
+
     // Remove from trail renderer
     const trailRenderer = (window as any).__instancedTrailRenderer;
     if (trailRenderer) {
@@ -706,17 +715,15 @@ export class InterceptionSystem {
     // Base radius of 6m (severe damage zone) + quality scaling up to 10m
     const radius = 6 + quality * 4;
     const geometry = new THREE.SphereGeometry(radius, 12, 8);
-    const material = new THREE.MeshBasicMaterial({ 
-      color: 0xff4400, 
-      transparent: true, 
+    const material = new THREE.MeshBasicMaterial({
+      color: 0xff4400,
+      transparent: true,
       opacity: 0.9,
-      emissive: 0xff2200,
-      emissiveIntensity: 0.5
     });
     const explosionSphere = new THREE.Mesh(geometry, material);
     explosionSphere.position.copy(position);
     this.scene.add(explosionSphere);
-    
+
     // Animate expansion and fade
     const startTime = Date.now();
     const animate = () => {
@@ -727,12 +734,12 @@ export class InterceptionSystem {
         material.dispose();
         return;
       }
-      
+
       // Expand and fade
       const scale = 1 + elapsed * 0.5;
       explosionSphere.scale.set(scale, scale, scale);
       material.opacity = 0.9 * (1 - elapsed * 2);
-      
+
       requestAnimationFrame(animate);
     };
     animate();
@@ -858,7 +865,6 @@ export class InterceptionSystem {
   setBatteryCoordination(enabled: boolean): void {
     this.batteryCoordinator.setCoordinationEnabled(enabled);
   }
-
 
   getNearestBattery(threat: Threat): IronDomeBattery | null {
     let nearestBattery: IronDomeBattery | null = null;

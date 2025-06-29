@@ -1,10 +1,10 @@
 import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
+import { GameState } from '../game/GameState';
 import { Threat } from '../entities/Threat';
 import { Projectile } from '../entities/Projectile';
-import { IronDomeBattery } from '../entities/IronDomeBattery';
 import { debug } from '../utils/logger';
-import { SoundSystem } from '../systems/SoundSystem';
+import { IronDomeBattery } from '../entities/IronDomeBattery';
 
 export enum CameraMode {
   ORBIT = 'orbit',
@@ -236,17 +236,7 @@ export class CameraController {
         break;
     }
 
-    // Update sound listener position and orientation
-    const soundSystem = SoundSystem.getInstance();
-    soundSystem.updateListenerPosition(this.camera.position);
-
-    // Get camera's forward and up vectors for orientation
-    const forward = new THREE.Vector3(0, 0, -1);
-    forward.applyQuaternion(this.camera.quaternion);
-    const up = new THREE.Vector3(0, 1, 0);
-    up.applyQuaternion(this.camera.quaternion);
-
-    soundSystem.updateListenerOrientation(forward, up);
+    // Sound listener is now automatically updated via Three.js AudioListener attached to camera
   }
 
   private updateFollowMode(deltaTime: number) {

@@ -1,3 +1,4 @@
+import * as THREE from 'three';
 import { debug } from '../utils/logger';
 
 interface SoundOptions {
@@ -10,34 +11,32 @@ interface SoundOptions {
   position?: { x: number; y: number; z: number };
   maxDistance?: number;
   refDistance?: number;
-  pitchVariation?: number; // Random pitch variation range (0-1)
+  pitchVariation?: number;
 }
 
 interface SoundInstance {
   id: string;
-  audio: HTMLAudioElement;
-  source?: MediaElementAudioSourceNode;
-  gainNode?: GainNode;
-  pannerNode?: PannerNode;
+  audio: THREE.Audio | THREE.PositionalAudio;
   startTime: number;
   fadeIn?: number;
   fadeOut?: number;
   fadeStartTime?: number;
   isFading?: boolean;
   originalVolume: number;
+  category?: string;
 }
 
 export class SoundSystem {
   private static instance: SoundSystem | null = null;
-  private audioContext: AudioContext | null = null;
-  private masterGainNode: GainNode | null = null;
-  private sounds: Map<string, HTMLAudioElement> = new Map();
+  private listener: THREE.AudioListener;
+  private audioLoader: THREE.AudioLoader;
+  private sounds: Map<string, AudioBuffer> = new Map();
   private activeSounds: Map<string, SoundInstance> = new Map();
+  private audioPool: Map<string, (THREE.Audio | THREE.PositionalAudio)[]> = new Map();
   private enabled: boolean = true;
   private masterVolume: number = 0.7;
   private categoryVolumes: Map<string, number> = new Map();
-  private listenerPosition = { x: 0, y: 0, z: 0 };
-  private listenerOrientation = { forward: { x: 0, y: 0, z: -1 }, up: { x: 0, y: 1, z: 0 } };
+  private maxActiveSounds: number = 500; // Increased for high-rate launches
   private bgmInstance: SoundInstance | null = null;
   private sfxEnabled: boolean = true;
   private bgmEnabled: boolean = true;
@@ -45,6 +44,10 @@ export class SoundSystem {
   private bgmVolume: number = 0.5;
 
   private constructor() {
+    // Initialize Three.js audio
+    this.listener = new THREE.AudioListener();
+    this.audioLoader = new THREE.AudioLoader();
+
     // Initialize category volumes
     this.categoryVolumes.set('launch', 0.8);
     this.categoryVolumes.set('explosion', 0.9);
@@ -56,7 +59,6 @@ export class SoundSystem {
     // Load saved preferences
     this.loadPreferences();
 
-    this.initializeAudioContext();
     this.loadSounds();
 
     // Load saved preferences
@@ -69,9 +71,7 @@ export class SoundSystem {
 
     if (savedVolume !== null) {
       this.masterVolume = parseFloat(savedVolume);
-      if (this.masterGainNode) {
-        this.masterGainNode.gain.value = this.masterVolume;
-      }
+      this.listener.setMasterVolume(this.masterVolume);
     }
   }
 
@@ -82,82 +82,13 @@ export class SoundSystem {
     return SoundSystem.instance;
   }
 
-  private initializeAudioContext() {
-    try {
-      this.audioContext = new (window.AudioContext || (window as any).webkitAudioContext)();
-      this.masterGainNode = this.audioContext.createGain();
-      this.masterGainNode.gain.value = this.masterVolume;
-      this.masterGainNode.connect(this.audioContext.destination);
-
-      // Set up listener position
-      if (this.audioContext.listener) {
-        const listener = this.audioContext.listener;
-
-        // Set default position
-        if (listener.positionX) {
-          listener.positionX.value = 0;
-          listener.positionY.value = 0;
-          listener.positionZ.value = 0;
-        } else if (listener.setPosition) {
-          listener.setPosition(0, 0, 0);
-        }
-
-        // Set default orientation
-        if (listener.forwardX) {
-          listener.forwardX.value = 0;
-          listener.forwardY.value = 0;
-          listener.forwardZ.value = -1;
-          listener.upX.value = 0;
-          listener.upY.value = 1;
-          listener.upZ.value = 0;
-        } else if (listener.setOrientation) {
-          listener.setOrientation(0, 0, -1, 0, 1, 0);
-        }
-      }
-
-      debug.log('Audio context initialized', { state: this.audioContext.state });
-
-      // Set up user interaction handler to resume audio context and retry BGM
-      const resumeAudio = () => {
-        if (this.audioContext && this.audioContext.state === 'suspended') {
-          this.audioContext.resume().then(() => {
-            debug.log('Audio context resumed after user interaction');
-            // Try to start BGM after audio context is resumed
-            if (this.bgmEnabled && !this.bgmInstance) {
-              this.playBackgroundMusic();
-            }
-          });
-        } else if (this.audioContext && this.audioContext.state === 'running') {
-          // Audio context already running, start BGM if enabled
-          if (this.bgmEnabled && !this.bgmInstance) {
-            this.playBackgroundMusic();
-          }
-        }
-
-        // Keep listeners active until BGM successfully starts
-        if (this.bgmEnabled && !this.bgmInstance) {
-          // Don't remove listeners yet - BGM hasn't started
-          return;
-        }
-
-        // Remove listeners only after BGM is playing
-        document.removeEventListener('click', resumeAudio);
-        document.removeEventListener('keydown', resumeAudio);
-        document.removeEventListener('touchstart', resumeAudio);
-      };
-
-      // Add listeners for user interaction
-      document.addEventListener('click', resumeAudio);
-      document.addEventListener('keydown', resumeAudio);
-      document.addEventListener('touchstart', resumeAudio);
-    } catch (error) {
-      debug.error('Failed to initialize audio context:', error);
-      this.enabled = false;
-    }
+  // Get the audio listener to attach to camera
+  getListener(): THREE.AudioListener {
+    return this.listener;
   }
 
   private loadSounds() {
-    // Define sound files to preload - using our normalized sounds
+    // Define sound files to preload
     const soundFiles = {
       // Launch sounds
       interceptor_launch: 'assets/sounds/normalized/launch/firing.mp3',
@@ -165,7 +96,7 @@ export class SoundSystem {
       rocket_launch: 'assets/sounds/normalized/launch/grad.mp3',
       mortar_launch: 'assets/sounds/normalized/launch/launch_smol.mp3',
 
-      // Explosion sounds - using new explosion files
+      // Explosion sounds
       explosion_air: 'assets/sounds/normalized/explosion/explosion1.mp3',
       explosion_ground: 'assets/sounds/normalized/explosion/explosion3.mp3',
       explosion_intercept: 'assets/sounds/normalized/explosion/explosion2.mp3',
@@ -178,17 +109,17 @@ export class SoundSystem {
       // Threat sounds
       threat_flyby: 'assets/sounds/normalized/flyby/flyby.mp3',
 
-      // Alert sounds (placeholders for now)
+      // Alert sounds (placeholders)
       alert_siren: 'assets/sounds/alert_siren.mp3',
       alert_critical: 'assets/sounds/alert_critical.mp3',
 
-      // UI sounds (placeholders for now)
+      // UI sounds (placeholders)
       ui_click: 'assets/sounds/ui_click.mp3',
       ui_success: 'assets/sounds/ui_success.mp3',
       ui_fail: 'assets/sounds/ui_fail.mp3',
       ui_upgrade: 'assets/sounds/ui_upgrade.mp3',
 
-      // Ambient sounds (placeholders for now)
+      // Ambient sounds (placeholders)
       ambient_base: 'assets/sounds/ambient_base.mp3',
 
       // Background music
@@ -197,34 +128,56 @@ export class SoundSystem {
 
     // Load actual sound files
     Object.entries(soundFiles).forEach(([key, path]) => {
-      const audio = new Audio();
-      audio.preload = 'auto';
-      audio.crossOrigin = 'anonymous'; // Add CORS support
-
-      // Only set src for files that exist (our normalized sounds)
+      // Only load files that exist (our normalized sounds)
       if (path.includes('normalized/')) {
-        audio.src = path;
+        this.audioLoader.load(
+          path,
+          buffer => {
+            this.sounds.set(key, buffer);
+            debug.log(`Sound loaded: ${key}`);
 
-        // Add load event listener for BGM
-        if (key === 'bgm_picaroon') {
-          audio.addEventListener('canplaythrough', () => {
-            debug.log('BGM audio loaded and ready to play');
-          });
-
-          audio.addEventListener('error', e => {
-            debug.error('Failed to load BGM:', e);
-          });
-        }
+            // Start BGM if it's loaded and enabled
+            if (key === 'bgm_picaroon' && this.bgmEnabled && !this.bgmInstance) {
+              this.playBackgroundMusic();
+            }
+          },
+          undefined,
+          error => {
+            debug.warn(`Failed to load sound ${key}:`, error);
+          }
+        );
       }
-
-      this.sounds.set(key, audio);
     });
 
-    debug.log('Sounds loaded');
+    debug.log('Sound loading initiated');
+  }
+
+  private getPooledAudio(spatialized: boolean = false): THREE.Audio | THREE.PositionalAudio {
+    const poolKey = spatialized ? 'positional' : 'standard';
+    let pool = this.audioPool.get(poolKey);
+
+    if (!pool) {
+      pool = [];
+      this.audioPool.set(poolKey, pool);
+    }
+
+    // Find an available audio object
+    const available = pool.find(audio => !audio.isPlaying);
+    if (available) {
+      return available;
+    }
+
+    // Create new audio object if none available
+    const audio = spatialized
+      ? new THREE.PositionalAudio(this.listener)
+      : new THREE.Audio(this.listener);
+
+    pool.push(audio);
+    return audio;
   }
 
   play(soundName: string, category: string = 'ui', options: SoundOptions = {}): string | null {
-    if (!this.enabled || !this.audioContext || !this.masterGainNode) {
+    if (!this.enabled) {
       return null;
     }
 
@@ -233,231 +186,282 @@ export class SoundSystem {
       return null;
     }
 
-    const audio = this.sounds.get(soundName);
-    if (!audio) {
-      debug.warn(`Sound not found: ${soundName}`);
+    const buffer = this.sounds.get(soundName);
+    if (!buffer) {
+      // Silently skip sounds that aren't loaded yet
       return null;
     }
 
-    // Check if audio has a valid source
-    if (!audio.src || audio.src === '') {
-      // Silently skip playing sounds that aren't loaded yet
-      return null;
+    // Clean up old sounds if we're at the limit
+    if (this.activeSounds.size >= this.maxActiveSounds) {
+      // Find and remove the oldest non-BGM sound
+      let oldestSound: SoundInstance | null = null;
+      let oldestTime = Date.now();
+
+      this.activeSounds.forEach(sound => {
+        if (sound.id !== this.bgmInstance?.id && sound.startTime < oldestTime) {
+          oldestSound = sound;
+          oldestTime = sound.startTime;
+        }
+      });
+
+      if (oldestSound) {
+        this.stopSound((oldestSound as SoundInstance).id);
+      }
     }
 
-    // Clone audio element for multiple simultaneous plays
-    const audioClone = audio.cloneNode(true) as HTMLAudioElement;
     const soundId = `${soundName}_${Date.now()}_${Math.random()}`;
 
-    // Add error handler for audio loading
-    audioClone.addEventListener('error', e => {
-      debug.error(`Failed to load audio ${soundName}:`, e);
-      this.activeSounds.delete(soundId);
-    });
-
     try {
-      // Resume audio context if suspended (mobile browsers)
-      if (this.audioContext.state === 'suspended') {
-        this.audioContext.resume();
-      }
+      // Get pooled audio object
+      const audio = this.getPooledAudio(options.spatialized);
 
-      // Create audio nodes
-      const source = this.audioContext.createMediaElementSource(audioClone);
-      const gainNode = this.audioContext.createGain();
-
-      // Calculate volume
-      const categoryVolume = this.categoryVolumes.get(category) || 1;
-      let volume = (options.volume || 1) * categoryVolume;
-
-      // Apply SFX volume for non-BGM sounds
-      if (category !== 'bgm') {
-        volume *= this.sfxVolume;
-      }
-
-      gainNode.gain.value = options.fadeIn ? 0 : volume;
-
-      // Set up audio graph
-      let lastNode: AudioNode = gainNode;
-
-      // Add spatial audio if requested
-      if (options.spatialized && options.position) {
-        const pannerNode = this.audioContext.createPanner();
-        pannerNode.panningModel = 'HRTF';
-        pannerNode.distanceModel = 'inverse';
-        pannerNode.refDistance = options.refDistance || 1;
-        pannerNode.maxDistance = options.maxDistance || 100;
-        pannerNode.rolloffFactor = 1;
-
-        // Set position
-        if (pannerNode.positionX) {
-          pannerNode.positionX.value = options.position.x;
-          pannerNode.positionY.value = options.position.y;
-          pannerNode.positionZ.value = options.position.z;
-        } else if (pannerNode.setPosition) {
-          pannerNode.setPosition(options.position.x, options.position.y, options.position.z);
-        }
-
-        gainNode.connect(pannerNode);
-        pannerNode.connect(this.masterGainNode);
-        lastNode = pannerNode;
-
-        // Store panner node reference
-        const soundInstance: SoundInstance = {
-          id: soundId,
-          audio: audioClone,
-          source,
-          gainNode,
-          pannerNode,
-          startTime: Date.now(),
-          fadeIn: options.fadeIn,
-          fadeOut: options.fadeOut,
-          originalVolume: volume,
-        };
-        this.activeSounds.set(soundId, soundInstance);
-      } else {
-        gainNode.connect(this.masterGainNode);
-
-        // Store sound instance
-        const soundInstance: SoundInstance = {
-          id: soundId,
-          audio: audioClone,
-          source,
-          gainNode,
-          startTime: Date.now(),
-          fadeIn: options.fadeIn,
-          fadeOut: options.fadeOut,
-          originalVolume: volume,
-        };
-        this.activeSounds.set(soundId, soundInstance);
-      }
-
-      source.connect(gainNode);
+      // Set buffer
+      audio.setBuffer(buffer);
 
       // Apply options
-      audioClone.loop = options.loop || false;
-      audioClone.playbackRate = options.playbackRate || 1;
+      const categoryVolume = this.categoryVolumes.get(category) || 1.0;
+      const finalVolume =
+        (options.volume || 1.0) *
+        categoryVolume *
+        (category === 'bgm' ? this.bgmVolume : this.sfxVolume);
 
-      // Apply pitch variation if requested
+      audio.setVolume(finalVolume);
+      audio.setLoop(options.loop || false);
+
+      // Apply pitch variation if specified
       if (options.pitchVariation) {
-        const variation = 1 + (Math.random() - 0.5) * 2 * options.pitchVariation;
-        audioClone.playbackRate *= variation;
+        const variation = 1 + (Math.random() - 0.5) * options.pitchVariation;
+        audio.setPlaybackRate((options.playbackRate || 1.0) * variation);
+      } else {
+        audio.setPlaybackRate(options.playbackRate || 1.0);
       }
 
-      // Set up fade in
-      if (options.fadeIn) {
-        gainNode.gain.setValueAtTime(0, this.audioContext.currentTime);
-        gainNode.gain.linearRampToValueAtTime(
-          volume,
-          this.audioContext.currentTime + options.fadeIn / 1000
-        );
+      // Set position for positional audio
+      if (options.spatialized && audio instanceof THREE.PositionalAudio) {
+        if (options.position) {
+          audio.position.set(options.position.x, options.position.y, options.position.z);
+        }
+        audio.setRefDistance(options.refDistance || 10);
+        audio.setMaxDistance(options.maxDistance || 1000);
+        audio.setRolloffFactor(1);
       }
-
-      // Handle audio end
-      audioClone.addEventListener('ended', () => {
-        this.activeSounds.delete(soundId);
-        audioClone.remove();
-      });
 
       // Play the sound
-      audioClone.play().catch(error => {
-        debug.warn(`Failed to play sound ${soundName}:`, error);
-        this.activeSounds.delete(soundId);
-      });
+      audio.play();
+
+      // Store sound instance
+      const soundInstance: SoundInstance = {
+        id: soundId,
+        audio,
+        startTime: Date.now(),
+        fadeIn: options.fadeIn,
+        fadeOut: options.fadeOut,
+        originalVolume: finalVolume,
+        category,
+      };
+
+      this.activeSounds.set(soundId, soundInstance);
+
+      // Handle fade in
+      if (options.fadeIn) {
+        soundInstance.isFading = true;
+        soundInstance.fadeStartTime = Date.now();
+        audio.setVolume(0);
+      }
+
+      // Auto-cleanup when sound ends (for non-looping sounds)
+      if (!options.loop) {
+        const duration = (buffer.duration * 1000) / (options.playbackRate || 1.0);
+        setTimeout(() => {
+          if (this.activeSounds.has(soundId)) {
+            this.stopSound(soundId);
+          }
+        }, duration + 100); // Add small buffer
+      }
 
       return soundId;
     } catch (error) {
-      debug.error(`Error playing sound ${soundName}:`, error);
+      debug.error(`Failed to play sound ${soundName}:`, error);
       return null;
     }
   }
 
-  stop(soundId: string, fadeOut?: number): void {
+  private stopSound(soundId: string) {
     const sound = this.activeSounds.get(soundId);
-    if (!sound) return;
-
-    if (fadeOut && sound.gainNode && this.audioContext) {
-      // Fade out
-      sound.gainNode.gain.linearRampToValueAtTime(
-        0,
-        this.audioContext.currentTime + fadeOut / 1000
-      );
-      setTimeout(() => {
-        sound.audio.pause();
-        this.activeSounds.delete(soundId);
-      }, fadeOut);
-    } else {
-      // Immediate stop
-      sound.audio.pause();
+    if (sound) {
+      try {
+        if (sound.audio.isPlaying) {
+          sound.audio.stop();
+        }
+        sound.audio.disconnect();
+      } catch (error) {
+        debug.error('Error stopping sound:', error);
+      }
       this.activeSounds.delete(soundId);
     }
   }
 
-  stopAll(category?: string, fadeOut?: number): void {
+  stop(soundId: string, fadeOut?: number) {
+    const sound = this.activeSounds.get(soundId);
+    if (!sound) return;
+
+    if (fadeOut && fadeOut > 0) {
+      sound.fadeOut = fadeOut;
+      sound.fadeStartTime = Date.now();
+      sound.isFading = true;
+    } else {
+      this.stopSound(soundId);
+    }
+  }
+
+  stopAll(category?: string, fadeOut?: number) {
     this.activeSounds.forEach((sound, id) => {
-      if (!category || sound.audio.dataset.category === category) {
+      if (!category || sound.category === category) {
         this.stop(id, fadeOut);
       }
     });
   }
 
-  private stopSound(soundId: string): void {
-    const sound = this.activeSounds.get(soundId);
-    if (sound) {
-      sound.audio.pause();
-      sound.audio.currentTime = 0;
-      this.activeSounds.delete(soundId);
+  // Convenience methods for specific sound types
+  playLaunch(position?: THREE.Vector3 | { x: number; y: number; z: number }) {
+    const sounds = ['interceptor_launch', 'interceptor_launch_alt'];
+    const sound = sounds[Math.floor(Math.random() * sounds.length)];
+
+    return this.play(sound, 'launch', {
+      volume: 0.8,
+      spatialized: !!position,
+      position: position ? { x: position.x, y: position.y, z: position.z } : undefined,
+      pitchVariation: 0.1,
+      maxDistance: 2000,
+      refDistance: 50,
+    });
+  }
+
+  playExplosion(
+    type: string = 'medium',
+    position?: THREE.Vector3 | { x: number; y: number; z: number }
+  ) {
+    const explosionMap: { [key: string]: string } = {
+      air: 'explosion_air',
+      ground: 'explosion_ground',
+      intercept: 'explosion_intercept',
+      large: 'explosion_large',
+      medium: 'explosion_medium',
+      small: 'explosion_small',
+      distant: 'explosion_distant',
+      debris: 'explosion_debris',
+    };
+
+    const sound = explosionMap[type] || 'explosion_medium';
+
+    return this.play(sound, 'explosion', {
+      volume: type === 'large' ? 1.0 : type === 'intercept' ? 1.0 : 0.8,
+      spatialized: type === 'intercept' ? false : !!position, // Make intercept sounds non-positional
+      position: position ? { x: position.x, y: position.y, z: position.z } : undefined,
+      pitchVariation: 0.15,
+      maxDistance: type === 'large' ? 5000 : type === 'intercept' ? 5000 : 3000,
+      refDistance: type === 'large' ? 100 : type === 'intercept' ? 100 : 50,
+    });
+  }
+
+  playAlert(type: string = 'siren') {
+    const alertMap: { [key: string]: string } = {
+      siren: 'alert_siren',
+      critical: 'alert_critical',
+    };
+
+    const sound = alertMap[type] || 'alert_siren';
+
+    return this.play(sound, 'alert', {
+      volume: 1.0,
+      loop: type === 'siren',
+    });
+  }
+
+  playUI(type: string = 'click') {
+    const uiMap: { [key: string]: string } = {
+      click: 'ui_click',
+      success: 'ui_success',
+      fail: 'ui_fail',
+      upgrade: 'ui_upgrade',
+    };
+
+    const sound = uiMap[type] || 'ui_click';
+
+    return this.play(sound, 'ui', {
+      volume: 0.5,
+    });
+  }
+
+  playThreatLaunch(
+    type: string = 'rocket',
+    position?: THREE.Vector3 | { x: number; y: number; z: number }
+  ) {
+    const launchMap: { [key: string]: string } = {
+      rocket: 'rocket_launch',
+      mortar: 'mortar_launch',
+      drone: 'threat_flyby',
+      ballistic: 'rocket_launch',
+    };
+
+    const sound = launchMap[type] || 'rocket_launch';
+
+    return this.play(sound, 'launch', {
+      volume: 0.7,
+      spatialized: !!position,
+      position: position ? { x: position.x, y: position.y, z: position.z } : undefined,
+      pitchVariation: 0.1,
+      maxDistance: 3000,
+      refDistance: 50,
+    });
+  }
+
+  playBackgroundMusic() {
+    if (!this.bgmEnabled || this.bgmInstance) return;
+
+    const bgmId = this.play('bgm_picaroon', 'bgm', {
+      volume: 1.0, // Don't multiply by bgmVolume here, it's already applied in play()
+      loop: true,
+      fadeIn: 2000,
+    });
+
+    if (bgmId) {
+      this.bgmInstance = this.activeSounds.get(bgmId) || null;
+      debug.log('Background music started');
     }
   }
 
-  updateListenerPosition(position: { x: number; y: number; z: number }) {
-    this.listenerPosition = position;
-
-    if (!this.audioContext || !this.audioContext.listener) return;
-
-    const listener = this.audioContext.listener;
-
-    if (listener.positionX) {
-      listener.positionX.value = position.x;
-      listener.positionY.value = position.y;
-      listener.positionZ.value = position.z;
-    } else if (listener.setPosition) {
-      listener.setPosition(position.x, position.y, position.z);
+  stopBackgroundMusic(fadeOut: number = 2000) {
+    if (this.bgmInstance) {
+      this.stop(this.bgmInstance.id, fadeOut);
+      this.bgmInstance = null;
     }
+  }
+
+  // Update methods for listener position/orientation
+  updateListenerPosition(position: { x: number; y: number; z: number }) {
+    // Three.js AudioListener automatically updates position with camera
+    // This method is kept for compatibility but isn't needed
   }
 
   updateListenerOrientation(
     forward: { x: number; y: number; z: number },
     up: { x: number; y: number; z: number }
   ) {
-    this.listenerOrientation = { forward, up };
-
-    if (!this.audioContext || !this.audioContext.listener) return;
-
-    const listener = this.audioContext.listener;
-
-    if (listener.forwardX) {
-      listener.forwardX.value = forward.x;
-      listener.forwardY.value = forward.y;
-      listener.forwardZ.value = forward.z;
-      listener.upX.value = up.x;
-      listener.upY.value = up.y;
-      listener.upZ.value = up.z;
-    } else if (listener.setOrientation) {
-      listener.setOrientation(forward.x, forward.y, forward.z, up.x, up.y, up.z);
-    }
+    // Three.js AudioListener automatically updates orientation with camera
+    // This method is kept for compatibility but isn't needed
   }
 
-  updateSoundPosition(soundId: string, position: { x: number; y: number; z: number }) {
-    const sound = this.activeSounds.get(soundId);
-    if (!sound || !sound.pannerNode) return;
+  // Settings methods
+  setMasterVolume(volume: number) {
+    this.masterVolume = Math.max(0, Math.min(1, volume));
+    this.listener.setMasterVolume(this.masterVolume);
+    localStorage.setItem('ironDome_masterVolume', this.masterVolume.toString());
+  }
 
-    if (sound.pannerNode.positionX) {
-      sound.pannerNode.positionX.value = position.x;
-      sound.pannerNode.positionY.value = position.y;
-      sound.pannerNode.positionZ.value = position.z;
-    } else if (sound.pannerNode.setPosition) {
-      sound.pannerNode.setPosition(position.x, position.y, position.z);
-    }
+  getMasterVolume(): number {
+    return this.masterVolume;
   }
 
   setEnabled(enabled: boolean) {
@@ -465,177 +469,15 @@ export class SoundSystem {
     localStorage.setItem('ironDome_soundEnabled', enabled.toString());
 
     if (!enabled) {
-      this.stopAll();
+      this.stopAll(undefined, 100);
     }
-  }
-
-  setMasterVolume(volume: number) {
-    this.masterVolume = Math.max(0, Math.min(1, volume));
-    localStorage.setItem('ironDome_masterVolume', this.masterVolume.toString());
-
-    if (this.masterGainNode) {
-      this.masterGainNode.gain.value = this.masterVolume;
-    }
-  }
-
-  setCategoryVolume(category: string, volume: number) {
-    this.categoryVolumes.set(category, Math.max(0, Math.min(1, volume)));
   }
 
   isEnabled(): boolean {
     return this.enabled;
   }
 
-  getMasterVolume(): number {
-    return this.masterVolume;
-  }
-
-  getCategoryVolume(category: string): number {
-    return this.categoryVolumes.get(category) || 1;
-  }
-
-  // Helper methods for common sounds
-  playLaunch(position?: { x: number; y: number; z: number }): string | null {
-    const variant = Math.random() > 0.5 ? 'interceptor_launch' : 'interceptor_launch_alt';
-    return this.play(variant, 'launch', {
-      volume: 0.8,
-      spatialized: !!position,
-      position,
-      maxDistance: 1000, // Increased from 300
-      refDistance: 50, // Increased from 20
-      pitchVariation: 0.15, // ±15% pitch variation
-    });
-  }
-
-  playExplosion(
-    type: 'air' | 'ground' | 'intercept',
-    position?: { x: number; y: number; z: number }
-  ): string | null {
-    // Map explosion types to available sounds with variety
-    const explosionVariants: Record<string, string[]> = {
-      air: ['explosion_air', 'explosion_small', 'explosion_medium'],
-      ground: ['explosion_ground', 'explosion_large', 'explosion_debris'],
-      intercept: [
-        'explosion_intercept',
-        'explosion_distant',
-        'explosion_small',
-        'explosion_air',
-        'explosion_medium',
-      ],
-    };
-
-    // Select a random variant for the explosion type
-    const variants = explosionVariants[type];
-    const soundName = variants[Math.floor(Math.random() * variants.length)];
-
-    return this.play(soundName, 'explosion', {
-      volume: type === 'ground' ? 1.0 : 0.9,
-      spatialized: !!position,
-      position,
-      maxDistance: 2000, // Increased from 500
-      refDistance: 100, // Increased from 50
-      pitchVariation: 0.2, // ±20% pitch variation for explosions
-    });
-  }
-
-  playAlert(type: 'siren' | 'critical'): string | null {
-    return this.play(`alert_${type}`, 'alert', {
-      volume: 1.0,
-      loop: type === 'siren',
-    });
-  }
-
-  playUI(type: 'click' | 'success' | 'fail' | 'upgrade'): string | null {
-    return this.play(`ui_${type}`, 'ui', {
-      volume: 0.5,
-    });
-  }
-
-  startAmbient(): string | null {
-    return this.play('ambient_base', 'ambient', {
-      volume: 0.3,
-      loop: true,
-      fadeIn: 3000,
-    });
-  }
-
-  playThreatLaunch(
-    type: 'rocket' | 'mortar' | 'missile',
-    position?: { x: number; y: number; z: number }
-  ): string | null {
-    const soundMap = {
-      rocket: 'rocket_launch',
-      mortar: 'mortar_launch',
-      missile: 'rocket_launch', // Use rocket sound for missiles too
-    };
-
-    const soundName = soundMap[type];
-    return this.play(soundName, 'launch', {
-      volume: 0.7,
-      spatialized: !!position,
-      position,
-      maxDistance: 1500, // Increased from 400
-      refDistance: 75, // Increased from 30
-      pitchVariation: 0.1,
-    });
-  }
-
-  playThreatFlyby(position?: { x: number; y: number; z: number }): string | null {
-    return this.play('threat_flyby', 'threat', {
-      volume: 0.6,
-      spatialized: !!position,
-      position,
-      maxDistance: 200,
-      refDistance: 10,
-      pitchVariation: 0.15,
-    });
-  }
-
-  // Background music methods
-  playBackgroundMusic(): void {
-    debug.log('playBackgroundMusic called', {
-      bgmEnabled: this.bgmEnabled,
-      hasBgmInstance: !!this.bgmInstance,
-      bgmVolume: this.bgmVolume,
-      audioContextState: this.audioContext?.state,
-    });
-
-    if (!this.bgmEnabled || this.bgmInstance) return;
-
-    // Ensure audio context is resumed
-    if (this.audioContext && this.audioContext.state === 'suspended') {
-      this.audioContext.resume().then(() => {
-        debug.log('Audio context resumed');
-        // Retry BGM after context is resumed
-        this.playBackgroundMusic();
-      });
-      return; // Exit and retry after resume
-    }
-
-    const id = this.play('bgm_picaroon', 'bgm', {
-      volume: this.bgmVolume,
-      loop: true,
-      fadeIn: 2000, // 2 second fade in
-    });
-
-    debug.log('BGM play result:', { id, bgmInstance: !!id });
-
-    if (id) {
-      this.bgmInstance = this.activeSounds.get(id) || null;
-    } else {
-      debug.warn('Failed to start BGM - will retry on next user interaction');
-    }
-  }
-
-  stopBackgroundMusic(): void {
-    if (this.bgmInstance) {
-      this.stop(this.bgmInstance.id, 2000); // 2 second fade out
-      this.bgmInstance = null;
-    }
-  }
-
-  // Settings methods
-  setSFXEnabled(enabled: boolean): void {
+  setSFXEnabled(enabled: boolean) {
     this.sfxEnabled = enabled;
     localStorage.setItem('ironDome_sfxEnabled', enabled.toString());
 
@@ -649,104 +491,135 @@ export class SoundSystem {
     }
   }
 
-  setBGMEnabled(enabled: boolean): void {
-    this.bgmEnabled = enabled;
-    localStorage.setItem('ironDome_bgmEnabled', enabled.toString());
-
-    if (enabled) {
-      // If we have a BGM instance, just unmute it
-      if (this.bgmInstance && this.bgmInstance.gainNode) {
-        this.bgmInstance.gainNode.gain.value = this.bgmVolume * this.masterVolume;
-      } else {
-        // Otherwise start playing
-        this.playBackgroundMusic();
-      }
-    } else {
-      // Just mute, don't stop
-      if (this.bgmInstance && this.bgmInstance.gainNode) {
-        this.bgmInstance.gainNode.gain.value = 0;
-      }
-    }
-  }
-
-  setSFXVolume(volume: number): void {
-    this.sfxVolume = Math.max(0, Math.min(1, volume));
-    localStorage.setItem('ironDome_sfxVolume', this.sfxVolume.toString());
-  }
-
-  setBGMVolume(volume: number): void {
-    this.bgmVolume = Math.max(0, Math.min(1, volume));
-    localStorage.setItem('ironDome_bgmVolume', this.bgmVolume.toString());
-
-    // Update BGM volume if playing
-    if (this.bgmInstance && this.bgmInstance.gainNode) {
-      this.bgmInstance.gainNode.gain.value = this.bgmVolume * this.masterVolume;
-    }
+  isSFXEnabled(): boolean {
+    return this.sfxEnabled;
   }
 
   getSFXEnabled(): boolean {
     return this.sfxEnabled;
   }
 
+  setBGMEnabled(enabled: boolean) {
+    this.bgmEnabled = enabled;
+    localStorage.setItem('ironDome_bgmEnabled', enabled.toString());
+
+    if (enabled && !this.bgmInstance) {
+      this.playBackgroundMusic();
+    } else if (!enabled && this.bgmInstance) {
+      this.stopBackgroundMusic();
+    }
+  }
+
+  isBGMEnabled(): boolean {
+    return this.bgmEnabled;
+  }
+
   getBGMEnabled(): boolean {
     return this.bgmEnabled;
+  }
+
+  setSFXVolume(volume: number) {
+    this.sfxVolume = Math.max(0, Math.min(1, volume));
+    localStorage.setItem('ironDome_sfxVolume', this.sfxVolume.toString());
+
+    // Update volume of active SFX
+    this.activeSounds.forEach(sound => {
+      if (sound.category !== 'bgm') {
+        const categoryVolume = this.categoryVolumes.get(sound.category || 'ui') || 1.0;
+        sound.audio.setVolume((sound.originalVolume * this.sfxVolume) / categoryVolume);
+      }
+    });
   }
 
   getSFXVolume(): number {
     return this.sfxVolume;
   }
 
+  setBGMVolume(volume: number) {
+    this.bgmVolume = Math.max(0, Math.min(1, volume));
+    localStorage.setItem('ironDome_bgmVolume', this.bgmVolume.toString());
+
+    // Update BGM volume if playing
+    if (this.bgmInstance) {
+      this.bgmInstance.audio.setVolume(this.bgmVolume);
+    }
+  }
+
   getBGMVolume(): number {
     return this.bgmVolume;
   }
 
-  private loadPreferences(): void {
-    // Load saved preferences from localStorage
-    const savedMasterVolume = localStorage.getItem('ironDome_masterVolume');
-    const savedSFXEnabled = localStorage.getItem('ironDome_sfxEnabled');
-    const savedBGMEnabled = localStorage.getItem('ironDome_bgmEnabled');
-    const savedSFXVolume = localStorage.getItem('ironDome_sfxVolume');
-    const savedBGMVolume = localStorage.getItem('ironDome_bgmVolume');
-
-    if (savedMasterVolume !== null) {
-      this.masterVolume = parseFloat(savedMasterVolume);
-    }
-    if (savedSFXEnabled !== null) {
-      this.sfxEnabled = savedSFXEnabled === 'true';
-    }
-    if (savedBGMEnabled !== null) {
-      this.bgmEnabled = savedBGMEnabled === 'true';
-    }
-    if (savedSFXVolume !== null) {
-      this.sfxVolume = parseFloat(savedSFXVolume);
-    }
-    if (savedBGMVolume !== null) {
-      this.bgmVolume = parseFloat(savedBGMVolume);
-    }
+  getCategoryVolume(category: string): number {
+    return this.categoryVolumes.get(category) || 1.0;
   }
 
-  // Debug method to check BGM status
-  debugBGM(): void {
-    debug.log('BGM Debug Info:', {
-      bgmEnabled: this.bgmEnabled,
-      hasBgmInstance: !!this.bgmInstance,
-      bgmVolume: this.bgmVolume,
-      audioContextState: this.audioContext?.state,
-      bgmAudioElement: this.bgmInstance?.audio,
-      bgmPlaying: this.bgmInstance?.audio && !this.bgmInstance.audio.paused,
-      bgmCurrentTime: this.bgmInstance?.audio?.currentTime,
-      bgmDuration: this.bgmInstance?.audio?.duration,
-      bgmReadyState: this.bgmInstance?.audio?.readyState,
-      bgmError: this.bgmInstance?.audio?.error,
+  setCategoryVolume(category: string, volume: number) {
+    const clampedVolume = Math.max(0, Math.min(1, volume));
+    this.categoryVolumes.set(category, clampedVolume);
+
+    // Update volume of active sounds in this category
+    this.activeSounds.forEach(sound => {
+      if (sound.category === category) {
+        const baseVolume = sound.originalVolume / this.getCategoryVolume(category);
+        sound.audio.setVolume(
+          baseVolume * clampedVolume * (category === 'bgm' ? this.bgmVolume : this.sfxVolume)
+        );
+      }
     });
   }
 
-  // Force retry BGM playback
-  retryBGM(): void {
-    debug.log('Manually retrying BGM playback');
-    if (this.bgmInstance) {
-      this.stopBackgroundMusic();
-    }
-    this.playBackgroundMusic();
+  private loadPreferences() {
+    const sfxEnabled = localStorage.getItem('ironDome_sfxEnabled');
+    const bgmEnabled = localStorage.getItem('ironDome_bgmEnabled');
+    const sfxVolume = localStorage.getItem('ironDome_sfxVolume');
+    const bgmVolume = localStorage.getItem('ironDome_bgmVolume');
+
+    if (sfxEnabled !== null) this.sfxEnabled = sfxEnabled === 'true';
+    if (bgmEnabled !== null) this.bgmEnabled = bgmEnabled === 'true';
+    if (sfxVolume !== null) this.sfxVolume = parseFloat(sfxVolume);
+    if (bgmVolume !== null) this.bgmVolume = parseFloat(bgmVolume);
+  }
+
+  // Update method for fading
+  update() {
+    const now = Date.now();
+
+    this.activeSounds.forEach((sound, id) => {
+      if (sound.isFading && sound.fadeStartTime) {
+        const elapsed = now - sound.fadeStartTime;
+
+        if (sound.fadeIn && elapsed < sound.fadeIn) {
+          // Fade in
+          const progress = elapsed / sound.fadeIn;
+          sound.audio.setVolume(sound.originalVolume * progress);
+
+          if (progress >= 1) {
+            sound.isFading = false;
+          }
+        } else if (sound.fadeOut && elapsed < sound.fadeOut) {
+          // Fade out
+          const progress = 1 - elapsed / sound.fadeOut;
+          sound.audio.setVolume(sound.originalVolume * progress);
+
+          if (progress <= 0) {
+            this.stopSound(id);
+          }
+        }
+      }
+    });
+  }
+
+  // Debug method
+  getDebugInfo() {
+    return {
+      enabled: this.enabled,
+      masterVolume: this.masterVolume,
+      activeSounds: this.activeSounds.size,
+      maxSounds: this.maxActiveSounds,
+      loadedSounds: this.sounds.size,
+      bgmPlaying: !!this.bgmInstance,
+      sfxEnabled: this.sfxEnabled,
+      bgmEnabled: this.bgmEnabled,
+    };
   }
 }

@@ -81,6 +81,10 @@ const camera = new THREE.PerspectiveCamera(
 camera.position.set(150, 80, 150); // Moved camera further back for better overview
 camera.lookAt(0, 0, 0);
 
+// Attach Three.js audio listener to camera
+const audioSystem = SoundSystem.getInstance();
+camera.add(audioSystem.getListener());
+
 // Store camera and scene globally for context menu
 (window as any).__camera = camera;
 (window as any).__scene = scene;
@@ -1709,10 +1713,12 @@ function animate() {
   let systemInterceptors: Projectile[] = [];
 
   if (!simulationControls.pause) {
-    if (simulationControls.autoIntercept) {
-      // CHAINSAW: Removed profiler
-      systemInterceptors = interceptionSystem.update(activeThreats);
-    }
+    // Always update interception system to handle active interceptors
+    // but only launch new ones if autoIntercept is enabled
+    systemInterceptors = interceptionSystem.update(
+      activeThreats,
+      !simulationControls.autoIntercept
+    );
 
     // Update dome placement system (for instanced rendering)
     domePlacementSystem.update();
@@ -1771,21 +1777,9 @@ function animate() {
     controls.update();
   }
 
-  // Update sound system listener position
+  // Update sound system for fade effects
   const soundSystem = SoundSystem.getInstance();
-  soundSystem.updateListenerPosition({
-    x: camera.position.x,
-    y: camera.position.y,
-    z: camera.position.z,
-  });
-
-  // Update listener orientation based on camera
-  const cameraDirection = new THREE.Vector3();
-  camera.getWorldDirection(cameraDirection);
-  soundSystem.updateListenerOrientation(
-    { x: cameraDirection.x, y: cameraDirection.y, z: cameraDirection.z },
-    { x: camera.up.x, y: camera.up.y, z: camera.up.z }
-  );
+  soundSystem.update();
 
   // CHAINSAW: Removed heavy trail/explosion systems causing frame drops and interception lag
 
@@ -1894,8 +1888,10 @@ if (inspectorMode) {
 // Update loading status
 updateLoadingStatus('Ready to launch!');
 
-// Start background music
-soundSystem.playBackgroundMusic();
+// Start background music only if enabled
+if (soundSystem.getBGMEnabled()) {
+  soundSystem.playBackgroundMusic();
+}
 
 // Initial UI render
 updateUIMode();
