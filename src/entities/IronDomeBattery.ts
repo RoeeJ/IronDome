@@ -1099,20 +1099,17 @@ export class IronDomeBattery extends EventEmitter {
     // Update tube state
     tube.isLoaded = false;
     tube.lastFiredTime = Date.now();
-    debug.log(`Tube fired, will reload in ${this.config.reloadTime}ms`);
 
-    // Remove visual missile from tube
-    if (tube.missile) {
-      this.launcherGroup.remove(tube.missile);
-      tube.missile.geometry.dispose();
-      (tube.missile.material as THREE.Material).dispose();
-      tube.missile = undefined;
-    }
+    // Create launch effects at the tube's end position (bottom of tube)
+    const effectPos = tube.endPosition.clone().add(this.config.position);
+    this.launchEffects.createLaunchEffect(effectPos, actualLaunchDirection);
 
-    // X marker will be created in the update loop when needed
+    // Play launch sound
+    const soundSystem = SoundSystem.getInstance();
+    soundSystem.playLaunch(tubeWorldPos);
 
-    // Animate launcher
-    this.animateLaunch(tube);
+    // Emit launch event
+    this.emit('interceptorLaunched', { interceptor, threat, battery: this });
 
     return interceptor;
   }

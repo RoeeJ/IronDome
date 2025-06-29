@@ -1,0 +1,138 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Iron Dome Sound Test</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+            background: #1a1a1a;
+            color: #fff;
+        }
+        h1 {
+            color: #00ffff;
+        }
+        .sound-category {
+            margin: 20px 0;
+            padding: 20px;
+            background: #2a2a2a;
+            border-radius: 8px;
+        }
+        button {
+            margin: 5px;
+            padding: 10px 20px;
+            background: #00ffff;
+            color: #000;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-weight: bold;
+        }
+        button:hover {
+            background: #00cccc;
+        }
+        .controls {
+            margin: 20px 0;
+            padding: 20px;
+            background: #333;
+            border-radius: 8px;
+        }
+        input[type="range"] {
+            width: 200px;
+            vertical-align: middle;
+        }
+        label {
+            display: inline-block;
+            width: 150px;
+        }
+    </style>
+</head>
+<body>
+    <h1>Iron Dome Sound System Test</h1>
+    
+    <div class="controls">
+        <h2>Controls</h2>
+        <div>
+            <label>Master Volume:</label>
+            <input type="range" id="volume" min="0" max="100" value="70">
+            <span id="volumeValue">70%</span>
+        </div>
+        <div>
+            <label>Pitch Variation:</label>
+            <input type="range" id="pitch" min="0" max="50" value="15">
+            <span id="pitchValue">15%</span>
+        </div>
+    </div>
+
+    <div class="sound-category">
+        <h2>Launch Sounds</h2>
+        <button onclick="playSound('launch/firing.mp3')">Interceptor Launch 1</button>
+        <button onclick="playSound('launch/launch2.mp3')">Interceptor Launch 2</button>
+        <button onclick="playSound('launch/grad.mp3')">Rocket Launch</button>
+        <button onclick="playSound('launch/launch_smol.mp3')">Mortar Launch</button>
+    </div>
+
+    <div class="sound-category">
+        <h2>Impact/Explosion Sounds</h2>
+        <button onclick="playSound('impact/87601__robinhood76__01450-missile-hits-brickwall-1.mp3')">Explosion</button>
+    </div>
+
+    <div class="sound-category">
+        <h2>Flyby Sounds</h2>
+        <button onclick="playSound('flyby/flyby.mp3')">Threat Flyby</button>
+    </div>
+
+    <script>
+        const volumeSlider = document.getElementById('volume');
+        const volumeValue = document.getElementById('volumeValue');
+        const pitchSlider = document.getElementById('pitch');
+        const pitchValue = document.getElementById('pitchValue');
+        
+        volumeSlider.addEventListener('input', (e) => {
+            volumeValue.textContent = e.target.value + '%';
+        });
+        
+        pitchSlider.addEventListener('input', (e) => {
+            pitchValue.textContent = e.target.value + '%';
+        });
+        
+        // Keep track of audio elements to avoid creating multiple sources
+        const audioElements = new Map();
+        
+        async function playSound(path) {
+            try {
+                // Create or reuse audio element
+                let audio = audioElements.get(path);
+                if (!audio) {
+                    audio = new Audio(`assets/sounds/normalized/${path}`);
+                    audioElements.set(path, audio);
+                }
+                
+                // Apply volume
+                const volume = volumeSlider.value / 100;
+                audio.volume = volume;
+                
+                // Apply pitch variation
+                const pitchVariation = pitchSlider.value / 100;
+                const variation = 1 + (Math.random() * 2 - 1) * pitchVariation;
+                audio.playbackRate = variation;
+                
+                // Reset and play
+                audio.currentTime = 0;
+                audio.play().catch(err => {
+                    console.error('Error playing sound:', err);
+                    alert('Error playing sound: ' + err.message);
+                });
+                
+            } catch (error) {
+                console.error('Error:', error);
+                alert('Error: ' + error.message);
+            }
+        }
+    </script>
+</body>
+</html>

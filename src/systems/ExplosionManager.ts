@@ -4,6 +4,7 @@ import { MaterialCache } from '../utils/MaterialCache';
 import { GeometryFactory } from '../utils/GeometryFactory';
 import { debug } from '../utils/logger';
 import { LightPool } from './LightPool';
+import { SoundSystem } from './SoundSystem';
 
 export enum ExplosionType {
   AIR_INTERCEPTION = 'air_interception',
@@ -47,10 +48,13 @@ export class ExplosionManager {
   private nextId = 0;
   private lightPool: LightPool;
   private readonly MAX_SHOCKWAVES = 10; // Limit active shockwaves for performance
-  
+
   // CHAINSAW: Instanced shockwave rendering
   private shockwaveInstancedMesh: THREE.InstancedMesh;
-  private shockwaveInstances = new Map<string, { index: number; position: THREE.Vector3; radius: number; startTime: number }>();
+  private shockwaveInstances = new Map<
+    string,
+    { index: number; position: THREE.Vector3; radius: number; startTime: number }
+  >();
   private availableShockwaveIndices: number[] = [];
   private shockwaveDummy = new THREE.Object3D();
 
@@ -100,7 +104,7 @@ export class ExplosionManager {
     this.scene = scene;
     this.instancedRenderer = new InstancedExplosionRenderer(scene);
     this.lightPool = LightPool.getInstance(scene, 20); // Support 20 simultaneous explosion lights
-    
+
     // CHAINSAW: Initialize instanced shockwave mesh
     const shockwaveGeometry = GeometryFactory.getInstance().getRing(1, 1.2, 32, 1);
     const shockwaveMaterial = MaterialCache.getInstance().getMeshBasicMaterial({
@@ -111,11 +115,15 @@ export class ExplosionManager {
       blending: THREE.AdditiveBlending,
       depthWrite: false,
     });
-    
-    this.shockwaveInstancedMesh = new THREE.InstancedMesh(shockwaveGeometry, shockwaveMaterial, this.MAX_SHOCKWAVES);
+
+    this.shockwaveInstancedMesh = new THREE.InstancedMesh(
+      shockwaveGeometry,
+      shockwaveMaterial,
+      this.MAX_SHOCKWAVES
+    );
     this.shockwaveInstancedMesh.castShadow = false;
     this.shockwaveInstancedMesh.receiveShadow = false;
-    
+
     // Initialize all instances as invisible
     const zeroScale = new THREE.Matrix4().makeScale(0, 0, 0);
     for (let i = 0; i < this.MAX_SHOCKWAVES; i++) {
@@ -123,7 +131,7 @@ export class ExplosionManager {
       this.availableShockwaveIndices.push(i);
     }
     this.shockwaveInstancedMesh.instanceMatrix.needsUpdate = true;
-    
+
     this.scene.add(this.shockwaveInstancedMesh);
   }
 
@@ -166,6 +174,16 @@ export class ExplosionManager {
       finalConfig.intensity || 1,
       config.type === ExplosionType.GROUND_IMPACT ? 'ground' : 'air'
     );
+
+    // Play explosion sound
+    const soundSystem = SoundSystem.getInstance();
+    const explosionType =
+      config.type === ExplosionType.GROUND_IMPACT
+        ? 'ground'
+        : config.type === ExplosionType.AIR_INTERCEPTION
+          ? 'intercept'
+          : 'air';
+    soundSystem.playExplosion(explosionType, config.position);
 
     // Create flash effect if enabled
     if (finalConfig.hasFlash) {
@@ -356,7 +374,8 @@ export class ExplosionManager {
     const minShockwaveDistance = Math.max(5, radius * 0.5); // At least 5m apart
     for (const [id, instance] of this.shockwaveInstances) {
       const distance = Math.sqrt(
-        Math.pow(instance.position.x - position.x, 2) + Math.pow(instance.position.z - position.z, 2)
+        Math.pow(instance.position.x - position.x, 2) +
+          Math.pow(instance.position.z - position.z, 2)
       ); // Only check horizontal distance
 
       if (distance < minShockwaveDistance) {
@@ -369,7 +388,7 @@ export class ExplosionManager {
 
     const shockwaveId = `shockwave_${Date.now()}_${Math.random()}`;
     const index = this.availableShockwaveIndices.pop()!;
-    
+
     // Store shockwave instance data
     this.shockwaveInstances.set(shockwaveId, {
       index,
@@ -434,15 +453,15 @@ export class ExplosionManager {
       this.shockwaveDummy.position.y = 0.05 + Math.random() * 0.02;
       this.shockwaveDummy.rotation.x = -Math.PI / 2;
       this.shockwaveDummy.scale.set(scale, scale, 1);
-      
+
       this.shockwaveDummy.updateMatrix();
       this.shockwaveInstancedMesh.setMatrixAt(instance.index, this.shockwaveDummy.matrix);
-      
+
       // Update opacity through color
       const opacity = 0.5 * (1 - progress);
       const color = new THREE.Color(1, 1, 1).multiplyScalar(opacity * 2);
       this.shockwaveInstancedMesh.setColorAt(instance.index, color);
-      
+
       needsUpdate = true;
     }
 
