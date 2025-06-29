@@ -191,10 +191,25 @@ export const HelpModal: React.FC<HelpModalProps> = ({ isOpen, onClose, isGameMod
                 <span className="help-key">Scroll</span> Zoom in/out
               </p>
               <p className="help-text">
-                <span className="help-key">P</span> Toggle performance stats
+                <span className="help-key">ESC</span> Pause game / Open pause menu
               </p>
               <p className="help-text">
-                <span className="help-key">S</span> Toggle extended stats panel
+                <span className="help-key">P</span> Pause/unpause simulation
+              </p>
+              <p className="help-text">
+                <span className="help-key">H</span> Toggle performance stats
+              </p>
+              <p className="help-text">
+                <span className="help-key">1-5</span> Select battery for placement
+              </p>
+              <p className="help-text">
+                <span className="help-key">Ctrl+Shift+D</span> Developer tools
+              </p>
+              <p className="help-text">
+                <span className="help-key">Ctrl+Shift+P</span> Performance overlay
+              </p>
+              <p className="help-text">
+                <span className="help-key">Ctrl+Shift+S</span> Screenshot mode
               </p>
               <p className="help-text">
                 <strong>Mobile:</strong> Touch to fire/rotate, pinch to zoom, long press for menu
@@ -209,8 +224,16 @@ export const HelpModal: React.FC<HelpModalProps> = ({ isOpen, onClose, isGameMod
               numbers.
             </p>
             <p className="help-text">
+              <strong>💣 Mortars:</strong> High-arc projectiles with steep descent. Short range but
+              hard to track.
+            </p>
+            <p className="help-text">
               <strong>🎯 Missiles:</strong> High-altitude ballistic threats. Slower but harder to
               intercept.
+            </p>
+            <p className="help-text">
+              <strong>🚁 Cruise Missiles:</strong> Low-flying guided missiles. Can maneuver around
+              defenses.
             </p>
             <p className="help-text">
               <strong>✈️ Drones:</strong> Slow-moving aerial threats. Can change direction and are
@@ -262,6 +285,34 @@ export const HelpModal: React.FC<HelpModalProps> = ({ isOpen, onClose, isGameMod
           </div>
 
           <div className="help-section">
+            <h3 className="help-section-title">Audio & Settings</h3>
+            <p className="help-text">
+              • Background music and sound effects can be adjusted in the pause menu
+              <br />
+              • Separate volume controls for BGM and SFX
+              <br />
+              • All audio settings are saved automatically
+              <br />
+              • Spatial audio for explosions and launches - sounds come from their 3D position
+              <br />• Multiple explosion sound variants for variety
+            </p>
+          </div>
+
+          <div className="help-section">
+            <h3 className="help-section-title">Camera Controls</h3>
+            <p className="help-text">
+              • Free camera mode by default - full control over view
+              <br />
+              • Follow interceptor mode tracks missiles during flight
+              <br />
+              • Smooth camera transitions between modes
+              <br />
+              • Camera automatically returns after interceptor detonates
+              <br />• Use scroll wheel to zoom in/out at any time
+            </p>
+          </div>
+
+          <div className="help-section">
             <h3 className="help-section-title">Tips & Strategy</h3>
             <p className="help-text">
               • Watch for red impact prediction circles on the ground
@@ -273,7 +324,9 @@ export const HelpModal: React.FC<HelpModalProps> = ({ isOpen, onClose, isGameMod
               • Place batteries to cover different approach angles
               <br />
               • Save credits for upgrades rather than many basic batteries
-              <br />• Boss waves (every 10th) require maximum defense readiness
+              <br />
+              • Boss waves (every 10th) require maximum defense readiness
+              <br />• Use the pause menu (ESC) to adjust settings mid-game
             </p>
           </div>
 
