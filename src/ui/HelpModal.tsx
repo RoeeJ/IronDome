@@ -197,9 +197,6 @@ export const HelpModal: React.FC<HelpModalProps> = ({ isOpen, onClose, isGameMod
                 <span className="help-key">R</span> Toggle performance stats
               </p>
               <p className="help-text">
-                <span className="help-key">1-5</span> Select battery for placement
-              </p>
-              <p className="help-text">
                 <span className="help-key">Ctrl+Shift+D</span> Developer tools
               </p>
               <p className="help-text">
@@ -295,13 +292,21 @@ export const HelpModal: React.FC<HelpModalProps> = ({ isOpen, onClose, isGameMod
           <div className="help-section">
             <h3 className="help-section-title">Camera Controls</h3>
             <p className="help-text">
-              • Free camera mode by default - full control over view
+              <span className="help-key">1</span> Orbit camera mode
               <br />
-              • Follow interceptor mode tracks missiles during flight
+              <span className="help-key">2</span> Tactical view
+              <br />
+              <span className="help-key">3</span> Battle overview
+              <br />
+              <span className="help-key">4</span> Cinematic mode
+              <br />
+              <span className="help-key">5</span> Follow threat camera
+              <br />
+              <span className="help-key">6</span> Follow interceptor camera
               <br />
               • Smooth camera transitions between modes
               <br />
-              • Camera automatically returns after interceptor detonates
+              • Camera automatically returns after target is destroyed
               <br />• Use scroll wheel to zoom in/out at any time
             </p>
           </div>
