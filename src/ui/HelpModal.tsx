@@ -194,19 +194,13 @@ export const HelpModal: React.FC<HelpModalProps> = ({ isOpen, onClose, isGameMod
                 <span className="help-key">ESC</span> Pause game / Open pause menu
               </p>
               <p className="help-text">
-                <span className="help-key">P</span> Pause/unpause simulation
-              </p>
-              <p className="help-text">
-                <span className="help-key">H</span> Toggle performance stats
+                <span className="help-key">R</span> Toggle performance stats
               </p>
               <p className="help-text">
                 <span className="help-key">1-5</span> Select battery for placement
               </p>
               <p className="help-text">
                 <span className="help-key">Ctrl+Shift+D</span> Developer tools
-              </p>
-              <p className="help-text">
-                <span className="help-key">Ctrl+Shift+P</span> Performance overlay
               </p>
               <p className="help-text">
                 <span className="help-key">Ctrl+Shift+S</span> Screenshot mode
