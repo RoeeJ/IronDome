@@ -192,10 +192,22 @@ export class SoundSystem {
     Object.entries(soundFiles).forEach(([key, path]) => {
       const audio = new Audio();
       audio.preload = 'auto';
+      audio.crossOrigin = 'anonymous'; // Add CORS support
 
       // Only set src for files that exist (our normalized sounds)
       if (path.includes('normalized/')) {
         audio.src = path;
+
+        // Add load event listener for BGM
+        if (key === 'bgm_picaroon') {
+          audio.addEventListener('canplaythrough', () => {
+            debug.log('BGM audio loaded and ready to play');
+          });
+
+          audio.addEventListener('error', e => {
+            debug.error('Failed to load BGM:', e);
+          });
+        }
       }
 
       this.sounds.set(key, audio);
@@ -229,6 +241,12 @@ export class SoundSystem {
     // Clone audio element for multiple simultaneous plays
     const audioClone = audio.cloneNode(true) as HTMLAudioElement;
     const soundId = `${soundName}_${Date.now()}_${Math.random()}`;
+
+    // Add error handler for audio loading
+    audioClone.addEventListener('error', e => {
+      debug.error(`Failed to load audio ${soundName}:`, e);
+      this.activeSounds.delete(soundId);
+    });
 
     try {
       // Resume audio context if suspended (mobile browsers)
@@ -581,7 +599,10 @@ export class SoundSystem {
     if (this.audioContext && this.audioContext.state === 'suspended') {
       this.audioContext.resume().then(() => {
         debug.log('Audio context resumed');
+        // Retry BGM after context is resumed
+        this.playBackgroundMusic();
       });
+      return; // Exit and retry after resume
     }
 
     const id = this.play('bgm_picaroon', 'bgm', {
@@ -594,6 +615,8 @@ export class SoundSystem {
 
     if (id) {
       this.bgmInstance = this.activeSounds.get(id) || null;
+    } else {
+      debug.warn('Failed to start BGM - will retry on next user interaction');
     }
   }
 
