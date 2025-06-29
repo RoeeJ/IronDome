@@ -56,7 +56,7 @@ export class Projectile {
   useInstancing: boolean = false;
   private instanceManager?: any;
   private instanceId?: number;
-  
+
   // Re-engagement tracking
   private minDistanceToTarget: number = Infinity;
   private isReEngaging: boolean = false;
@@ -118,7 +118,7 @@ export class Projectile {
     this.batteryPosition = batteryPosition;
     this.useInstancing = useInstancing;
     this.instanceManager = instanceManager;
-    
+
     // Optional debug logging for interceptor launch positions
     if (isInterceptor && batteryPosition && (window as any).__debugLaunchPositions) {
       debug.module('Projectile').log('Interceptor created:', {
@@ -127,7 +127,7 @@ export class Projectile {
         batteryPosition: batteryPosition,
         distanceFromBattery: position.distanceTo(batteryPosition),
         velocity: velocity,
-        speed: velocity.length()
+        speed: velocity.length(),
       });
     }
 
@@ -141,7 +141,7 @@ export class Projectile {
       // Don't add to scene yet - instance manager will handle it
       this.instanceId = 0; // Placeholder, will be set by instance manager
     }
-    
+
     if (!useInstancing) {
       // Regular mesh creation
       const modelFactory = MissileModelFactory.getInstance();
@@ -269,7 +269,7 @@ export class Projectile {
         // Check distance to battery
         const distanceToBattery = landingPos.distanceTo(this.batteryPosition);
         const dangerRadius = 10; // Self-destruct if landing within 10m of battery
-        
+
         // Also check current distance to prevent immediate self-destruct on launch
         const currentDistanceToBattery = position.distanceTo(this.batteryPosition);
 
@@ -308,7 +308,7 @@ export class Projectile {
     if (currentVel.length() > 1) {
       this.orientMissile(currentVel);
     }
-    
+
     // Instance updates are handled by the manager's batch update method
     // No individual updates needed here
 
@@ -389,13 +389,13 @@ export class Projectile {
 
   destroy(scene: THREE.Scene, world: CANNON.World): void {
     this.isActive = false;
-    
+
     // Instance removal is handled by the manager when removing threats
     // Only remove mesh if not using instancing
     if (!this.useInstancing && this.mesh) {
       scene.remove(this.mesh);
     }
-    
+
     world.removeBody(this.body);
 
     // Remove from pooled trail system if used
@@ -444,16 +444,19 @@ export class Projectile {
   getVelocity(): THREE.Vector3 {
     return new THREE.Vector3(this.body.velocity.x, this.body.velocity.y, this.body.velocity.z);
   }
-  
+
   getRotation(): THREE.Euler {
     // Calculate rotation from velocity vector
     const velocity = this.getVelocity();
     const heading = Math.atan2(-velocity.z, velocity.x);
-    const pitch = Math.atan2(velocity.y, Math.sqrt(velocity.x * velocity.x + velocity.z * velocity.z));
-    
+    const pitch = Math.atan2(
+      velocity.y,
+      Math.sqrt(velocity.x * velocity.x + velocity.z * velocity.z)
+    );
+
     return new THREE.Euler(pitch, heading, 0);
   }
-  
+
   getScale(): THREE.Vector3 {
     return this.mesh.scale.clone();
   }
@@ -603,30 +606,34 @@ export class Projectile {
     // Proportional navigation
     const toTarget = targetPos.clone().sub(myPos);
     const distance = toTarget.length();
-    
+
     // Track minimum distance for re-engagement detection
     if (distance < this.minDistanceToTarget) {
       this.minDistanceToTarget = distance;
     }
-    
+
     // Check for re-engagement opportunity
-    if (!this.isReEngaging && 
-        this.minDistanceToTarget < 15 && // Got close but missed
-        distance > this.lastTargetDistance && // Moving away from target
-        distance > 10 && // Far enough to need re-engagement
-        this.reEngagementAttempts < 1 && // Only try once
-        currentSpeed > 50) { // Still have enough energy
-      
-      debug.category('Guidance', 
+    if (
+      !this.isReEngaging &&
+      this.minDistanceToTarget < 15 && // Got close but missed
+      distance > this.lastTargetDistance && // Moving away from target
+      distance > 10 && // Far enough to need re-engagement
+      this.reEngagementAttempts < 1 && // Only try once
+      currentSpeed > 50
+    ) {
+      // Still have enough energy
+
+      debug.category(
+        'Guidance',
         `[RE-ENGAGE] Missed target! Min dist: ${this.minDistanceToTarget.toFixed(1)}m, ` +
-        `Current: ${distance.toFixed(1)}m, Attempting turnaround`
+          `Current: ${distance.toFixed(1)}m, Attempting turnaround`
       );
-      
+
       this.isReEngaging = true;
       this.reEngagementAttempts++;
       this.minDistanceToTarget = Infinity; // Reset for new approach
     }
-    
+
     this.lastTargetDistance = distance;
 
     // DEBUG: Log basic guidance info
@@ -684,20 +691,20 @@ export class Projectile {
     // Apply correction force
     let correctionGain = this.body.mass * 2; // Default P gain
     let maxGForce = 40; // Default max G-force
-    
+
     // More aggressive control for re-engagement
     if (this.isReEngaging) {
       correctionGain = this.body.mass * 4; // Double the gain for faster turn
       maxGForce = 60; // Allow higher G-forces for turnaround
-      
+
       // Add additional turning force perpendicular to current velocity
       const turnAxis = currentVelocity.clone().cross(los).normalize();
       const turnForce = turnAxis.multiplyScalar(this.body.mass * 100);
       velocityError.add(turnForce);
-      
+
       debug.category('Guidance', '[RE-ENGAGE] Using aggressive turn parameters');
     }
-    
+
     const correctionForce = velocityError.multiplyScalar(correctionGain);
 
     // Realistic missile constraints scaled for simulator
@@ -750,7 +757,7 @@ export class Projectile {
         new CANNON.Vec3(0, 0, 0)
       );
     }
-    
+
     // Check if re-engagement is complete (heading back toward target)
     if (this.isReEngaging && distance < 20) {
       const closingVelocity = -toTarget.normalize().dot(currentVelocity);
@@ -767,8 +774,8 @@ export class Projectile {
       }
     }
 
-    // Orient the missile model
-    this.orientMissile(currentVelocity);
+    // Orient the missile model - MOVED to main update() loop to prevent stuttering
+    // this.orientMissile(currentVelocity);
   }
 
   private orientMissile(velocity: THREE.Vector3): void {
@@ -776,33 +783,16 @@ export class Projectile {
 
     const direction = velocity.clone().normalize();
 
-    // For GLTF models, we need to handle orientation differently
+    // Create a point far ahead in the direction of velocity
+    const lookAtPoint = this.mesh.position.clone().add(direction.multiplyScalar(10));
+
+    // Make the mesh look at that point
+    this.mesh.lookAt(lookAtPoint);
+
+    // For GLTF models, we might need an additional rotation to correct the model's intrinsic orientation.
+    // The Tamir model seems to be oriented along its Y-axis, so we add a 90-degree rotation on the X-axis.
     if (this.mesh instanceof THREE.Group || this.mesh.type === 'Group') {
-      // Use static debug values for model orientation
-      const quaternion = new THREE.Quaternion().setFromUnitVectors(
-        Projectile.modelForwardVector,
-        direction
-      );
-
-      // Apply adjustment rotation
-      const adjustmentQuat = new THREE.Quaternion().setFromEuler(
-        Projectile.modelRotationAdjustment
-      );
-      quaternion.multiply(adjustmentQuat);
-
-      this.mesh.quaternion.copy(quaternion);
-    } else {
-      // For procedural geometry (cone) - cone points up by default in Three.js
-      const defaultForward = new THREE.Vector3(0, 1, 0); // Cone points along +Y
-      const quaternion = new THREE.Quaternion().setFromUnitVectors(defaultForward, direction);
-      this.mesh.quaternion.copy(quaternion);
-    }
-
-    // Add slight roll based on turn rate for realism
-    if (this.isInterceptor) {
-      const angularVel = this.body.angularVelocity;
-      const rollAmount = Math.min(Math.max(-angularVel.y * 0.1, -0.5), 0.5);
-      this.mesh.rotateZ(rollAmount);
+      this.mesh.rotateX(Math.PI / 2);
     }
   }
 
@@ -880,26 +870,29 @@ export class Projectile {
 
       debug.asset(
         'Tamir model loaded',
-        `at position ${this.mesh.position.toArray().map(n => n.toFixed(2)).join(', ')}`
+        `at position ${this.mesh.position
+          .toArray()
+          .map(n => n.toFixed(2))
+          .join(', ')}`
       );
     } catch (error) {
       debug.error('Failed to load Tamir model:', error);
     }
   }
-  
+
   private logModelHierarchy(obj: THREE.Object3D, depth: number): void {
     const indent = '  '.repeat(depth);
     let info = `${indent}${obj.name || 'unnamed'} (${obj.type})`;
-    
+
     if (obj instanceof THREE.Mesh) {
       const box = new THREE.Box3().setFromObject(obj);
       const size = box.getSize(new THREE.Vector3());
       info += ` - Size: ${size.x.toFixed(2)}x${size.y.toFixed(2)}x${size.z.toFixed(2)}`;
       info += ` - Scale: ${obj.scale.x.toFixed(2)},${obj.scale.y.toFixed(2)},${obj.scale.z.toFixed(2)}`;
     }
-    
+
     debug.asset(info);
-    
+
     obj.children.forEach(child => {
       this.logModelHierarchy(child, depth + 1);
     });

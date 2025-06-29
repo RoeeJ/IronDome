@@ -1680,7 +1680,9 @@ function animate() {
   }
 
   // Update controls
-  controls.update();
+  if (cameraController.getCurrentMode() === CameraMode.ORBIT) {
+    controls.update();
+  }
 
   // Update sound system listener position
   const soundSystem = SoundSystem.getInstance();

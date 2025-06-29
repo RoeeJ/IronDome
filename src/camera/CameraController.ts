@@ -30,12 +30,25 @@ export class CameraController {
   private controls: OrbitControls;
   private currentMode: CameraMode = CameraMode.ORBIT;
   private followTarget: Threat | Projectile | IronDomeBattery | null = null;
+  private smoothedTargetPosition: THREE.Vector3 = new THREE.Vector3();
+  private smoothedLookAtTarget: THREE.Vector3 = new THREE.Vector3(); // Separate smoothed lookAt target
+  private targetVelocity: THREE.Vector3 = new THREE.Vector3(); // Smoothed velocity for prediction
+  private isFirstFollowUpdate: boolean = true;
+  private targetSmoothingFactor: number = 0.08; // Much lower for gliding motion
+  private lookAtSmoothingFactor: number = 0.12; // Smoother lookAt transitions
+  private velocitySmoothingFactor: number = 0.15; // Smooth velocity changes
   private transition: CameraTransition | null = null;
   private cinematicPath: THREE.CatmullRomCurve3 | null = null;
   private cinematicProgress: number = 0;
   private cinematicSpeed: number = 0.1;
   private desiredMode: CameraMode = CameraMode.ORBIT; // Mode to switch to when target becomes available
   private modeChangeCallback?: (mode: string) => void;
+
+  // Linger effect after target destruction
+  private lingerTimer: number = 0;
+  private lingerDuration: number = 1; // Seconds to linger after explosion
+  private lingerPosition: THREE.Vector3 = new THREE.Vector3();
+  private isLingering: boolean = false;
 
   // Camera shake
   private shakeIntensity: number = 0;
@@ -44,9 +57,9 @@ export class CameraController {
 
   // Smooth follow parameters
   private followOffset: THREE.Vector3 = new THREE.Vector3(30, 20, 30);
-  private followSmoothness: number = 0.15; // Increased for smoother following
-  private lookAheadFactor: number = 0.5;
-  private minVelocityThreshold: number = 5; // Minimum velocity to consider for direction
+  private followSmoothness: number = 0.08; // Very smooth gliding motion
+  private lookAheadFactor: number = 0.3; // How much to anticipate movement
+  private minVelocityThreshold: number = 1; // Lower threshold for smoother transitions
 
   // Zoom parameters
   private targetFOV: number = 75;
@@ -87,10 +100,17 @@ export class CameraController {
       case CameraMode.FOLLOW_THREAT:
       case CameraMode.FOLLOW_INTERCEPTOR:
         this.controls.enabled = false;
+        this.isFirstFollowUpdate = true; // Reset smoothing on mode switch
         this.targetFOV = mode === CameraMode.FOLLOW_INTERCEPTOR ? 70 : 60; // Wider FOV for fast interceptors
         if (!target) {
           debug.warn('No target specified for follow mode');
           this.setMode(CameraMode.ORBIT);
+        } else if ('getPosition' in target) {
+          // Initialize smoothed positions to target's current position
+          const pos = target.getPosition();
+          this.smoothedTargetPosition.copy(pos);
+          this.smoothedLookAtTarget.copy(pos);
+          this.isLingering = false; // Cancel any lingering when switching targets
         }
         break;
 
@@ -142,16 +162,7 @@ export class CameraController {
   }
 
   update(deltaTime: number, threats: Threat[], interceptors: Projectile[]) {
-    // Debug log interceptor count periodically
-    if (
-      Math.random() < 0.02 &&
-      (this.currentMode === CameraMode.FOLLOW_INTERCEPTOR ||
-        this.desiredMode === CameraMode.FOLLOW_INTERCEPTOR)
-    ) {
-      debug.log(
-        `Camera update - Active interceptors: ${interceptors.filter(i => i.isActive).length}, Total: ${interceptors.length}`
-      );
-    }
+    // Remove excessive debug logging
 
     // Check if we need to find a new target or switch modes
     this.checkTargetValidity(threats, interceptors);
@@ -226,6 +237,32 @@ export class CameraController {
   }
 
   private updateFollowMode(deltaTime: number) {
+    // Handle lingering after explosion
+    if (this.isLingering) {
+      this.lingerTimer -= deltaTime;
+
+      // Continue looking at the explosion position with slight drift
+      const driftOffset = new THREE.Vector3(
+        Math.sin(this.lingerTimer * 2) * 0.5,
+        Math.cos(this.lingerTimer * 3) * 0.3,
+        Math.sin(this.lingerTimer * 1.5) * 0.5
+      );
+
+      this.camera.lookAt(this.lingerPosition.clone().add(driftOffset));
+
+      // Slowly pull camera back during linger
+      const pullbackSpeed = 0.02;
+      const currentDir = this.camera.position.clone().sub(this.lingerPosition).normalize();
+      this.camera.position.add(currentDir.multiplyScalar(pullbackSpeed));
+
+      if (this.lingerTimer <= 0) {
+        this.isLingering = false;
+        debug.log('Linger complete, searching for new target...');
+        // Will find new target on next update
+      }
+      return;
+    }
+
     if (!this.followTarget || !('getPosition' in this.followTarget)) {
       // No target - camera stays at current position
       return;
@@ -235,51 +272,75 @@ export class CameraController {
     const targetVel =
       'getVelocity' in this.followTarget ? this.followTarget.getVelocity() : new THREE.Vector3();
 
-    // Debug log for interceptor velocity and position
-    if (this.currentMode === CameraMode.FOLLOW_INTERCEPTOR) {
-      const speed = targetVel.length();
-      const targetId = (this.followTarget as any).id || 'unknown';
-      if (Math.random() < 0.02) {
-        // Log occasionally
-        debug.log(
-          `Following interceptor ${targetId}: velocity ${speed.toFixed(1)} m/s, pos (${targetPos.x.toFixed(1)}, ${targetPos.y.toFixed(1)}, ${targetPos.z.toFixed(1)})`
-        );
-      }
-    }
-
-    // Calculate desired camera position - follow behind the target
-    let desiredPosition: THREE.Vector3;
-    const speed = targetVel.length();
-
-    if (speed > 0.1) {
-      // Much lower threshold for better tracking
-      // Position camera behind the projectile along its flight path
-      const behindDistance = this.currentMode === CameraMode.FOLLOW_INTERCEPTOR ? 15 : 20; // Closer for interceptors
-      // Get normalized velocity direction
-      const velocityDir = targetVel.clone().normalize();
-      // Camera offset is in the opposite direction of velocity (behind the projectile)
-      const cameraOffset = velocityDir.multiplyScalar(-behindDistance);
-      // Add the offset to position camera behind
-      desiredPosition = targetPos.clone().add(cameraOffset);
-
-      // Adjust smoothness based on speed
-      let smoothness = this.followSmoothness;
-      if (this.currentMode === CameraMode.FOLLOW_INTERCEPTOR && speed > 100) {
-        smoothness *= 2; // More smoothing for fast interceptors
-      } else if (speed < 10) {
-        smoothness *= 0.5; // Less smoothing for slow projectiles
-      }
-
-      this.camera.position.lerp(desiredPosition, smoothness);
+    // If it's the first frame of following, snap everything to the target's position
+    if (this.isFirstFollowUpdate) {
+      this.smoothedTargetPosition.copy(targetPos);
+      this.smoothedLookAtTarget.copy(targetPos);
+      this.targetVelocity.copy(targetVel);
+      this.isFirstFollowUpdate = false;
     } else {
-      // If not moving, position camera at default offset behind
-      const defaultBehind = new THREE.Vector3(0, 10, 20);
-      desiredPosition = targetPos.clone().add(defaultBehind);
-      this.camera.position.lerp(desiredPosition, this.followSmoothness);
+      // Smooth the velocity for more stable predictions
+      this.targetVelocity.lerp(targetVel, this.velocitySmoothingFactor);
+
+      // Calculate predicted position based on smoothed velocity
+      const predictedPos = targetPos
+        .clone()
+        .add(this.targetVelocity.clone().multiplyScalar(this.lookAheadFactor * deltaTime));
+
+      // Glide smoothly to the predicted position
+      this.smoothedTargetPosition.lerp(predictedPos, this.targetSmoothingFactor);
+
+      // Even smoother lookAt target for stable orientation
+      this.smoothedLookAtTarget.lerp(predictedPos, this.lookAtSmoothingFactor);
     }
 
-    // Always look directly at the projectile to keep it centered
-    this.camera.lookAt(targetPos);
+    // Remove excessive debug logging
+
+    // Calculate camera position based on smoothed velocity direction
+    const speed = this.targetVelocity.length();
+    let desiredPosition: THREE.Vector3;
+
+    if (speed > this.minVelocityThreshold) {
+      // Dynamic camera distance based on speed
+      const baseBehindDistance = this.currentMode === CameraMode.FOLLOW_INTERCEPTOR ? 20 : 10;
+      const speedFactor = Math.min(speed / 50, 2); // Scale with speed up to 2x
+      const behindDistance = baseBehindDistance * (1 + speedFactor * 0.3);
+
+      // Position camera behind based on smoothed velocity direction
+      const velocityDir = this.targetVelocity.clone().normalize();
+      const cameraOffset = velocityDir.multiplyScalar(-behindDistance);
+
+      // Small lateral offset for slight cinematic angle (reduced from 3 to 0.5)
+      const lateralOffset = new THREE.Vector3(-velocityDir.z, 0, velocityDir.x).multiplyScalar(0.5);
+
+      desiredPosition = this.smoothedTargetPosition.clone().add(cameraOffset).add(lateralOffset);
+
+      // Dynamic vertical offset based on trajectory
+      const verticalOffset = this.currentMode === CameraMode.FOLLOW_INTERCEPTOR ? 8 : 4;
+      const trajectoryAngle = Math.atan2(
+        this.targetVelocity.y,
+        Math.sqrt(this.targetVelocity.x ** 2 + this.targetVelocity.z ** 2)
+      );
+      desiredPosition.y += verticalOffset * (1 + Math.sin(trajectoryAngle) * 0.5);
+    } else {
+      // Default position when stationary
+      const behindDistance = 12;
+      const verticalOffset = 6;
+      desiredPosition = this.smoothedTargetPosition
+        .clone()
+        .add(new THREE.Vector3(5, verticalOffset, -behindDistance));
+    }
+
+    // Glide camera to desired position
+    this.camera.position.lerp(desiredPosition, this.followSmoothness);
+
+    // Look slightly ahead of the smoothed target
+    const lookAheadPos = this.smoothedLookAtTarget.clone();
+    if (speed > this.minVelocityThreshold) {
+      lookAheadPos.add(this.targetVelocity.clone().normalize().multiplyScalar(5));
+    }
+
+    this.camera.lookAt(lookAheadPos);
   }
 
   private updateFirstPersonMode() {
@@ -419,28 +480,46 @@ export class CameraController {
   }
 
   private checkTargetValidity(threats: Threat[], interceptors: Projectile[]): void {
-    // Special handling for follow interceptor - check if we're actually following one
+    // Check if we're already lingering
+    if (this.isLingering) {
+      return; // Continue lingering, don't check for new targets
+    }
+
+    // Check if current target is still valid FIRST before reassigning
+    if (this.followTarget && 'isActive' in this.followTarget && !this.followTarget.isActive) {
+      // Target just became inactive - start lingering at explosion location
+      if (
+        this.currentMode === CameraMode.FOLLOW_INTERCEPTOR ||
+        this.currentMode === CameraMode.FOLLOW_THREAT
+      ) {
+        this.isLingering = true;
+        this.lingerTimer = this.lingerDuration;
+        this.lingerPosition.copy(this.smoothedTargetPosition);
+        this.followTarget = null; // Clear target so we don't keep checking it
+        debug.log(
+          `Target destroyed! Starting linger effect at explosion location for ${this.lingerDuration}s`
+        );
+        return; // Don't switch targets while lingering
+      }
+    }
+
+    // Now check if we need a new target (no target or need initial target)
     if (
       this.currentMode === CameraMode.FOLLOW_INTERCEPTOR &&
-      (!this.followTarget || !('isActive' in this.followTarget) || !this.followTarget.isActive)
+      (!this.followTarget || !('isActive' in this.followTarget))
     ) {
       const activeInterceptors = interceptors.filter(i => i.isActive);
-      debug.log(
-        `Follow interceptor mode but no valid target. Active interceptors: ${activeInterceptors.length}`
-      );
       if (activeInterceptors.length > 0) {
         this.followTarget = activeInterceptors[0];
-        const interceptorId = (activeInterceptors[0] as any).id || 'unknown';
-        debug.log(`Assigned interceptor ${interceptorId} as new target`);
+        this.isFirstFollowUpdate = true; // Reset smoothing for new target
       } else {
         // Stay in follow mode but with no target - camera will remain at last position
         this.followTarget = null;
-        debug.log('No interceptors available, waiting in follow mode...');
         return;
       }
     }
 
-    // Check if current target is still valid
+    // Handle other follow modes similarly
     if (this.followTarget && 'isActive' in this.followTarget) {
       if (!this.followTarget.isActive) {
         debug.log(`Current ${this.desiredMode} target destroyed, looking for replacement...`);
@@ -459,15 +538,9 @@ export class CameraController {
 
           case CameraMode.FOLLOW_INTERCEPTOR:
             const activeInterceptors = interceptors.filter(i => i.isActive);
-            debug.log(`Looking for new interceptor. Active count: ${activeInterceptors.length}`);
             const newInterceptor = activeInterceptors[0];
             if (newInterceptor) {
               this.followTarget = newInterceptor;
-              const interceptorId = (newInterceptor as any).id || 'unknown';
-              debug.log(`Switched to new interceptor target: ${interceptorId}`);
-            } else {
-              // No interceptors available, stay in follow mode waiting
-              debug.log('No active interceptors found, waiting for new interceptors...');
             }
             break;
 
@@ -490,8 +563,14 @@ export class CameraController {
       }
     }
 
-    // Check if we're waiting for a target
-    if (this.currentMode === CameraMode.ORBIT && this.desiredMode !== CameraMode.ORBIT) {
+    // Check if we need to find a target (either waiting in orbit mode or just finished lingering)
+    if (
+      (this.currentMode === CameraMode.ORBIT && this.desiredMode !== CameraMode.ORBIT) ||
+      (this.followTarget === null &&
+        !this.isLingering &&
+        (this.currentMode === CameraMode.FOLLOW_INTERCEPTOR ||
+          this.currentMode === CameraMode.FOLLOW_THREAT))
+    ) {
       switch (this.desiredMode) {
         case CameraMode.FOLLOW_THREAT:
           const threat = threats.find(t => t.isActive);
