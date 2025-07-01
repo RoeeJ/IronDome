@@ -1,6 +1,5 @@
 import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
-import { GameState } from '../game/GameState';
 import { Threat } from '../entities/Threat';
 import { Projectile } from '../entities/Projectile';
 import { debug } from '../utils/logger';
@@ -83,7 +82,6 @@ export class CameraController {
   setMode(mode: CameraMode, target?: Threat | Projectile | IronDomeBattery) {
     if (mode === this.currentMode && target === this.followTarget) return;
 
-    const previousMode = this.currentMode;
     this.currentMode = mode;
     this.desiredMode = mode;
     this.followTarget = target || null;
@@ -528,7 +526,7 @@ export class CameraController {
         debug.log(`Current ${this.desiredMode} target destroyed, looking for replacement...`);
         // Target destroyed, find new target based on desired mode
         switch (this.desiredMode) {
-          case CameraMode.FOLLOW_THREAT:
+          case CameraMode.FOLLOW_THREAT: {
             const newThreat = threats.find(t => t.isActive);
             if (newThreat) {
               this.followTarget = newThreat;
@@ -538,16 +536,18 @@ export class CameraController {
               debug.log('No threats available, waiting for new threats...');
             }
             break;
+          }
 
-          case CameraMode.FOLLOW_INTERCEPTOR:
+          case CameraMode.FOLLOW_INTERCEPTOR: {
             const activeInterceptors = interceptors.filter(i => i.isActive);
             const newInterceptor = activeInterceptors[0];
             if (newInterceptor) {
               this.followTarget = newInterceptor;
             }
             break;
+          }
 
-          case CameraMode.FIRST_PERSON:
+          case CameraMode.FIRST_PERSON: {
             // Try interceptor first, then threat
             const fpInterceptor = interceptors.find(i => i.isActive);
             if (fpInterceptor) {
@@ -562,6 +562,7 @@ export class CameraController {
               }
             }
             break;
+          }
         }
       }
     }
@@ -575,7 +576,7 @@ export class CameraController {
           this.currentMode === CameraMode.FOLLOW_THREAT))
     ) {
       switch (this.desiredMode) {
-        case CameraMode.FOLLOW_THREAT:
+        case CameraMode.FOLLOW_THREAT: {
           const threat = threats.find(t => t.isActive);
           if (threat) {
             this.followTarget = threat;
@@ -587,8 +588,9 @@ export class CameraController {
             debug.log('Found threat to follow');
           }
           break;
+        }
 
-        case CameraMode.FOLLOW_INTERCEPTOR:
+        case CameraMode.FOLLOW_INTERCEPTOR: {
           const interceptor = interceptors.find(i => i.isActive);
           if (interceptor) {
             this.followTarget = interceptor;
@@ -600,8 +602,9 @@ export class CameraController {
             debug.log('Found interceptor to follow');
           }
           break;
+        }
 
-        case CameraMode.FIRST_PERSON:
+        case CameraMode.FIRST_PERSON: {
           const fpTarget = interceptors.find(i => i.isActive) || threats.find(t => t.isActive);
           if (fpTarget) {
             this.followTarget = fpTarget;
@@ -613,6 +616,7 @@ export class CameraController {
             debug.log('Found target for first person view');
           }
           break;
+        }
       }
     }
   }

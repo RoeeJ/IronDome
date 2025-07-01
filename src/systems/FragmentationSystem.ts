@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { MaterialCache } from '../utils/MaterialCache';
 
 export interface FragmentationConfig {
   fragmentCount: number;

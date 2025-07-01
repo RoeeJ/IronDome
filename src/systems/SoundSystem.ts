@@ -44,6 +44,12 @@ export class SoundSystem {
   private bgmVolume: number = 0.5;
   private audioContextResumed = false;
 
+  // Race condition prevention
+  private bgmTransitioning = false;
+  private bgmToggleDebounceTimer: number | null = null;
+  private pendingBgmState: boolean | null = null;
+  private allBgmSources: Set<THREE.Audio | THREE.PositionalAudio> = new Set();
+
   private constructor() {
     // Initialize Three.js audio
     this.listener = new THREE.AudioListener();
@@ -296,6 +302,11 @@ export class SoundSystem {
         if (sound.audio.source) {
           sound.audio.disconnect();
         }
+
+        // Remove from BGM sources tracking if it's BGM
+        if (sound.category === 'bgm') {
+          this.allBgmSources.delete(sound.audio);
+        }
       } catch (error) {
         // Silently ignore disconnect errors - they're harmless
         if (error instanceof Error && !error.message.includes('disconnect')) {
@@ -422,19 +433,29 @@ export class SoundSystem {
   }
 
   async playBackgroundMusic() {
-    // Don't start if disabled or already playing
-    if (!this.bgmEnabled || this.bgmInstance) return;
+    // Don't start if disabled, already playing, or transitioning
+    if (!this.bgmEnabled || this.bgmInstance || this.bgmTransitioning) return;
+
+    // Set transitioning flag
+    this.bgmTransitioning = true;
 
     // Double-check that BGM isn't already in active sounds
     for (const [, sound] of this.activeSounds) {
       if (sound.category === 'bgm' && sound.audio.isPlaying) {
         this.bgmInstance = sound;
+        this.bgmTransitioning = false;
         return;
       }
     }
 
     // Ensure audio context is resumed before playing
     await this.ensureAudioContext();
+
+    // Check if still enabled after async operation
+    if (!this.bgmEnabled) {
+      this.bgmTransitioning = false;
+      return;
+    }
 
     const bgmId = this.play('bgm_picaroon', 'bgm', {
       volume: 1.0, // Don't multiply by bgmVolume here, it's already applied in play()
@@ -443,17 +464,49 @@ export class SoundSystem {
     });
 
     if (bgmId) {
-      this.bgmInstance = this.activeSounds.get(bgmId) || null;
-      debug.log('Background music started');
+      const instance = this.activeSounds.get(bgmId);
+      if (instance) {
+        this.bgmInstance = instance;
+        // Track this audio source
+        this.allBgmSources.add(instance.audio);
+        debug.log('Background music started');
+      }
     }
+
+    this.bgmTransitioning = false;
   }
 
   stopBackgroundMusic(fadeOut: number = 2000) {
+    // Stop all BGM sources, not just the tracked instance
+    this.allBgmSources.forEach(audio => {
+      try {
+        if (audio.isPlaying) {
+          audio.stop();
+        }
+        if (audio.source) {
+          audio.disconnect();
+        }
+      } catch (error) {
+        // Ignore errors during cleanup
+      }
+    });
+
+    // Clear the set
+    this.allBgmSources.clear();
+
+    // Stop tracked instance if exists
     if (this.bgmInstance) {
       const bgmId = this.bgmInstance.id;
-      this.bgmInstance = null; // Clear reference immediately to prevent race conditions
+      this.bgmInstance = null;
       this.stop(bgmId, fadeOut);
     }
+
+    // Also check activeSounds for any orphaned BGM
+    this.activeSounds.forEach((sound, id) => {
+      if (sound.category === 'bgm') {
+        this.stop(id, fadeOut);
+      }
+    });
   }
 
   // Update methods for listener position/orientation
@@ -517,14 +570,33 @@ export class SoundSystem {
   }
 
   setBGMEnabled(enabled: boolean) {
-    this.bgmEnabled = enabled;
-    localStorage.setItem('ironDome_bgmEnabled', enabled.toString());
+    // Store pending state
+    this.pendingBgmState = enabled;
 
-    if (enabled && !this.bgmInstance) {
-      this.playBackgroundMusic();
-    } else if (!enabled && this.bgmInstance) {
-      this.stopBackgroundMusic();
+    // Clear existing debounce timer
+    if (this.bgmToggleDebounceTimer !== null) {
+      clearTimeout(this.bgmToggleDebounceTimer);
     }
+
+    // Set up debounced execution
+    this.bgmToggleDebounceTimer = window.setTimeout(() => {
+      this.bgmToggleDebounceTimer = null;
+
+      // Apply the most recent pending state
+      if (this.pendingBgmState !== null) {
+        this.bgmEnabled = this.pendingBgmState;
+        localStorage.setItem('ironDome_bgmEnabled', this.pendingBgmState.toString());
+
+        if (this.pendingBgmState && !this.bgmInstance && !this.bgmTransitioning) {
+          this.playBackgroundMusic();
+        } else if (!this.pendingBgmState) {
+          // Always stop when disabled, regardless of transitioning state
+          this.stopBackgroundMusic();
+        }
+
+        this.pendingBgmState = null;
+      }
+    }, 150); // 150ms debounce delay
   }
 
   isBGMEnabled(): boolean {
@@ -540,14 +612,14 @@ export class SoundSystem {
     if (this.bgmInstance && this.bgmInstance.audio.isPlaying) {
       return true;
     }
-    
+
     // Double-check active sounds in case bgmInstance is stale
     for (const [, sound] of this.activeSounds) {
       if (sound.category === 'bgm' && sound.audio.isPlaying) {
         return true;
       }
     }
-    
+
     return false;
   }
 
@@ -658,6 +730,21 @@ export class SoundSystem {
     });
   }
 
+  // Cleanup method
+  cleanup() {
+    // Clear debounce timer
+    if (this.bgmToggleDebounceTimer !== null) {
+      clearTimeout(this.bgmToggleDebounceTimer);
+      this.bgmToggleDebounceTimer = null;
+    }
+
+    // Stop all sounds
+    this.stopAll(undefined, 0);
+
+    // Clear BGM sources
+    this.allBgmSources.clear();
+  }
+
   // Debug method
   getDebugInfo() {
     return {
@@ -669,6 +756,9 @@ export class SoundSystem {
       bgmPlaying: !!this.bgmInstance,
       sfxEnabled: this.sfxEnabled,
       bgmEnabled: this.bgmEnabled,
+      bgmTransitioning: this.bgmTransitioning,
+      pendingBgmState: this.pendingBgmState,
+      allBgmSources: this.allBgmSources.size,
     };
   }
 }

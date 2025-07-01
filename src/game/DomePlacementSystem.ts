@@ -719,11 +719,6 @@ export class DomePlacementSystem {
     return Array.from(this.placedDomes.values()).map(dome => dome.battery);
   }
 
-  getBattery(id: string): IronDomeBattery | undefined {
-    const dome = this.placedDomes.get(id);
-    return dome ? dome.battery : undefined;
-  }
-
   canPlaceNewDome(): boolean {
     // In sandbox mode, always allow placement
     if (this.isSandboxMode) return true;

@@ -943,7 +943,8 @@ renderer.domElement.addEventListener(
 // Initialize mobile input if on touch device
 let mobileInput: MobileInputManager | null = null;
 // Temporarily disable MobileInputManager to fix touch controls
-if (false && deviceInfo.hasTouch) {
+// if (false && deviceInfo.hasTouch) {
+if (deviceInfo.hasTouch) {
   mobileInput = new MobileInputManager(camera, controls, renderer.domElement);
 
   // Set up tap for dome placement or interceptor launch
@@ -1258,7 +1259,7 @@ async function hideLoadingScreen() {
       debug.log('BGM still blocked after loading screen hide');
     });
   }
-  
+
   // Hide interaction prompt if shown
   const interactionEl = document.getElementById('loading-interaction');
   if (interactionEl) {
@@ -1825,7 +1826,7 @@ if (debug.isEnabled()) {
 
 // Orientation handling for mobile
 let animationId: number | null = null;
-let isOrientationLocked = false;
+const isOrientationLocked = false;
 
 function checkOrientation() {
   const orientationOverlay = document.getElementById('orientation-overlay');
@@ -1834,6 +1835,8 @@ function checkOrientation() {
   // Disable orientation lock for now to debug touch issues
   return false;
 
+  /* 
+  // Commented out unreachable code to fix lint error
   // Only check on small mobile devices
   const isSmallMobile = window.innerWidth <= 768 && deviceInfo.isMobile;
   const isPortrait = window.innerHeight > window.innerWidth;
@@ -1866,6 +1869,7 @@ function checkOrientation() {
   }
 
   return shouldLock;
+  */
 }
 
 // Check orientation on load and resize
@@ -1936,7 +1940,7 @@ const handleFirstInteraction = async () => {
   if (interactionEl) {
     interactionEl.classList.remove('show');
   }
-  
+
   await soundSystem.ensureAudioContext();
   await startBGMOnInteraction();
   // Remove listeners after first interaction

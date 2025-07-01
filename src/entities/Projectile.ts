@@ -482,7 +482,7 @@ export class Projectile {
     debug.category('Interceptor', `Failure: ${this.failureMode}`);
 
     switch (this.failureMode) {
-      case 'motor':
+      case 'motor': {
         // Motor failure - stop thrust, let gravity take over
         if (this.exhaustTrailId) {
           const pooledTrail = PooledTrailSystem.getInstance(this.scene);
@@ -523,8 +523,9 @@ export class Projectile {
           });
         }
         break;
+      }
 
-      case 'guidance':
+      case 'guidance': {
         // Guidance failure - veer off course
         const randomVeer = new THREE.Vector3(
           (Math.random() - 0.5) * 50,
@@ -537,6 +538,7 @@ export class Projectile {
         // Disable proximity fuse
         this.proximityFuse = undefined;
         break;
+      }
 
       case 'premature':
         // Premature detonation

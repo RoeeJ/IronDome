@@ -9,7 +9,6 @@ import { StaticRadarNetwork } from '../scene/StaticRadarNetwork';
 import { InvisibleRadarSystem } from '../scene/InvisibleRadarSystem';
 import { LaunchEffectsSystem } from '../systems/LaunchEffectsSystem';
 import { GeometryOptimizer } from '../utils/GeometryOptimizer';
-import { GeometryConfig } from '../config/GeometryConfig';
 import { debug } from '../utils/logger';
 import { ResourceManager } from '../game/ResourceManager';
 import { MaterialCache } from '../utils/MaterialCache';
@@ -17,7 +16,7 @@ import { GeometryFactory } from '../utils/GeometryFactory';
 import { EventEmitter } from 'events';
 import { ExplosionManager, ExplosionType } from '../systems/ExplosionManager';
 import { SoundSystem } from '../systems/SoundSystem';
-import { BATTERY_TUBE_CONFIG, getTubeVectors } from '../../config/IronDome';
+import { getTubeVectors } from '../../config/IronDome';
 
 export interface BatteryConfig {
   position: THREE.Vector3;

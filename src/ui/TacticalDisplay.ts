@@ -45,10 +45,6 @@ export class TacticalDisplay {
     this.initialize();
   }
 
-  public getContainer(): HTMLDivElement {
-    return this.container;
-  }
-
   private initialize(): void {
     const deviceCaps = DeviceCapabilities.getInstance();
     const deviceInfo = deviceCaps.getDeviceInfo();
