@@ -160,6 +160,7 @@ export class DeveloperControls {
       'qassam2',
       'qassam3',
       'grad',
+      'decoy',
     ];
 
     threatTypes.forEach(type => {

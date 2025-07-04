@@ -11,6 +11,7 @@ export enum ExplosionType {
   GROUND_IMPACT = 'ground_impact',
   DEBRIS_IMPACT = 'debris_impact',
   DRONE_DESTRUCTION = 'drone_destruction',
+  AIR_BURST = 'air_burst',
 }
 
 export interface ExplosionConfig {
@@ -23,6 +24,7 @@ export interface ExplosionConfig {
   hasDebris?: boolean;
   hasFlash?: boolean;
   hasShockwave?: boolean;
+  normal?: THREE.Vector3; // For oriented shockwaves
 }
 
 interface ExplosionInstance {
@@ -32,6 +34,7 @@ interface ExplosionInstance {
   duration: number;
   flash?: THREE.PointLight;
   shockwave?: THREE.Mesh;
+  normal?: THREE.Vector3;
   active: boolean;
 }
 
@@ -53,7 +56,13 @@ export class ExplosionManager {
   private shockwaveInstancedMesh: THREE.InstancedMesh;
   private shockwaveInstances = new Map<
     string,
-    { index: number; position: THREE.Vector3; radius: number; startTime: number }
+    {
+      index: number;
+      position: THREE.Vector3;
+      radius: number;
+      startTime: number;
+      normal?: THREE.Vector3;
+    }
   >();
   private availableShockwaveIndices: number[] = [];
   private shockwaveDummy = new THREE.Object3D();
@@ -97,6 +106,16 @@ export class ExplosionManager {
       hasShockwave: false,
       flashIntensity: 80,
       flashColor: 0xffff00,
+    },
+    [ExplosionType.AIR_BURST]: {
+      color: new THREE.Color(0xffffff), // Bright white flash
+      lightColor: new THREE.Color(0xffffff),
+      lightIntensity: 8, // Very intense light
+      scale: 1.5, // Large visual effect
+      duration: 500, // Short duration
+      hasDebris: false, // No debris
+      hasShockwave: false, // No shockwave
+      sound: 'air',
     },
   };
 
@@ -158,6 +177,7 @@ export class ExplosionManager {
       hasDebris: config.hasDebris ?? typeConfig.hasDebris,
       hasFlash: config.hasFlash ?? typeConfig.hasFlash,
       hasShockwave: config.hasShockwave ?? typeConfig.hasShockwave,
+      normal: config.normal,
     };
 
     const explosion: ExplosionInstance = {
@@ -165,6 +185,7 @@ export class ExplosionManager {
       config: finalConfig,
       startTime: Date.now(),
       duration: finalConfig.duration || 1500,
+      normal: finalConfig.normal,
       active: true,
     };
 
@@ -208,7 +229,7 @@ export class ExplosionManager {
 
     // Create shockwave effect if enabled
     if (finalConfig.hasShockwave) {
-      this.createShockwave(config.position, config.radius, config.type);
+      this.createShockwave(config.position, config.radius, config.type, finalConfig.normal);
     }
 
     // Trigger debris if enabled (handled by external debris system)
@@ -352,15 +373,16 @@ export class ExplosionManager {
   private createShockwave(
     position: THREE.Vector3,
     radius: number,
-    explosionType?: ExplosionType
+    explosionType?: ExplosionType,
+    normal?: THREE.Vector3
   ): void {
     // Only create horizontal shockwaves for ground impacts
-    if (explosionType && explosionType !== ExplosionType.GROUND_IMPACT) {
+    if (explosionType && explosionType !== ExplosionType.GROUND_IMPACT && !normal) {
       return; // Skip shockwave for air explosions
     }
 
-    // Only create shockwave if near ground level
-    if (position.y > 5) {
+    // Only create shockwave if near ground level or if it's an oriented blast (e.g. building hit)
+    if (position.y > 5 && !normal) {
       return; // Skip shockwave for explosions too high above ground
     }
 
@@ -395,6 +417,7 @@ export class ExplosionManager {
       position: position.clone(),
       radius: radius * 2,
       startTime: Date.now(),
+      normal: normal,
     });
 
     debug.log(
@@ -450,8 +473,19 @@ export class ExplosionManager {
       // Update instance matrix
       const scale = 1 + (instance.radius - 1) * progress;
       this.shockwaveDummy.position.copy(instance.position);
-      this.shockwaveDummy.position.y = 0.05 + Math.random() * 0.02;
-      this.shockwaveDummy.rotation.x = -Math.PI / 2;
+      this.shockwaveDummy.quaternion.identity(); // Reset rotation
+
+      if (instance.normal && Math.abs(instance.normal.y) < 0.99) {
+        // Oriented shockwave for side hits
+        this.shockwaveDummy.quaternion.setFromUnitVectors(
+          new THREE.Vector3(0, 1, 0),
+          instance.normal
+        );
+      } else {
+        // Horizontal shockwave for ground or top hits
+        this.shockwaveDummy.rotation.x = -Math.PI / 2;
+        if (!instance.normal) this.shockwaveDummy.position.y = 0.05 + Math.random() * 0.02; // Only adjust y for ground hits
+      }
       this.shockwaveDummy.scale.set(scale, scale, 1);
 
       this.shockwaveDummy.updateMatrix();

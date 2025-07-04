@@ -113,6 +113,22 @@ export class ThreatLauncherSystem {
         reloadTime: 20000, // Increased from 8s to 20s
         spread: 20,
       },
+      {
+        type: ThreatType.DECOY,
+        count: 1,
+        volleySize: { min: 2, max: 5 }, // Launch a few decoys at once
+        volleyDelay: 400,
+        reloadTime: 60000, // 1 minute
+        spread: 100,
+      },
+      {
+        type: ThreatType.BALLISTIC_MISSILE,
+        count: 1,
+        volleySize: { min: 1, max: 2 }, // Launch 1-2 missiles in a volley
+        volleyDelay: 3000, // 3 seconds between each launch
+        reloadTime: 180000, // 3 minutes (increased due to larger volley)
+        spread: 500, // Increased spread for a wider attack
+      },
     ];
 
     launcherTypes.forEach((config, typeIndex) => {

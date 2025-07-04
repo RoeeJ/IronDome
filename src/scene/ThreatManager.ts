@@ -228,7 +228,7 @@ export class ThreatManager extends EventEmitter {
     this.nextSpawnTime = Date.now() + interval;
   }
 
-  update(): void {
+  update(deltaTime: number): void {
     // Update launch effects
     this.launchEffects.update();
 
@@ -252,7 +252,66 @@ export class ThreatManager extends EventEmitter {
         continue;
       }
 
-      threat.update();
+      threat.update(deltaTime);
+
+      // NEW: Building collision detection
+      const buildingSystem = (window as any).__buildingSystem;
+      if (buildingSystem && threat.getPosition().y < 100) {
+        // Only check for low-altitude threats
+        const buildings = buildingSystem.getAllBuildings();
+        for (const building of buildings) {
+          // Assuming buildings are axis-aligned boxes for simplicity
+          // And that building.position is the center of the base.
+          // Using a rough estimate for building dimensions.
+          const buildingHalfWidth = 12;
+          const buildingHalfDepth = 12;
+          const buildingHeight = 80;
+
+          const threatPos = threat.getPosition();
+          const buildingPos = building.position;
+
+          const box = new THREE.Box3(
+            new THREE.Vector3(
+              buildingPos.x - buildingHalfWidth,
+              0,
+              buildingPos.z - buildingHalfDepth
+            ),
+            new THREE.Vector3(
+              buildingPos.x + buildingHalfWidth,
+              buildingHeight,
+              buildingPos.z + buildingHalfDepth
+            )
+          );
+
+          if (box.containsPoint(threatPos)) {
+            debug.category('Combat', `Threat ${threat.id} collided with a building.`);
+            const impactNormal = this.getImpactNormal(threatPos, box);
+
+            buildingSystem.damageBuilding(building.id, this.getThreatDamage(threat.type));
+
+            this.explosionManager.createExplosion({
+              type: ExplosionType.GROUND_IMPACT,
+              position: threatPos,
+              radius: 15,
+              normal: impactNormal,
+            });
+
+            SoundSystem.getInstance().playExplosion('ground', threatPos);
+            this.threatsToRemove.add(threat);
+            break; // Move to next threat
+          }
+        }
+        if (this.threatsToRemove.has(threat)) continue; // Threat was removed, skip rest of its update
+      }
+
+      // Check for payload deployment from ballistic missiles
+      if (threat.shouldDeployPayload) {
+        const threatConfig = THREAT_CONFIGS[threat.type];
+        if (threatConfig.payload) {
+          this.deployPayload(threat, threatConfig.payload);
+        }
+        this.threatsToRemove.add(threat);
+      }
 
       // Check if threat has hit ground or reached target
       const threatConfig = THREAT_CONFIGS[threat.type];
@@ -485,6 +544,122 @@ export class ThreatManager extends EventEmitter {
     }
   }
 
+  private getImpactNormal(impactPoint: THREE.Vector3, buildingBox: THREE.Box3): THREE.Vector3 {
+    const center = buildingBox.getCenter(new THREE.Vector3());
+
+    const dists = {
+      x_pos: Math.abs(impactPoint.x - buildingBox.max.x),
+      x_neg: Math.abs(impactPoint.x - buildingBox.min.x),
+      z_pos: Math.abs(impactPoint.z - buildingBox.max.z),
+      z_neg: Math.abs(impactPoint.z - buildingBox.min.z),
+      y_pos: Math.abs(impactPoint.y - buildingBox.max.y),
+    };
+
+    let min_dist = Infinity;
+    const normal = new THREE.Vector3(0, 1, 0); // Default to top hit
+
+    if (dists.x_pos < min_dist) {
+      min_dist = dists.x_pos;
+      normal.set(1, 0, 0);
+    }
+    if (dists.x_neg < min_dist) {
+      min_dist = dists.x_neg;
+      normal.set(-1, 0, 0);
+    }
+    if (dists.z_pos < min_dist) {
+      min_dist = dists.z_pos;
+      normal.set(0, 0, 1);
+    }
+    if (dists.z_neg < min_dist) {
+      min_dist = dists.z_neg;
+      normal.set(0, 0, -1);
+    }
+    if (dists.y_pos < min_dist) {
+      min_dist = dists.y_pos;
+      normal.set(0, 1, 0);
+    }
+    return normal;
+  }
+
+  private deployPayload(
+    parentThreat: Threat,
+    payloadConfig: { type: ThreatType; count: number; spread: number }
+  ): void {
+    debug.category('Combat', `Deploying payload from threat ${parentThreat.id}`);
+    const parentPosition = parentThreat.getPosition();
+    const parentVelocity = parentThreat.getVelocity();
+
+    // Add a visual effect for payload deployment
+    this.explosionManager.createExplosion({
+      type: ExplosionType.AIR_BURST, // A non-damaging air burst effect
+      position: parentPosition,
+      radius: 30, // A fairly large visual effect
+      intensity: 0.5,
+    });
+
+    SoundSystem.getInstance().playExplosion('air', parentPosition, 0.5);
+
+    // Get building system to target buildings
+    const buildingSystem = (window as any).__buildingSystem;
+    let buildingTargets: THREE.Vector3[] = [];
+    if (buildingSystem) {
+      const buildings = buildingSystem.getAllBuildings();
+      if (buildings.length > 0) {
+        // Shuffle buildings and pick some as targets
+        const shuffled = buildings.sort(() => 0.5 - Math.random());
+        buildingTargets = shuffled.slice(0, payloadConfig.count).map(b => b.position.clone());
+      }
+    }
+
+    for (let i = 0; i < payloadConfig.count; i++) {
+      // Add random spread to velocity
+      const spreadVector = new THREE.Vector3(
+        (Math.random() - 0.5) * 2,
+        (Math.random() - 0.5) * 2,
+        (Math.random() - 0.5) * 2
+      )
+        .normalize()
+        .multiplyScalar(payloadConfig.spread);
+
+      const childVelocity = parentVelocity.clone().add(spreadVector);
+
+      // Aim child threats at buildings if available, otherwise use original logic
+      let childTargetPosition: THREE.Vector3;
+      if (buildingTargets.length > i) {
+        // We have a specific building to target
+        childTargetPosition = buildingTargets[i];
+        childTargetPosition.y = 0; // Aim for the ground position of the building
+      } else {
+        // Fallback to original logic if no buildings or not enough buildings
+        const originalTarget = parentThreat.targetPosition;
+        const targetSpread = new THREE.Vector3(
+          (Math.random() - 0.5) * 2,
+          0,
+          (Math.random() - 0.5) * 2
+        )
+          .normalize()
+          .multiplyScalar(1000); // 1km spread for submunitions
+        childTargetPosition = originalTarget.clone().add(targetSpread);
+      }
+
+      const threat = new Threat(this.scene, this.world, {
+        type: payloadConfig.type,
+        position: parentPosition.clone(),
+        velocity: childVelocity,
+        targetPosition: childTargetPosition,
+        useInstancing: true,
+        instanceManager: this.instancedRenderer,
+      });
+
+      this.cleanupOldestThreat();
+      if (!this.instancedRenderer.addThreat(threat)) {
+        threat.mesh.visible = true;
+      }
+      this.threats.push(threat);
+      this.emit('threatSpawned', threat);
+    }
+  }
+
   private checkAndFireLaunchers(): void {
     const currentTime = Date.now();
     const readyLaunchers = this.launcherSystem.getReadyLaunchers(currentTime);
@@ -580,6 +755,38 @@ export class ThreatManager extends EventEmitter {
         velocity: Math.min(mortarVelocity, threatStats.velocity),
       };
       velocity = TrajectoryCalculator.getVelocityVector(launchParams);
+    } else if (launcher.type === ThreatType.BALLISTIC_MISSILE) {
+      // For ballistic missiles, we want a very high arc. We achieve this by
+      // picking a steep launch angle and then calculating the required velocity
+      // to hit the target, capped by the missile's configured max speed.
+      const launchParams = TrajectoryCalculator.calculateLaunchParameters(
+        spawnPosition,
+        targetPosition,
+        threatStats.velocity
+      );
+
+      if (launchParams) {
+        // Force a very high angle for a true ballistic trajectory.
+        const minAngle = 75;
+        const maxAngle = 85;
+        launchParams.angle = minAngle + Math.random() * (maxAngle - minAngle);
+
+        // Recalculate velocity needed for this angle and distance.
+        const distance = spawnPosition.distanceTo(targetPosition);
+        const angleRad = (launchParams.angle * Math.PI) / 180;
+        const g = 9.82;
+        const requiredVelocity = Math.sqrt((distance * g) / Math.sin(2 * angleRad));
+
+        // Use the calculated velocity, but cap it at the missile's configured max speed.
+        launchParams.velocity = Math.min(requiredVelocity, threatStats.velocity);
+
+        velocity = TrajectoryCalculator.getVelocityVector(launchParams);
+      } else {
+        // Fallback if target is out of range for a simple ballistic arc.
+        // Launch at a steep angle towards the target.
+        const direction = targetPosition.clone().sub(spawnPosition).normalize();
+        velocity = direction.multiplyScalar(threatStats.velocity);
+      }
     } else {
       // Regular rockets - calculate launch parameters
       const launchParams = TrajectoryCalculator.calculateLaunchParameters(
@@ -600,10 +807,8 @@ export class ThreatManager extends EventEmitter {
         const g = 9.82;
         const requiredVelocity = Math.sqrt((distance * g) / Math.sin(2 * angleRad));
 
-        // Use calculated velocity if reasonable
-        if (requiredVelocity < threatStats.velocity * 1.5) {
-          launchParams.velocity = requiredVelocity;
-        }
+        // Use calculated velocity, but cap it at the missile's configured max speed.
+        launchParams.velocity = Math.min(requiredVelocity, threatStats.velocity);
 
         velocity = TrajectoryCalculator.getVelocityVector(launchParams);
       } else {
@@ -1346,6 +1551,13 @@ export class ThreatManager extends EventEmitter {
         minInterval: 8000,
         maxInterval: 15000,
       },
+      {
+        type: ThreatType.DECOY,
+        spawnRadius: 900,
+        targetRadius: 150,
+        minInterval: 10000,
+        maxInterval: 25000,
+      },
     ];
 
     switch (threatTypes) {
@@ -1402,6 +1614,22 @@ export class ThreatManager extends EventEmitter {
             maxInterval: 8000,
           },
         ];
+        // Add decoys to the mixed set
+        this.spawnConfigs.push({
+          type: ThreatType.DECOY,
+          spawnRadius: 900,
+          targetRadius: 150,
+          minInterval: 10000,
+          maxInterval: 25000,
+        });
+        // Also add ballistic missiles, but make them rare
+        this.spawnConfigs.push({
+          type: ThreatType.BALLISTIC_MISSILE,
+          spawnRadius: 950, // Launch from far away
+          targetRadius: 150,
+          minInterval: 45000, // Very long interval (45s)
+          maxInterval: 90000, // (90s)
+        });
         break;
       case 'all':
       default:
@@ -1416,11 +1644,14 @@ export class ThreatManager extends EventEmitter {
   }
 
   // Spawn a specific type of threat on demand
-  spawnSpecificThreat(type: 'rocket' | 'mortar' | 'drone' | 'ballistic'): void {
-    let threatType: ThreatType;
+  spawnSpecificThreat(type: string): void {
+    let threatType: ThreatType | undefined;
 
-    switch (type) {
-      case 'rocket':
+    // Normalize type for easier matching
+    const normalizedType = type.toLowerCase().replace(/_/g, '');
+
+    switch (normalizedType) {
+      case 'rocket': {
         // Pick a random rocket type
         const rocketTypes = [
           ThreatType.SHORT_RANGE,
@@ -1430,18 +1661,42 @@ export class ThreatManager extends EventEmitter {
         ];
         threatType = rocketTypes[Math.floor(Math.random() * rocketTypes.length)];
         break;
+      }
+      // Add specific rocket types
+      case 'qassam1':
+        threatType = ThreatType.QASSAM_1;
+        break;
+      case 'qassam2':
+        threatType = ThreatType.QASSAM_2;
+        break;
+      case 'qassam3':
+        threatType = ThreatType.QASSAM_3;
+        break;
+      case 'grad':
+      case 'gradrocket':
+        threatType = ThreatType.GRAD_ROCKET;
+        break;
       case 'mortar':
         threatType = ThreatType.MORTAR;
         break;
-      case 'drone':
+      case 'drone': {
         // Pick a random drone type
         const droneTypes = [ThreatType.DRONE_SLOW, ThreatType.DRONE_FAST];
         threatType = droneTypes[Math.floor(Math.random() * droneTypes.length)];
         break;
+      }
       case 'ballistic':
-        threatType = ThreatType.CRUISE_MISSILE;
+        threatType = ThreatType.BALLISTIC_MISSILE;
         break;
+      case 'decoy':
+        threatType = ThreatType.DECOY;
+        break;
+      default:
+        debug.warn(`[ThreatManager] Unknown specific threat type requested: ${type}`);
+        return;
     }
+
+    if (!threatType) return;
 
     // Create a config for this specific threat
     const config = {
@@ -1502,7 +1757,7 @@ export class ThreatManager extends EventEmitter {
         possibleTypes = [ThreatType.MORTAR];
         break;
       case 'ballistic':
-        possibleTypes = [ThreatType.CRUISE_MISSILE];
+        possibleTypes = [ThreatType.BALLISTIC_MISSILE, ThreatType.CRUISE_MISSILE];
         break;
       case 'mixed':
       default:
@@ -1512,6 +1767,9 @@ export class ThreatManager extends EventEmitter {
           ThreatType.MORTAR,
           ThreatType.DRONE_SLOW,
           ThreatType.QASSAM_1,
+          ThreatType.DECOY,
+          ThreatType.BALLISTIC_MISSILE,
+          ThreatType.CRUISE_MISSILE,
         ];
         break;
     }

@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { Threat } from '../entities/Threat';
+import { Threat, THREAT_CONFIGS } from '../entities/Threat';
 
 /**
  * Invisible radar system that provides detection capabilities without visual elements
@@ -7,6 +7,7 @@ import { Threat } from '../entities/Threat';
 export class InvisibleRadarSystem {
   private detectionRadius: number;
   private detectedThreats: Set<string> = new Set();
+  private sensorLevel: number = 1; // For future upgrades
 
   constructor(detectionRadius: number = 800) {
     this.detectionRadius = detectionRadius;
@@ -22,10 +23,24 @@ export class InvisibleRadarSystem {
     // Detect all threats within range
     threats.forEach(threat => {
       if (threat.isActive) {
-        const distance = threat.getPosition().length(); // Distance from center
-        if (distance <= this.detectionRadius) {
-          this.detectedThreats.add(threat.id);
+        const distance = threat.getPosition().length(); // Distance from center (0,0,0)
+        if (distance > this.detectionRadius) {
+          return; // Out of range, skip
         }
+
+        const config = THREAT_CONFIGS[threat.type];
+        // Default signature if not defined, making existing threats detectable
+        const signature = config.signature || { radar: 1.0, thermal: 1.0, electronic: 1.0 };
+
+        // Level 1 sensor only sees radar signature.
+        // Decoys have radar: 1.0, so they are detected.
+        if (this.sensorLevel >= 1) {
+          if (signature.radar >= 0.5) {
+            // Basic detection threshold
+            this.detectedThreats.add(threat.id);
+          }
+        }
+        // Future upgrades could check other signatures to differentiate decoys.
       }
     });
   }

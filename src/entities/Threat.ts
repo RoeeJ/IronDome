@@ -22,6 +22,9 @@ export enum ThreatType {
   QASSAM_2 = 'QASSAM_2',
   QASSAM_3 = 'QASSAM_3',
   GRAD_ROCKET = 'GRAD_ROCKET',
+  BALLISTIC_MISSILE = 'BALLISTIC_MISSILE',
+  DECOY = 'DECOY',
+  RE_ENTRY_VEHICLE = 'RE_ENTRY_VEHICLE',
 }
 
 export interface ThreatConfig {
@@ -37,6 +40,18 @@ export interface ThreatConfig {
   isDrone?: boolean; // Different physics for drones
   isMortar?: boolean; // High arc trajectory
   rcs?: number; // Radar cross section (affects detection)
+  signature?: {
+    // For decoys vs real threats
+    radar: number; // 1.0 for real, < 1.0 for decoys
+    thermal: number;
+    electronic: number;
+  };
+  flightStages?: {
+    boost: { duration: number; thrust: number };
+    terminal: { speed: number };
+  };
+  payload?: { type: ThreatType; count: number; spread: number };
+  hasTerminalGuidance?: boolean;
 }
 
 export const THREAT_CONFIGS: Record<ThreatType, ThreatConfig> = {
@@ -55,6 +70,7 @@ export const THREAT_CONFIGS: Record<ThreatType, ThreatConfig> = {
     warheadSize: 50,
     color: 0xff6600,
     radius: 0.6,
+    signature: { radar: 1.0, thermal: 1.0, electronic: 1.0 },
   },
   [ThreatType.LONG_RANGE]: {
     velocity: 1000,
@@ -157,6 +173,45 @@ export const THREAT_CONFIGS: Record<ThreatType, ThreatConfig> = {
     radius: 0.5,
     rcs: 0.7,
   },
+
+  [ThreatType.BALLISTIC_MISSILE]: {
+    velocity: 800, // Max velocity cap, not a fixed launch speed.
+    maxRange: 500000,
+    maxAltitude: 40000, // High altitude for ballistic arc
+    warheadSize: 1000,
+    color: 0xcc00ff, // Purple
+    radius: 2.0,
+    rcs: 2.0,
+    payload: { type: ThreatType.RE_ENTRY_VEHICLE, count: 4, spread: 500 },
+  },
+
+  [ThreatType.DECOY]: {
+    velocity: 600, // Same as medium range to be convincing
+    maxRange: 40000,
+    maxAltitude: 10000,
+    warheadSize: 0, // No damage
+    color: 0xaaaaaa, // Grey color
+    radius: 0.6, // Same size as medium range
+    rcs: 1.0, // Same radar cross-section
+    signature: {
+      radar: 1.0, // Looks real on radar
+      thermal: 0.1, // Low thermal signature
+      electronic: 0.1, // Low electronic signature
+    },
+  },
+
+  [ThreatType.RE_ENTRY_VEHICLE]: {
+    velocity: 1500, // High speed, but inherited from parent on spawn. This is a fallback value.
+    maxRange: 80000, // Inherited from parent, not used for launch
+    maxAltitude: 80000, // Inherited from parent
+    warheadSize: 150, // Smaller, tactical warhead
+    color: 0xff4500, // Bright orange/red for re-entry heat
+    radius: 0.5,
+    rcs: 0.3, // Smaller radar cross-section
+    hasTerminalGuidance: true, // This vehicle guides itself
+    signature: { radar: 1.0, thermal: 5.0, electronic: 0.5 }, // High thermal signature
+    // No flight stages or payload, it's a terminal threat
+  },
 };
 
 export interface ThreatOptions extends Omit<ProjectileOptions, 'color' | 'radius' | 'mass'> {
@@ -176,6 +231,12 @@ export class Threat extends Projectile {
   private cruisingPhase: boolean = false;
   private maneuverTimer: number = 0;
   private _isBeingIntercepted: boolean = false;
+
+  // New properties for ballistic threats
+  private flightPhase: 'boost' | 'midcourse' | 'terminal' = 'boost';
+  private phaseTimer: number = 0;
+  public shouldDeployPayload: boolean = false;
+  private hasPassedApex: boolean = false; // For payload deployment logic
 
   constructor(scene: THREE.Scene, world: CANNON.World, options: ThreatOptions) {
     const config = THREAT_CONFIGS[options.type];
@@ -216,6 +277,13 @@ export class Threat extends Projectile {
       this.body.mass = config.warheadSize * 0.5; // Lighter than regular projectiles
       // Lock rotation for drones
       this.body.fixedRotation = true;
+    }
+
+    // Initialize flight phase
+    if (this.config.flightStages) {
+      this.flightPhase = 'boost';
+    } else {
+      this.flightPhase = 'midcourse'; // Default for non-staged threats
     }
   }
 
@@ -286,7 +354,7 @@ export class Threat extends Projectile {
     return this.impactPoint;
   }
 
-  private updateDroneBehavior(): void {
+  private updateDroneBehavior(deltaTime: number): void {
     const currentPos = this.getPosition();
     const targetDir = new THREE.Vector3().subVectors(this.targetPosition, currentPos);
 
@@ -349,7 +417,7 @@ export class Threat extends Projectile {
         }
 
         // Add some random maneuvering
-        this.maneuverTimer += 0.016;
+        this.maneuverTimer += deltaTime;
         if (this.config.maneuverability && this.maneuverTimer > 0.5) {
           const maneuver = new CANNON.Vec3(
             (Math.random() - 0.5) * this.config.maneuverability * 10,
@@ -398,12 +466,94 @@ export class Threat extends Projectile {
     }
   }
 
-  update(): void {
+  private updateBallisticBehavior(deltaTime: number): void {
+    if (!this.config.flightStages) return;
+
+    this.phaseTimer += deltaTime;
+
+    switch (this.flightPhase) {
+      case 'boost':
+        // Apply thrust along velocity vector
+        const thrustForce = this.getVelocity()
+          .normalize()
+          .multiplyScalar(this.config.flightStages.boost.thrust);
+        this.body.applyForce(new CANNON.Vec3(thrustForce.x, thrustForce.y, thrustForce.z));
+
+        if (this.phaseTimer >= this.config.flightStages.boost.duration) {
+          this.flightPhase = 'midcourse';
+          this.phaseTimer = 0;
+        }
+        break;
+
+      case 'midcourse':
+        // Coasting phase (gravity is already applied by physics engine)
+        // Check for apex to deploy payload
+        if (this.config.payload && this.getVelocity().y <= 0 && !this.shouldDeployPayload) {
+          this.shouldDeployPayload = true;
+          this.flightPhase = 'terminal'; // Move to terminal after payload deployment
+        } else if (this.getVelocity().y <= 0) {
+          this.flightPhase = 'terminal';
+        }
+        break;
+
+      case 'terminal':
+        // The main bus of the ballistic missile does not have a terminal guidance phase.
+        // It deploys its payload and then becomes inert, following a ballistic trajectory
+        // until it's removed from the simulation. The spawned RE_ENTRY_VEHICLEs have their own guidance.
+        break;
+    }
+  }
+
+  private updateTerminalGuidance(deltaTime: number): void {
+    if (!this.targetPosition) return;
+
+    const currentPos = this.getPosition();
+    const targetPos = this.targetPosition;
+
+    // Proportional navigation towards the ground target
+    const toTarget = new THREE.Vector3().subVectors(targetPos, currentPos);
+    const distanceToTarget = toTarget.length();
+
+    // If very close, just continue straight
+    if (distanceToTarget < 50) {
+      return;
+    }
+
+    const currentVel = this.getVelocity();
+    const currentSpeed = currentVel.length();
+
+    // Don't guide if speed is too low
+    if (currentSpeed < 100) return;
+
+    // Calculate desired velocity vector
+    const desiredVel = toTarget.normalize().multiplyScalar(currentSpeed);
+
+    // Calculate the required change in velocity
+    const velocityError = desiredVel.sub(currentVel);
+
+    // Apply a correction force. The gain determines how quickly it corrects.
+    // A higher gain makes it more agile.
+    const gain = this.body.mass * 5; // High gain for fast correction
+    const correctionForce = velocityError.multiplyScalar(gain);
+
+    // Limit the correction force to simulate realistic maneuverability
+    const maxForce = this.body.mass * 50000; // High G-force tolerance
+    if (correctionForce.lengthSq() > maxForce * maxForce) {
+      correctionForce.normalize().multiplyScalar(maxForce);
+    }
+
+    this.body.applyForce(new CANNON.Vec3(correctionForce.x, correctionForce.y, correctionForce.z));
+  }
+
+  update(deltaTime: number): void {
     super.update();
 
-    // Special behaviors based on threat type
-    if (this.config.isDrone) {
-      this.updateDroneBehavior();
+    if (this.config.flightStages) {
+      this.updateBallisticBehavior(deltaTime);
+    } else if (this.config.hasTerminalGuidance) {
+      this.updateTerminalGuidance(deltaTime);
+    } else if (this.config.isDrone) {
+      this.updateDroneBehavior(deltaTime);
 
       // Keep drone level - override any rotation from physics
       this.mesh.rotation.x = 0;
@@ -426,6 +576,23 @@ export class Threat extends Projectile {
       }
     } else if (this.config.cruiseAltitude && !this.config.isDrone) {
       this.updateCruiseMissileBehavior();
+    }
+
+    // Apex detection for payload deployment on non-staged ballistic missiles
+    if (
+      this.config.payload &&
+      !this.config.flightStages && // Only for our simplified ballistic missiles
+      !this.shouldDeployPayload // Only if payload hasn't been deployed
+    ) {
+      const currentVelocity = this.getVelocity();
+      if (!this.hasPassedApex && currentVelocity.y <= 0) {
+        this.hasPassedApex = true;
+      }
+
+      // Deploy when descending below 80% of max altitude
+      if (this.hasPassedApex && this.getPosition().y < this.config.maxAltitude * 0.8) {
+        this.shouldDeployPayload = true;
+      }
     }
 
     // Orient all non-drone threats along velocity

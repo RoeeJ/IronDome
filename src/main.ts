@@ -76,7 +76,7 @@ const camera = new THREE.PerspectiveCamera(
   75,
   window.innerWidth / window.innerHeight,
   0.1,
-  5000 // Extended far plane for much larger world
+  200000 // Greatly extended far plane for ballistic missile tracking
 );
 camera.position.set(150, 80, 150); // Moved camera further back for better overview
 camera.lookAt(0, 0, 0);
@@ -130,8 +130,8 @@ const materialCache = MaterialCache.getInstance();
 const controls = new OrbitControls(camera, renderer.domElement);
 controls.enableDamping = true;
 controls.dampingFactor = 0.05;
-controls.minDistance = 20;
-controls.maxDistance = 1000; // Further increased for extended world
+controls.minDistance = 10;
+controls.maxDistance = 100000; // Greatly increased for ballistic missile tracking
 controls.maxPolarAngle = Math.PI / 2 - 0.1; // Prevent going below ground
 
 // Enable touch controls for mobile
@@ -1685,7 +1685,7 @@ function animate() {
     world.step(1 / 60, scaledDelta, 3);
 
     // Update threat manager
-    threatManager.update();
+    threatManager.update(deltaTime);
 
     // Update all batteries (includes health bar orientation and reloading)
     const allBatteries = domePlacementSystem.getAllBatteries();
