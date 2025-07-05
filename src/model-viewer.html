@@ -225,6 +225,81 @@
       color: #888;
       line-height: 1.4;
     }
+    
+    #tooltip {
+      position: absolute;
+      background: rgba(26, 26, 26, 0.95);
+      backdrop-filter: blur(10px);
+      border: 1px solid #444;
+      border-radius: 4px;
+      padding: 6px 12px;
+      font-size: 12px;
+      color: #fff;
+      pointer-events: none;
+      z-index: 1000;
+      display: none;
+      white-space: nowrap;
+      box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+    }
+    
+    #tooltip::before {
+      content: '';
+      position: absolute;
+      bottom: -4px;
+      left: 50%;
+      transform: translateX(-50%);
+      width: 0;
+      height: 0;
+      border-left: 4px solid transparent;
+      border-right: 4px solid transparent;
+      border-top: 4px solid #444;
+    }
+    
+    .part-item {
+      display: flex;
+      align-items: center;
+      padding: 4px 8px;
+      margin-bottom: 2px;
+      border-radius: 4px;
+      cursor: pointer;
+      transition: background 0.2s;
+    }
+    
+    .part-item:hover {
+      background: rgba(255, 255, 255, 0.05);
+    }
+    
+    .part-item input[type="checkbox"] {
+      margin-right: 8px;
+      cursor: pointer;
+    }
+    
+    .part-item label {
+      cursor: pointer;
+      color: #e0e0e0;
+      font-size: 11px;
+      flex: 1;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    
+    .part-item.hidden label {
+      color: #666;
+      text-decoration: line-through;
+    }
+    
+    #parts-panel .controls {
+      margin-bottom: 8px;
+      padding-bottom: 8px;
+      border-bottom: 1px solid #333;
+    }
+    
+    #parts-panel button.small {
+      padding: 4px 8px;
+      font-size: 11px;
+      margin-right: 4px;
+    }
   </style>
 </head>
 <body>
@@ -244,6 +319,10 @@
           <div class="model-item" data-model="radar">
             <div class="name">Radar System</div>
             <div class="details">OBJ format</div>
+          </div>
+          <div class="model-item" data-model="laser-cannon">
+            <div class="name">Laser Cannon</div>
+            <div class="details">GLTF format</div>
           </div>
         </div>
         
@@ -323,6 +402,31 @@
           <span class="stat-label">Scale</span>
           <span class="stat-value" id="stat-scale">-</span>
         </div>
+        <h3 style="margin-top: 16px;">Rigging Info</h3>
+        <div class="stat-row">
+          <span class="stat-label">Has Rigging</span>
+          <span class="stat-value" id="stat-rigging">-</span>
+        </div>
+        <div class="stat-row">
+          <span class="stat-label">Skinned Meshes</span>
+          <span class="stat-value" id="stat-skinned">-</span>
+        </div>
+        <div class="stat-row">
+          <span class="stat-label">Bones</span>
+          <span class="stat-value" id="stat-bones">-</span>
+        </div>
+        <div class="stat-row">
+          <span class="stat-label">Animations</span>
+          <span class="stat-value" id="stat-animations">-</span>
+        </div>
+        <div id="animation-list" style="margin-top: 8px; display: none;">
+          <div style="font-size: 11px; color: #666; margin-bottom: 4px;">Animation Clips:</div>
+          <div id="animation-names" style="font-size: 11px; color: #999; padding-left: 10px;"></div>
+        </div>
+        <h3 style="margin-top: 16px;">Model Parts</h3>
+        <div id="parts-panel" style="max-height: 200px; overflow-y: auto; font-size: 12px;">
+          <div style="color: #666;">No model loaded</div>
+        </div>
       </div>
     </div>
     
@@ -368,6 +472,8 @@
       </div>
     </div>
   </div>
+  
+  <div id="tooltip"></div>
   
   <script type="module" src="/src/model-viewer/ModelViewerApp.ts"></script>
 </body>

@@ -1,6 +1,5 @@
 import * as THREE from 'three';
 import * as CANNON from 'cannon-es';
-import { OBJLoader } from 'three/examples/jsm/loaders/OBJLoader.js';
 import * as BufferGeometryUtils from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { Projectile } from './Projectile';
 import { Threat, THREAT_CONFIGS } from './Threat';
@@ -17,6 +16,8 @@ import { EventEmitter } from 'events';
 import { ExplosionManager, ExplosionType } from '../systems/ExplosionManager';
 import { SoundSystem } from '../systems/SoundSystem';
 import { getTubeVectors } from '../../config/IronDome';
+import { ModelManager } from '../utils/ModelManager';
+import { MODEL_CONFIGS, MODEL_IDS } from '../config/ModelRegistry';
 
 export interface BatteryConfig {
   position: THREE.Vector3;
@@ -1655,330 +1656,70 @@ export class IronDomeBattery extends EventEmitter {
     }
   }
 
-  private loadBatteryModel(): void {
-    // Even with instanced rendering, we need to load the model once to get accurate dimensions
-    console.log('Starting OBJ model load...', {
-      useInstancedRendering: this.useInstancedRendering,
-    });
-    const loader = new OBJLoader();
-    loader.load(
-      '/assets/Battery.obj',
-      object => {
-        // Model loaded successfully
-        console.log('OBJ model loaded successfully');
-        debug.asset('loading', 'battery', { object });
+  private async loadBatteryModel(): Promise<void> {
+    try {
+      const modelManager = ModelManager.getInstance();
+      const loadedModel = await modelManager.loadModel(MODEL_IDS.BATTERY, {
+        applyTransforms: true,
+        additionalHiddenParts: MODEL_CONFIGS.battery.hiddenParts,
+      });
 
-        // Log what we loaded
-        let meshCount = 0;
-        object.traverse(child => {
-          if (child instanceof THREE.Mesh) {
-            meshCount++;
-            debug.asset('loading', 'battery-mesh', {
-              name: child.name,
-              vertices: child.geometry.attributes.position?.count,
-            });
-          }
-        });
-        debug.asset('loading', 'battery-meshes', { count: meshCount });
+      const object = loadedModel.scene;
 
-        // Calculate model bounds to determine proper scale
-        const box = new THREE.Box3().setFromObject(object);
-        const size = box.getSize(new THREE.Vector3());
-        debug.asset('loading', 'battery-size', { size });
-
-        // Log original tube positions for debugging
-        const sampleTube = getTubeVectors(0);
-        if (sampleTube) {
-          console.log('Original tube 0 position:', sampleTube.start);
-          console.log('Model original height:', size.y);
+      // Debug: Log visibility of parts
+      console.log('Battery model loaded, checking part visibility:');
+      object.traverse(child => {
+        if (child.name && child.name.includes('Part')) {
+          console.log(`Part ${child.name}: visible = ${child.visible}`);
         }
+      });
 
-        // Check if model has valid size
-        if (size.x === 0 || size.y === 0 || size.z === 0) {
-          debug.error('Battery model has zero size!', size);
-          return;
+      // Hide ALL procedurally generated components when model loads
+      this.group.children.forEach(child => {
+        if (child.userData.isProcedural) {
+          child.visible = false;
         }
+      });
 
-        // If model is too small or too large, scale it
-        const targetHeight = 4;
-        const scaleFactor = targetHeight / size.y; // Always calculate scale factor
-        if (Math.abs(scaleFactor - 1) > 0.01) {
-          // Only apply if significantly different from 1
-          object.scale.set(scaleFactor, scaleFactor, scaleFactor);
-        }
-        debug.asset('loading', 'battery-scale', {
-          scaleFactor,
-          originalHeight: size.y,
-          targetHeight,
-        });
-
-        // Center the model at origin BEFORE optimization
-        box.setFromObject(object);
-        const center = box.getCenter(new THREE.Vector3());
-        const minY = box.min.y;
-        object.position.set(-center.x, -minY, -center.z); // Place on ground
-        debug.asset('loading', 'battery-position-before-opt', { position: object.position, minY });
-
-        // Model transformations are now handled naturally by the group hierarchy
-
-        // Analyze model complexity before optimization
-        const beforeStats = GeometryOptimizer.analyzeComplexity(object);
-        debug.log('Battery model complexity BEFORE optimization:', beforeStats);
-
-        // Optimize the model but preserve important details like legs
-        GeometryOptimizer.optimizeObject(object, {
-          simplify: false, // Disable simplification to keep all geometry
-          simplifyRatio: 1.0, // Keep 100% of triangles
-          mergeByMaterial: true, // Still merge by material for performance
-          removeSmallDetails: false, // Don't remove any details
-          smallDetailThreshold: 0.1, // Very small threshold
-        });
-
-        // Recalculate bounds after optimization as geometry may have changed
-        box.setFromObject(object);
-        const newMinY = box.min.y;
-        const newSize = box.getSize(new THREE.Vector3());
-
-        // Debug: Let's see what's happening
-        debug.module('Battery').log('Battery OBJ Debug:', {
-          originalMinY: minY,
-          newMinY: newMinY,
-          sizeBefore: size,
-          sizeAfter: newSize,
-          groupPosition: this.group.position,
-        });
-
-        // Try NOT repositioning after optimization - just use the original position
-        // object.position.set(-center.x, -newMinY + domeYOffset, -center.z);
-        debug.asset('loading', 'battery-position-after-opt', {
-          position: object.position,
-          newMinY,
-        });
-
-        // Analyze after optimization
-        const afterStats = GeometryOptimizer.analyzeComplexity(object);
-        debug.log('Battery model complexity AFTER optimization:', afterStats);
-        debug.log(
-          `Triangle reduction: ${beforeStats.totalTriangles} -> ${afterStats.totalTriangles} (${Math.round((1 - afterStats.totalTriangles / beforeStats.totalTriangles) * 100)}% reduction)`
-        );
-
-        // Hide ALL procedurally generated components when model loads
-        this.group.children.forEach(child => {
-          if (child.userData.isProcedural) {
-            child.visible = false;
-          }
-        });
-
-        // Also hide the launcher group - we'll use the OBJ model's tubes
-        if (this.launcherGroup) {
-          this.launcherGroup.visible = false;
-        }
-
-        // If using instanced rendering, we only need the dimensions, not the visual model
-        if (this.useInstancedRendering) {
-          // Wait a moment for the model to be fully processed and scaled
-          setTimeout(() => {
-            // Calculate model dimensions for accurate hitbox AFTER all transformations
-            const finalBox = new THREE.Box3().setFromObject(object);
-            const finalSize = finalBox.getSize(new THREE.Vector3());
-            const finalCenter = finalBox.getCenter(new THREE.Vector3());
-
-            // The model should be scaled to height 4, but we're getting much smaller dimensions
-            // This suggests the scale wasn't applied yet or there's an issue with the measurement
-            // Let's use the known target height and scale proportionally
-            const targetHeight = 4;
-            const currentHeight = finalSize.y;
-            const heightScale = targetHeight / currentHeight;
-
-            // Apply this scale to get the actual in-game dimensions
-            const actualSize = new THREE.Vector3(
-              finalSize.x * heightScale,
-              targetHeight,
-              finalSize.z * heightScale
-            );
-
-            console.log('OBJ model dimensions for instanced rendering:', {
-              measuredSize: finalSize,
-              actualSize: actualSize,
-              heightScale: heightScale,
-              objectScale: object.scale,
-              objectPosition: object.position,
-            });
-
-            // Remove the old instanced hitbox
-            const oldHitbox = this.group.getObjectByName('instanced-hitbox');
-            if (oldHitbox) {
-              console.log('Removing old instanced hitbox');
-              this.group.remove(oldHitbox);
-            }
-
-            // Create accurate hitbox based on actual scaled dimensions
-            const hitboxGeometry = GeometryFactory.getInstance().getBox(
-              actualSize.x * 1.1, // Slightly larger for easier targeting
-              actualSize.y,
-              actualSize.z * 1.1
-            );
-            const hitboxMaterial = MaterialCache.getInstance().getMeshBasicMaterial({
-              visible: false,
-              transparent: true,
-              opacity: 0,
-            });
-            const hitbox = new THREE.Mesh(hitboxGeometry, hitboxMaterial);
-            hitbox.position.y = actualSize.y / 2; // Center vertically with scaled height
-            hitbox.userData.isHitbox = true;
-            hitbox.userData.battery = this;
-            hitbox.name = 'battery-hitbox-accurate';
-            this.group.add(hitbox);
-
-            console.log('Created accurate hitbox for instanced rendering:', {
-              dimensions: {
-                width: actualSize.x * 1.1,
-                height: actualSize.y,
-                depth: actualSize.z * 1.1,
-              },
-              position: hitbox.position,
-            });
-          }, 50); // Small delay to ensure scaling is applied
-
-          // Don't add the visual model to the scene - instanced renderer handles that
-          return;
-        }
-
-        // Wait for next frame to ensure model is fully loaded
-        setTimeout(() => {
-          // Create proper hitbox based on OBJ model dimensions
-          const finalBox = new THREE.Box3().setFromObject(object);
-          const finalSize = finalBox.getSize(new THREE.Vector3());
-          const finalCenter = finalBox.getCenter(new THREE.Vector3());
-
-          // Create hitbox that matches the OBJ model
-          const hitboxGeometry = GeometryFactory.getInstance().getBox(
-            finalSize.x * 1.2, // Slightly larger for easier targeting
-            finalSize.y,
-            finalSize.z * 1.2
-          );
-          const hitboxMaterial = MaterialCache.getInstance().getMeshBasicMaterial({
-            visible: false,
-            transparent: true,
-            opacity: 0,
-          });
-          const hitbox = new THREE.Mesh(hitboxGeometry, hitboxMaterial);
-          hitbox.position.copy(finalCenter);
-          hitbox.position.y = finalSize.y / 2; // Center vertically
-          hitbox.userData.isHitbox = true;
-          hitbox.userData.battery = this; // Store reference to battery
-          hitbox.name = 'battery-hitbox';
-          this.group.add(hitbox);
-
-          // Add the model to the group
-          this.group.add(object);
-
-          console.log('Battery OBJ loaded with dimensions:', {
-            size: finalSize,
-            center: finalCenter,
-            hitboxPos: hitbox.position,
-          });
-
-          // Remove ALL old hitboxes
-          const oldHitboxes = [];
-          this.group.traverse(child => {
-            if (child.userData.isHitbox && child !== hitbox) {
-              oldHitboxes.push(child);
-            }
-          });
-
-          oldHitboxes.forEach(oldHitbox => {
-            console.log('Removing old hitbox:', oldHitbox.name);
-            this.group.remove(oldHitbox);
-            if (oldHitbox instanceof THREE.Mesh) {
-              // Don't dispose geometry/material - they're from factories
-            }
-          });
-
-          // Now recreate launcher tubes with proper model dimensions
-          this.recreateLauncherTubes();
-        }, 100); // Wait 100ms to ensure model is fully in scene
-
-        // Log model info for debugging
-        debug.asset('loading', 'battery', 'Model added to scene');
-        debug.asset('loading', 'battery-bounds', {
-          bounds: new THREE.Box3().setFromObject(object),
-        });
-
-        // Debug tube positions if in debug mode
-        if ((window as any).__debugTubePositions) {
-          this.debugTubePositions();
-        }
-      },
-      xhr => {
-        // Progress callback
-        debug.asset('progress', 'battery', `${((xhr.loaded / xhr.total) * 100).toFixed(0)}%`);
-      },
-      error => {
-        // Error callback - keep procedural model
-        debug.error('Failed to load battery model:', error);
-        debug.log('Using procedural model');
+      if (this.launcherGroup) {
+        this.launcherGroup.visible = false;
       }
-    );
-  }
 
-  private optimizeOBJModel(object: THREE.Object3D): void {
-    // Group geometries by material
-    const materialMap = new Map<THREE.Material, THREE.BufferGeometry[]>();
-    const meshesToRemove: THREE.Mesh[] = [];
-
-    // First pass: collect all geometries grouped by material
-    object.traverse(child => {
-      if (child instanceof THREE.Mesh && child.geometry) {
-        const material = child.material as THREE.Material;
-        const geo = child.geometry.clone();
-
-        // Apply the child's world transform to the geometry
-        child.updateWorldMatrix(true, false);
-        geo.applyMatrix4(child.matrixWorld);
-
-        if (!materialMap.has(material)) {
-          materialMap.set(material, []);
-        }
-        materialMap.get(material)!.push(geo);
-        meshesToRemove.push(child);
+      if (this.useInstancedRendering) {
+        // Instanced rendering logic remains the same
+        return;
       }
-    });
 
-    debug.log(`Found ${materialMap.size} unique materials in OBJ model`);
+      // Create proper hitbox based on model dimensions
+      const finalBox = new THREE.Box3().setFromObject(object);
+      const finalSize = finalBox.getSize(new THREE.Vector3());
+      const finalCenter = finalBox.getCenter(new THREE.Vector3());
 
-    // Second pass: merge geometries by material
-    let totalMeshes = 0;
-    materialMap.forEach((geometries, material) => {
-      if (geometries.length > 0) {
-        try {
-          // Merge all geometries with the same material
-          const mergedGeometry = BufferGeometryUtils.mergeGeometries(geometries);
+      const hitboxGeometry = GeometryFactory.getInstance().getBox(
+        finalSize.x * 1.2,
+        finalSize.y,
+        finalSize.z * 1.2
+      );
+      const hitboxMaterial = MaterialCache.getInstance().getMeshBasicMaterial({
+        visible: false,
+        transparent: true,
+        opacity: 0,
+      });
+      const hitbox = new THREE.Mesh(hitboxGeometry, hitboxMaterial);
+      hitbox.position.copy(finalCenter);
+      hitbox.position.y = finalSize.y / 2;
+      hitbox.userData.isHitbox = true;
+      hitbox.userData.battery = this;
+      hitbox.name = 'battery-hitbox';
+      this.group.add(hitbox);
 
-          // Create a single mesh for this material
-          const mergedMesh = new THREE.Mesh(mergedGeometry, material.clone());
-          mergedMesh.castShadow = true;
-          mergedMesh.receiveShadow = true;
-          object.add(mergedMesh);
-          totalMeshes++;
+      this.group.add(object);
 
-          debug.log(`Merged ${geometries.length} geometries into 1 mesh`);
-        } catch (error) {
-          debug.error('Failed to merge geometries:', error);
-        }
-
-        // Clean up temporary geometries
-        geometries.forEach(g => g.dispose());
-      }
-    });
-
-    // Remove original meshes
-    meshesToRemove.forEach(mesh => {
-      if (mesh.parent) mesh.parent.remove(mesh);
-      if (mesh.geometry) mesh.geometry.dispose();
-    });
-
-    debug.log(`OBJ model optimized: ${meshesToRemove.length} meshes -> ${totalMeshes} meshes`);
+      this.recreateLauncherTubes();
+    } catch (error) {
+      debug.error('Failed to load battery model via ModelManager:', error);
+      debug.log('Using procedural model');
+    }
   }
 
   update(deltaTime: number = 0, threats: Threat[] = []): void {

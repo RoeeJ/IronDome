@@ -15,6 +15,13 @@ export interface ModelStatistics {
     center: THREE.Vector3;
   };
   memoryEstimate: string;
+  // Rigging information
+  hasRigging: boolean;
+  skinnedMeshes: number;
+  bones: number;
+  animations: number;
+  animationNames: string[];
+  boneNames: string[];
 }
 
 export class ModelInfo {
@@ -34,13 +41,45 @@ export class ModelInfo {
         center: new THREE.Vector3(),
       },
       memoryEstimate: '0 KB',
+      // Initialize rigging properties
+      hasRigging: false,
+      skinnedMeshes: 0,
+      bones: 0,
+      animations: 0,
+      animationNames: [],
+      boneNames: [],
     };
 
     const textures = new Set<THREE.Texture>();
     const materials = new Set<THREE.Material>();
+    const bones = new Set<THREE.Bone>();
     const box = new THREE.Box3();
 
     model.traverse(child => {
+      // Check for bones
+      if (child instanceof THREE.Bone) {
+        bones.add(child);
+        if (child.name) {
+          stats.boneNames.push(child.name);
+        }
+      }
+
+      // Check for SkinnedMesh
+      if (child instanceof THREE.SkinnedMesh) {
+        stats.skinnedMeshes++;
+        stats.hasRigging = true;
+
+        // Analyze skeleton if present
+        if (child.skeleton) {
+          child.skeleton.bones.forEach(bone => {
+            bones.add(bone);
+            if (bone.name && !stats.boneNames.includes(bone.name)) {
+              stats.boneNames.push(bone.name);
+            }
+          });
+        }
+      }
+
       if (child instanceof THREE.Mesh) {
         stats.meshes++;
         stats.drawCalls++;
@@ -82,6 +121,17 @@ export class ModelInfo {
         }
       }
     });
+
+    stats.bones = bones.size;
+
+    // Check for animations on the model
+    if ('animations' in model && Array.isArray(model.animations)) {
+      stats.animations = model.animations.length;
+      stats.animationNames = model.animations.map(clip => clip.name || 'Unnamed Animation');
+      if (stats.animations > 0) {
+        stats.hasRigging = true;
+      }
+    }
 
     stats.textures = textures.size;
     stats.materials = materials.size;

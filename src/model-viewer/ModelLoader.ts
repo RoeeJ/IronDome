@@ -141,8 +141,11 @@ export class ModelLoader {
             }
           });
 
+          // Attach animations to the model for later use
           if (gltf.animations && gltf.animations.length > 0) {
             console.log(`Model has ${gltf.animations.length} animations`);
+            // Store animations on the model object for later access
+            (model as any).animations = gltf.animations;
           }
 
           resolve(model);
@@ -182,7 +185,7 @@ export class ModelLoader {
       this.textureLoader.load(
         path,
         texture => {
-          texture.encoding = THREE.sRGBEncoding;
+          texture.colorSpace = THREE.SRGBColorSpace;
           texture.anisotropy = 16;
           resolve(texture);
         },

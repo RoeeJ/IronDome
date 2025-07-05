@@ -1,9 +1,9 @@
 import * as THREE from 'three';
-import { OBJLoader } from 'three/examples/jsm/loaders/OBJLoader.js';
 import * as BufferGeometryUtils from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { IronDomeBattery } from '../entities/IronDomeBattery';
 import { debug } from '../utils/logger';
 import { GeometryOptimizer } from '../utils/GeometryOptimizer';
+import { ModelManager } from '../utils/ModelManager';
 
 export class InstancedOBJDomeRenderer {
   private scene: THREE.Scene;
@@ -34,24 +34,17 @@ export class InstancedOBJDomeRenderer {
   }
 
   private async loadOBJModel(): Promise<void> {
-    const loader = new OBJLoader();
-
     try {
-      const object = await new Promise<THREE.Group>((resolve, reject) => {
-        loader.load(
-          '/assets/Battery.obj',
-          obj => resolve(obj),
-          progress => debug.log('Loading OBJ for instanced rendering...', progress),
-          error => reject(error)
-        );
-      });
+      // Use ModelManager to load the battery model with hidden parts
+      const modelManager = ModelManager.getInstance();
+      const loadedModel = await modelManager.loadModel('battery');
 
       // Analyze model complexity before optimization
-      const beforeStats = GeometryOptimizer.analyzeComplexity(object);
+      const beforeStats = GeometryOptimizer.analyzeComplexity(loadedModel.scene);
       debug.log('Battery OBJ complexity BEFORE optimization:', beforeStats);
 
       // Optimize the model but preserve important details like legs
-      GeometryOptimizer.optimizeObject(object, {
+      GeometryOptimizer.optimizeObject(loadedModel.scene, {
         simplify: false, // Disable simplification to keep all geometry
         simplifyRatio: 1.0, // Keep 100% of triangles
         mergeByMaterial: true, // Still merge by material for performance
@@ -59,15 +52,22 @@ export class InstancedOBJDomeRenderer {
         smallDetailThreshold: 0.1, // Very small threshold
       });
 
-      const afterStats = GeometryOptimizer.analyzeComplexity(object);
+      const afterStats = GeometryOptimizer.analyzeComplexity(loadedModel.scene);
       debug.log('Battery OBJ complexity AFTER optimization:', afterStats);
 
       // Process the optimized OBJ model
       const geometries: THREE.BufferGeometry[] = [];
       const materials: THREE.Material[] = [];
 
-      object.traverse(child => {
-        if (child instanceof THREE.Mesh && child.geometry) {
+      // Only collect geometries from visible parts
+      debug.log('InstancedOBJDomeRenderer: Traversing loaded model parts:');
+      loadedModel.scene.traverse(child => {
+        if (child.name) {
+          debug.log(`  Part: ${child.name}, visible: ${child.visible}, type: ${child.type}`);
+        }
+
+        if (child instanceof THREE.Mesh && child.geometry && child.visible) {
+          debug.log(`  Adding visible mesh: ${child.name || 'unnamed'}`);
           const geo = child.geometry.clone();
           geo.applyMatrix4(child.matrixWorld);
           geometries.push(geo);
@@ -76,8 +76,13 @@ export class InstancedOBJDomeRenderer {
           if (child.material && !materials.includes(child.material)) {
             materials.push(child.material as THREE.Material);
           }
+        } else if (child instanceof THREE.Mesh && child.geometry && !child.visible) {
+          debug.log(`  Skipping hidden mesh: ${child.name || 'unnamed'}`);
         }
       });
+
+      debug.log(`InstancedOBJDomeRenderer: Collected ${geometries.length} visible geometries`);
+      debug.log(`Hidden parts from model: ${loadedModel.hiddenParts.join(', ')}`);
 
       if (geometries.length === 0) {
         debug.error('No geometries found in OBJ model');

@@ -100,7 +100,7 @@ export class GeometryOptimizer {
       const meshesToRemove: THREE.Mesh[] = [];
 
       object.traverse(child => {
-        if (child instanceof THREE.Mesh && child.geometry) {
+        if (child instanceof THREE.Mesh && child.geometry && child.visible) {
           const material = Array.isArray(child.material) ? child.material[0] : child.material;
 
           if (!materialMap.has(material)) {

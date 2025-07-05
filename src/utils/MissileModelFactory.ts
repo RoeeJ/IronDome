@@ -2,6 +2,8 @@ import * as THREE from 'three';
 import { ThreatType, ThreatConfig } from '../entities/Threat';
 import { GeometryFactory } from './GeometryFactory';
 import { MaterialCache } from './MaterialCache';
+import { ModelManager } from './ModelManager';
+import { ModelId, MODEL_IDS } from '../config/ModelRegistry';
 
 export class MissileModelFactory {
   private static instance: MissileModelFactory | null = null;
@@ -51,11 +53,48 @@ export class MissileModelFactory {
   }
 
   createInterceptorModel(color: number = 0x00ffff): THREE.Object3D {
+    // For now, always use procedural model to avoid async issues
+    // TODO: Implement background loading system
+    return this.createProceduralInterceptorModel(color);
+  }
+
+  async createInterceptorModelAsync(color: number = 0x00ffff): Promise<THREE.Object3D> {
+    // Try to load a real Tamir model if available
+    try {
+      const modelManager = ModelManager.getInstance();
+      // Use ultra-simple version for performance in game
+      const model = await modelManager.loadModel(MODEL_IDS.TAMIR_ULTRA, {
+        applyTransforms: true,
+      });
+
+      // Apply color tint to the model
+      model.scene.traverse(child => {
+        if (child instanceof THREE.Mesh && child.material) {
+          const materials = Array.isArray(child.material) ? child.material : [child.material];
+          materials.forEach(mat => {
+            if ('color' in mat) {
+              // Blend the original color with the requested color
+              mat.color.multiplyScalar(0.5).add(new THREE.Color(color).multiplyScalar(0.5));
+            }
+          });
+        }
+      });
+
+      return model.scene;
+    } catch (error) {
+      // Fallback to procedural model if loading fails
+      console.warn('Failed to load Tamir model, using procedural fallback', error);
+      return this.createProceduralInterceptorModel(color);
+    }
+  }
+
+  // Keep the procedural model as a fallback
+  private createProceduralInterceptorModel(color: number = 0x00ffff): THREE.Object3D {
     const group = new THREE.Group();
 
     // Main body - sleek cylinder (no rotation, keep it along Y axis)
     const bodyGeometry = this.geometryFactory.getCylinder(0.15, 0.2, 1.5, 8);
-    const bodyMaterial = this.materialCache.getMeshStandardMaterial({
+    const bodyMaterial = this.materialCache.getMeshEmissiveMaterial({
       color: color,
       roughness: 0.2,
       metalness: 0.8,

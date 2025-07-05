@@ -3,6 +3,8 @@ import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { ModelLoader } from './ModelLoader';
 import { ModelInfo } from './ModelInfo';
 import { ViewerControls } from './ViewerControls';
+import { ModelManager } from '../utils/ModelManager';
+import { MODEL_CONFIGS, ModelId, getModelsByCategory } from '../config/ModelRegistry';
 
 interface ModelConfig {
   id: string;
@@ -28,6 +30,15 @@ export class ModelViewerApp {
   private orbitRadius = 8;
   private orbitHeight = 5;
 
+  // Raycasting for hover
+  private raycaster = new THREE.Raycaster();
+  private mouse = new THREE.Vector2();
+  private hoveredObject: THREE.Object3D | null = null;
+  private tooltip: HTMLElement;
+
+  // Parts management
+  private modelParts: Map<string, THREE.Object3D> = new Map();
+
   private models: ModelConfig[] = [
     {
       id: 'battery',
@@ -37,6 +48,12 @@ export class ModelViewerApp {
       scale: 0.01,
     },
     { id: 'radar', name: 'Radar System', path: '/assets/Radar.obj', type: 'obj', scale: 0.01 },
+    {
+      id: 'laser-cannon',
+      name: 'Laser Cannon',
+      path: '/assets/laser_cannon/scene.gltf',
+      type: 'gltf',
+    },
     {
       id: 'tamir-original',
       name: 'Tamir Original',
@@ -78,6 +95,9 @@ export class ModelViewerApp {
   constructor() {
     this.scene = new THREE.Scene();
     this.scene.background = new THREE.Color(0x0a0a0a);
+
+    // Get tooltip element
+    this.tooltip = document.getElementById('tooltip')!;
 
     const canvas = document.getElementById('canvas') as HTMLCanvasElement;
     this.renderer = new THREE.WebGLRenderer({
@@ -212,6 +232,77 @@ export class ModelViewerApp {
         }
       }
     });
+
+    // Mouse move for hover detection
+    this.renderer.domElement.addEventListener('mousemove', this.onMouseMove.bind(this));
+    this.renderer.domElement.addEventListener('mouseleave', this.onMouseLeave.bind(this));
+  }
+
+  private onMouseMove(event: MouseEvent): void {
+    if (!this.currentModel) return;
+
+    // Calculate mouse position in normalized device coordinates
+    const rect = this.renderer.domElement.getBoundingClientRect();
+    this.mouse.x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
+    this.mouse.y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
+
+    // Update the raycaster
+    this.raycaster.setFromCamera(this.mouse, this.camera);
+
+    // Find intersections
+    const intersects = this.raycaster.intersectObject(this.currentModel, true);
+
+    if (intersects.length > 0) {
+      const intersected = intersects[0].object;
+
+      if (intersected !== this.hoveredObject) {
+        this.hoveredObject = intersected;
+
+        // Get the name of the intersected object or its parent
+        let partName = intersected.name;
+        let parent = intersected.parent;
+
+        // If the object itself doesn't have a name, check its parents
+        while (!partName && parent && parent !== this.currentModel) {
+          partName = parent.name;
+          parent = parent.parent;
+        }
+
+        if (partName && partName !== 'Scene' && partName !== 'RootNode') {
+          // Show tooltip
+          this.tooltip.textContent = partName;
+          this.tooltip.style.display = 'block';
+        } else {
+          // For objects without names, show material or type info
+          if (intersected instanceof THREE.Mesh) {
+            const materialName =
+              intersected.material instanceof THREE.Material
+                ? intersected.material.name || 'Unnamed Material'
+                : 'Multi-Material';
+            this.tooltip.textContent =
+              materialName !== 'Unnamed Material' ? materialName : `${intersected.type}`;
+            this.tooltip.style.display = 'block';
+          } else {
+            this.tooltip.style.display = 'none';
+          }
+        }
+      }
+
+      // Update tooltip position
+      this.tooltip.style.left = `${event.clientX + 10}px`;
+      this.tooltip.style.top = `${event.clientY - 30}px`;
+    } else {
+      this.hideTooltip();
+    }
+  }
+
+  private onMouseLeave(): void {
+    this.hideTooltip();
+  }
+
+  private hideTooltip(): void {
+    this.hoveredObject = null;
+    this.tooltip.style.display = 'none';
   }
 
   private async loadModel(modelId: string): Promise<void> {
@@ -300,12 +391,134 @@ export class ModelViewerApp {
       this.controls.update();
 
       this.viewerControls.setModel(model);
+
+      // Update parts panel
+      this.updatePartsPanel(model);
     } catch (error) {
       console.error('Failed to load model:', error);
       alert(`Failed to load model: ${config.name}`);
     } finally {
       this.hideLoading();
     }
+  }
+
+  private updatePartsPanel(model: THREE.Object3D): void {
+    const partsPanel = document.getElementById('parts-panel')!;
+    this.modelParts.clear();
+
+    // Collect all named parts
+    const parts: { name: string; object: THREE.Object3D }[] = [];
+
+    model.traverse(child => {
+      if (
+        child.name &&
+        child !== model &&
+        !child.name.includes('Scene') &&
+        !child.name.includes('RootNode')
+      ) {
+        parts.push({ name: child.name, object: child });
+        this.modelParts.set(child.name, child);
+      }
+    });
+
+    if (parts.length === 0) {
+      partsPanel.innerHTML = '<div style="color: #666;">No named parts found</div>';
+      return;
+    }
+
+    // Create controls
+    let html = `
+      <div class="controls">
+        <button class="small" id="show-all-parts">Show All</button>
+        <button class="small" id="hide-all-parts">Hide All</button>
+      </div>
+      <div id="parts-list">
+    `;
+
+    // Add part items
+    parts.forEach(part => {
+      const id = `part-${part.name.replace(/[^a-zA-Z0-9]/g, '-')}`;
+      html += `
+        <div class="part-item" data-part="${part.name}">
+          <input type="checkbox" id="${id}" checked>
+          <label for="${id}" title="${part.name}">${part.name}</label>
+        </div>
+      `;
+    });
+
+    html += '</div>';
+    partsPanel.innerHTML = html;
+
+    // Add event listeners
+    document.getElementById('show-all-parts')?.addEventListener('click', () => {
+      this.setAllPartsVisibility(true);
+    });
+
+    document.getElementById('hide-all-parts')?.addEventListener('click', () => {
+      this.setAllPartsVisibility(false);
+    });
+
+    // Add listeners for individual parts
+    partsPanel.querySelectorAll('.part-item').forEach(item => {
+      const checkbox = item.querySelector('input[type="checkbox"]') as HTMLInputElement;
+      const partName = item.getAttribute('data-part');
+
+      if (checkbox && partName) {
+        checkbox.addEventListener('change', () => {
+          this.setPartVisibility(partName, checkbox.checked);
+        });
+
+        // Also allow clicking on the entire item
+        item.addEventListener('click', e => {
+          if ((e.target as HTMLElement).tagName !== 'INPUT') {
+            checkbox.checked = !checkbox.checked;
+            checkbox.dispatchEvent(new Event('change'));
+          }
+        });
+      }
+    });
+
+    console.log(
+      `Found ${parts.length} named parts:`,
+      parts.map(p => p.name)
+    );
+  }
+
+  private setPartVisibility(partName: string, visible: boolean): void {
+    const part = this.modelParts.get(partName);
+    if (part) {
+      part.visible = visible;
+
+      // Update UI
+      const partItem = document.querySelector(`.part-item[data-part="${partName}"]`);
+      if (partItem) {
+        if (visible) {
+          partItem.classList.remove('hidden');
+        } else {
+          partItem.classList.add('hidden');
+        }
+      }
+    }
+  }
+
+  private setAllPartsVisibility(visible: boolean): void {
+    this.modelParts.forEach((part, name) => {
+      part.visible = visible;
+    });
+
+    // Update all checkboxes
+    document.querySelectorAll('.part-item input[type="checkbox"]').forEach(checkbox => {
+      (checkbox as HTMLInputElement).checked = visible;
+    });
+
+    // Update UI classes
+    document.querySelectorAll('.part-item').forEach(item => {
+      if (visible) {
+        item.classList.remove('hidden');
+      } else {
+        item.classList.add('hidden');
+      }
+    });
   }
 
   private updateStats(info: any): void {
@@ -315,6 +528,38 @@ export class ModelViewerApp {
     document.getElementById('stat-textures')!.textContent = info.textures.toString();
     document.getElementById('stat-materials')!.textContent = info.materials.toString();
     document.getElementById('stat-size')!.textContent = info.memoryEstimate;
+
+    // Update rigging information
+    document.getElementById('stat-rigging')!.textContent = info.hasRigging ? 'Yes' : 'No';
+    document.getElementById('stat-skinned')!.textContent = info.skinnedMeshes.toString();
+    document.getElementById('stat-bones')!.textContent = info.bones.toString();
+    document.getElementById('stat-animations')!.textContent = info.animations.toString();
+
+    // Show/hide animation list
+    const animationList = document.getElementById('animation-list')!;
+    const animationNames = document.getElementById('animation-names')!;
+
+    if (info.animations > 0 && info.animationNames.length > 0) {
+      animationList.style.display = 'block';
+      animationNames.innerHTML = info.animationNames
+        .map((name: string) => `• ${name}`)
+        .join('<br>');
+    } else {
+      animationList.style.display = 'none';
+      animationNames.innerHTML = '';
+    }
+
+    // Log detailed rigging info to console
+    if (info.hasRigging) {
+      console.log('Rigging Information:', {
+        hasRigging: info.hasRigging,
+        skinnedMeshes: info.skinnedMeshes,
+        bones: info.bones,
+        boneNames: info.boneNames,
+        animations: info.animations,
+        animationNames: info.animationNames,
+      });
+    }
   }
 
   private updateDimensions(

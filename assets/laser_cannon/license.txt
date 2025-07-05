@@ -1,0 +1,11 @@
+Model Information:
+* title:	Laser Cannon
+* source:	https://sketchfab.com/3d-models/laser-cannon-12cf8ce3f24f4571aed07cf575ce6117
+* author:	D.Spoon (https://sketchfab.com/d.spoon)
+
+Model License:
+* license type:	CC-BY-4.0 (http://creativecommons.org/licenses/by/4.0/)
+* requirements:	Author must be credited. Commercial use is allowed.
+
+If you use this 3D model in your project be sure to copy paste this credit wherever you share it:
+This work is based on "Laser Cannon" (https://sketchfab.com/3d-models/laser-cannon-12cf8ce3f24f4571aed07cf575ce6117) by D.Spoon (https://sketchfab.com/d.spoon) licensed under CC-BY-4.0 (http://creativecommons.org/licenses/by/4.0/)
