@@ -1668,11 +1668,6 @@ export class IronDomeBattery extends EventEmitter {
 
       // Debug: Log visibility of parts
       console.log('Battery model loaded, checking part visibility:');
-      object.traverse(child => {
-        if (child.name && child.name.includes('Part')) {
-          console.log(`Part ${child.name}: visible = ${child.visible}`);
-        }
-      });
 
       // Hide ALL procedurally generated components when model loads
       this.group.children.forEach(child => {

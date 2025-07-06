@@ -1,5 +1,7 @@
 import * as THREE from 'three';
+import { IBattery } from '../entities/IBattery';
 import { IronDomeBattery } from '../entities/IronDomeBattery';
+import { LaserBattery } from '../entities/LaserBattery';
 import { Threat } from '../entities/Threat';
 import { debug } from '../utils/logger';
 
@@ -11,7 +13,7 @@ interface ThreatAssignment {
 }
 
 interface BatteryStatus {
-  battery: IronDomeBattery;
+  battery: IBattery;
   availableInterceptors: number;
   activeEngagements: number;
   lastFiredTime: number;
@@ -26,10 +28,10 @@ export class BatteryCoordinator {
     debug.module('BatteryCoordinator').log('Battery coordination system initialized');
   }
 
-  registerBattery(batteryId: string, battery: IronDomeBattery): void {
+  registerBattery(batteryId: string, battery: IBattery): void {
     this.batteries.set(batteryId, {
       battery,
-      availableInterceptors: battery.getInterceptorCount(),
+      availableInterceptors: battery instanceof IronDomeBattery ? battery.getInterceptorCount() : 0,
       activeEngagements: 0,
       lastFiredTime: 0,
     });
@@ -47,7 +49,7 @@ export class BatteryCoordinator {
 
   updateBatteryStatus(batteryId: string): void {
     const status = this.batteries.get(batteryId);
-    if (status) {
+    if (status && status.battery instanceof IronDomeBattery) {
       status.availableInterceptors = status.battery.getInterceptorCount();
     }
   }
@@ -59,7 +61,7 @@ export class BatteryCoordinator {
    * - Available interceptors
    * - Engagement efficiency
    */
-  findOptimalBattery(threat: Threat, existingInterceptors: number = 0): IronDomeBattery | null {
+  findOptimalBattery(threat: Threat, existingInterceptors: number = 0): IBattery | null {
     // If coordination is disabled, fall back to simple closest battery selection
     if (!this.coordinationEnabled) {
       return this.findClosestCapableBattery(threat);
@@ -86,12 +88,21 @@ export class BatteryCoordinator {
     const capableBatteries: Array<{ batteryId: string; status: BatteryStatus; score: number }> = [];
 
     this.batteries.forEach((status, batteryId) => {
-      if (!status.battery.isOperational() || !status.battery.canIntercept(threat)) {
+      if (!status.battery.isOperational()) {
         return;
       }
 
-      if (status.availableInterceptors === 0) {
-        return;
+      // Check if battery can intercept based on type
+      if (status.battery instanceof IronDomeBattery) {
+        if (!status.battery.canIntercept(threat) || status.availableInterceptors === 0) {
+          return;
+        }
+      } else if (status.battery instanceof LaserBattery) {
+        // Laser batteries can engage if operational and have energy
+        const laserBattery = status.battery as LaserBattery;
+        if (laserBattery.getEnergyLevel() <= 0.1) { // Need at least 10% energy
+          return;
+        }
       }
 
       // Calculate engagement score
@@ -125,7 +136,8 @@ export class BatteryCoordinator {
     const distance = batteryPos.distanceTo(threatPos);
 
     // Performance optimization: Quick rejection for out-of-range threats
-    const maxRange = battery.getConfig().maxRange;
+    const config = battery.getConfig?.() || { maxRange: 100 };
+    const maxRange = config.maxRange;
     if (distance > maxRange) {
       return 0;
     }
@@ -137,19 +149,37 @@ export class BatteryCoordinator {
     score *= rangeFactor;
 
     // 2. Battery load factor (prefer less loaded batteries)
-    const maxEngagements = Math.ceil(status.battery.getConfig().launcherCount / 4); // Can handle multiple threats
+    const batteryConfig = status.battery.getConfig?.() || { launcherCount: 20 };
+    const maxEngagements = Math.ceil(batteryConfig.launcherCount / 4); // Can handle multiple threats
     const loadFactor = Math.max(0.1, 1 - status.activeEngagements / maxEngagements);
     score *= loadFactor;
 
-    // 3. Available interceptors bonus
-    const availableRatio = status.availableInterceptors / status.battery.getConfig().launcherCount;
-    score *= 0.5 + 0.5 * availableRatio; // 50% base + 50% based on availability
+    // 3. Available resources bonus
+    if (status.battery instanceof IronDomeBattery) {
+      const launcherCount = (status.battery.getConfig?.() || { launcherCount: 20 }).launcherCount;
+      const availableRatio = status.availableInterceptors / launcherCount;
+      score *= 0.5 + 0.5 * availableRatio; // 50% base + 50% based on availability
+    } else if (status.battery instanceof LaserBattery) {
+      // For laser batteries, use energy level
+      const energyLevel = (status.battery as LaserBattery).getEnergyLevel();
+      score *= 0.5 + 0.5 * energyLevel;
+    }
 
-    // 4. Time to impact check (simple pass/fail)
-    const interceptTime = distance / battery.getConfig().interceptorSpeed;
+    // 4. Time to impact check
     const threatTimeToImpact = threat.getTimeToImpact();
-    if (interceptTime >= threatTimeToImpact) {
-      return 0; // Can't intercept in time
+    
+    if (status.battery instanceof IronDomeBattery) {
+      const interceptorSpeed = (battery.getConfig?.() as any)?.interceptorSpeed || 250;
+      const interceptTime = distance / interceptorSpeed;
+      if (interceptTime >= threatTimeToImpact) {
+        return 0; // Can't intercept in time
+      }
+    } else if (status.battery instanceof LaserBattery) {
+      // Laser batteries engage instantly but need time to destroy
+      const timeToDestroy = 100 / 50; // health / damage per second
+      if (timeToDestroy >= threatTimeToImpact) {
+        return 0; // Can't destroy in time
+      }
     }
 
     // 5. Time urgency bonus - prioritize batteries that can intercept sooner
@@ -296,17 +326,26 @@ export class BatteryCoordinator {
   /**
    * Simple fallback method when coordination is disabled
    */
-  private findClosestCapableBattery(threat: Threat): IronDomeBattery | null {
-    let closestBattery: IronDomeBattery | null = null;
+  private findClosestCapableBattery(threat: Threat): IBattery | null {
+    let closestBattery: IBattery | null = null;
     let minDistance = Infinity;
 
     this.batteries.forEach(status => {
-      if (!status.battery.isOperational() || !status.battery.canIntercept(threat)) {
+      if (!status.battery.isOperational()) {
         return;
       }
 
-      if (status.availableInterceptors === 0) {
-        return;
+      // Check if battery can intercept based on type
+      if (status.battery instanceof IronDomeBattery) {
+        if (!status.battery.canIntercept(threat) || status.availableInterceptors === 0) {
+          return;
+        }
+      } else if (status.battery instanceof LaserBattery) {
+        // Laser batteries can engage if operational and have energy
+        const laserBattery = status.battery as LaserBattery;
+        if (laserBattery.getEnergyLevel() <= 0.1) { // Need at least 10% energy
+          return;
+        }
       }
 
       const distance = threat.getPosition().distanceTo(status.battery.getPosition());

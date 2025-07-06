@@ -8,11 +8,7 @@ import { DomeContextMenu } from './DomeContextMenu';
 import { HelpModal } from './HelpModal';
 import { SoundSystem } from '../systems/SoundSystem';
 import * as THREE from 'three';
-
-interface GameUIProps {
-  waveManager: WaveManager;
-  placementSystem: DomePlacementSystem;
-}
+import { BatteryType, BATTERY_CONFIGS } from '../config/BatteryTypes';
 
 interface GameUIProps {
   waveManager: WaveManager;
@@ -51,6 +47,7 @@ export const GameUI: React.FC<GameUIProps> = ({
   const [highScore, setHighScore] = useState(0);
   const [showShop, setShowShop] = useState(false);
   const [placementMode, setPlacementMode] = useState(false);
+  const [selectedBatteryType, setSelectedBatteryType] = useState<BatteryType>(BatteryType.IRON_DOME);
   const [gameOver, setGameOver] = useState<GameOverData | null>(null);
   const [contextMenu, setContextMenu] = useState<{
     battery: any;
@@ -579,14 +576,15 @@ export const GameUI: React.FC<GameUIProps> = ({
     }
   };
 
-  const handlePlaceDome = () => {
+  const handlePlaceDome = async () => {
     SoundSystem.getInstance().playUI('click');
     vibrate(20);
     if (placementSystem.isInPlacementMode()) {
       placementSystem.exitPlacementMode();
       setPlacementMode(false);
     } else {
-      placementSystem.enterPlacementMode();
+      placementSystem.setSelectedBatteryType(selectedBatteryType);
+      await placementSystem.enterPlacementMode();
       setPlacementMode(true);
     }
   };
@@ -2058,12 +2056,82 @@ export const GameUI: React.FC<GameUIProps> = ({
       </div>
 
       <div className="action-buttons">
+        {/* Battery Type Selector - Segmented Button */}
+        {!placementMode && (
+          <div style={{
+            display: 'flex',
+            background: 'rgba(0, 0, 0, 0.9)',
+            border: '1px solid rgba(0, 150, 255, 0.5)',
+            borderRadius: '25px',
+            padding: '4px',
+            marginBottom: '10px',
+            width: 'fit-content',
+            margin: '0 auto 10px'
+          }}>
+            {Object.values(BatteryType).map((type, index) => {
+              const config = BATTERY_CONFIGS[type];
+              const isSelected = selectedBatteryType === type;
+              const isLocked = isGameMode && config.unlockLevel > gameState.getPlayerLevel();
+              const isFirst = index === 0;
+              const isLast = index === Object.values(BatteryType).length - 1;
+              
+              return (
+                <button
+                  key={type}
+                  onClick={() => !isLocked && setSelectedBatteryType(type)}
+                  disabled={isLocked}
+                  style={{
+                    background: isSelected ? 'rgba(0, 150, 255, 0.8)' : 'transparent',
+                    border: 'none',
+                    borderRadius: isFirst ? '20px 0 0 20px' : isLast ? '0 20px 20px 0' : '0',
+                    padding: '8px 16px',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '6px',
+                    cursor: isLocked ? 'not-allowed' : 'pointer',
+                    transition: 'all 0.3s ease',
+                    opacity: isLocked ? 0.3 : 1,
+                    color: isSelected ? '#fff' : '#0095ff',
+                    fontWeight: isSelected ? 'bold' : 'normal',
+                    position: 'relative',
+                    overflow: 'hidden'
+                  }}
+                  onMouseEnter={(e) => {
+                    if (!isLocked && !isSelected) {
+                      e.currentTarget.style.background = 'rgba(0, 150, 255, 0.2)';
+                    }
+                  }}
+                  onMouseLeave={(e) => {
+                    if (!isSelected) {
+                      e.currentTarget.style.background = 'transparent';
+                    }
+                  }}
+                >
+                  <span style={{ fontSize: '18px' }}>{config.icon}</span>
+                  <span style={{ fontSize: '13px' }}>{config.name}</span>
+                  {isLocked && (
+                    <span style={{ 
+                      fontSize: '10px', 
+                      background: 'rgba(255, 102, 102, 0.3)',
+                      padding: '2px 4px',
+                      borderRadius: '3px',
+                      marginLeft: '4px'
+                    }}>
+                      LV{config.unlockLevel}
+                    </span>
+                  )}
+                </button>
+              );
+            })}
+          </div>
+        )}
+        
         <button
           className={`game-button ${placementMode ? 'active' : ''}`}
           onClick={handlePlaceDome}
           disabled={!placementSystem.canPlaceNewDome()}
         >
-          {placementMode ? 'Cancel Placement' : 'Place Dome'}
+          {placementMode ? 'Cancel Placement' : `Place ${BATTERY_CONFIGS[selectedBatteryType].name}`}
           {!placementMode &&
             isGameMode &&
             placementInfo.placedDomes >= placementInfo.unlockedDomes && (

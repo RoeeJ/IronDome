@@ -4,6 +4,7 @@ import { EventEmitter } from 'events';
 import { Threat, ThreatType, THREAT_CONFIGS } from '../entities/Threat';
 import { UnifiedTrajectorySystem as TrajectoryCalculator } from '../systems/UnifiedTrajectorySystem';
 import { LaunchEffectsSystem } from '../systems/LaunchEffectsSystem';
+import { IBattery } from '../entities/IBattery';
 import { IronDomeBattery } from '../entities/IronDomeBattery';
 import { ExplosionManager, ExplosionType } from '../systems/ExplosionManager';
 import { GeometryFactory } from '../utils/GeometryFactory';
@@ -39,7 +40,7 @@ export class ThreatManager extends EventEmitter {
   public isSpawning: boolean = false;
   private impactMarkers: THREE.Mesh[] = [];
   private launchEffects: LaunchEffectsSystem;
-  private batteries: IronDomeBattery[] = [];
+  private batteries: IBattery[] = [];
 
   // Memory management limits to prevent WebGL crashes
   private static readonly MAX_THREATS = 50;
@@ -129,27 +130,27 @@ export class ThreatManager extends EventEmitter {
     // Pass camera from scene userData if available for LOD support
     this.instancedRenderer = new InstancedThreatRenderer(scene, 100, scene.userData.camera);
 
-    // Default spawn configurations with all threat types
+    // Default spawn configurations with all threat types - spawning from world edge
     this.spawnConfigs = [
       // Original rockets
       {
         type: ThreatType.SHORT_RANGE,
-        spawnRadius: 150,
+        spawnRadius: 2500,
         targetRadius: 40,
         minInterval: 3000,
         maxInterval: 8000,
       },
       {
         type: ThreatType.MEDIUM_RANGE,
-        spawnRadius: 180,
+        spawnRadius: 2700,
         targetRadius: 60,
         minInterval: 5000,
         maxInterval: 15000,
       },
-      // Mortars - frequent, close range
+      // Mortars - still closer range for realism
       {
         type: ThreatType.MORTAR,
-        spawnRadius: 80,
+        spawnRadius: 500,
         targetRadius: 20,
         minInterval: 2000,
         maxInterval: 5000,
@@ -157,14 +158,14 @@ export class ThreatManager extends EventEmitter {
       // Drones - less frequent, varied approach
       {
         type: ThreatType.DRONE_SLOW,
-        spawnRadius: 200,
+        spawnRadius: 2600,
         targetRadius: 30,
         minInterval: 10000,
         maxInterval: 20000,
       },
       {
         type: ThreatType.DRONE_FAST,
-        spawnRadius: 250,
+        spawnRadius: 2800,
         targetRadius: 40,
         minInterval: 15000,
         maxInterval: 30000,
@@ -172,7 +173,7 @@ export class ThreatManager extends EventEmitter {
       // Cruise missiles - rare, long range
       {
         type: ThreatType.CRUISE_MISSILE,
-        spawnRadius: 300,
+        spawnRadius: 3000,
         targetRadius: 50,
         minInterval: 30000,
         maxInterval: 60000,
@@ -180,14 +181,14 @@ export class ThreatManager extends EventEmitter {
       // Specific rocket variants
       {
         type: ThreatType.QASSAM_1,
-        spawnRadius: 100,
+        spawnRadius: 2400,
         targetRadius: 30,
         minInterval: 4000,
         maxInterval: 8000,
       },
       {
         type: ThreatType.GRAD_ROCKET,
-        spawnRadius: 150,
+        spawnRadius: 2600,
         targetRadius: 40,
         minInterval: 8000,
         maxInterval: 15000,
@@ -400,7 +401,9 @@ export class ThreatManager extends EventEmitter {
             const baseDamage = this.getThreatDamage(threat.type);
             const actualDamage = Math.ceil(baseDamage * damageFalloff);
 
-            battery.takeDamage(actualDamage);
+            if (battery instanceof IronDomeBattery) {
+              battery.takeDamage(actualDamage);
+            }
             this.emit('batteryHit', { battery, damage: actualDamage });
             debug.category(
               'Combat',
@@ -469,7 +472,9 @@ export class ThreatManager extends EventEmitter {
             const shockwaveDamage = Math.ceil(baseDamage * 0.5 * damageFalloff); // 50% of base damage for shockwave
 
             if (shockwaveDamage > 0) {
-              battery.takeDamage(shockwaveDamage);
+              if (battery instanceof IronDomeBattery) {
+                battery.takeDamage(shockwaveDamage);
+              }
               this.emit('batteryHit', { battery, damage: shockwaveDamage, isShockwave: true });
               debug.category(
                 'Combat',
@@ -1219,13 +1224,13 @@ export class ThreatManager extends EventEmitter {
     this.activeCraters.clear();
   }
 
-  registerBattery(battery: IronDomeBattery): void {
+  registerBattery(battery: IBattery): void {
     if (!this.batteries.includes(battery)) {
       this.batteries.push(battery);
     }
   }
 
-  unregisterBattery(battery: IronDomeBattery): void {
+  unregisterBattery(battery: IBattery): void {
     const index = this.batteries.indexOf(battery);
     if (index !== -1) {
       this.batteries.splice(index, 1);
@@ -1236,7 +1241,7 @@ export class ThreatManager extends EventEmitter {
     this.instanceManager = manager;
   }
 
-  private checkBatteryHit(impactPosition: THREE.Vector3): IronDomeBattery | null {
+  private checkBatteryHit(impactPosition: THREE.Vector3): IBattery | null {
     const hitRadius = 15; // Radius within which a battery takes damage
 
     for (const battery of this.batteries) {
@@ -1311,8 +1316,8 @@ export class ThreatManager extends EventEmitter {
     }
   }
 
-  private findNearestOperationalBattery(position: THREE.Vector3): IronDomeBattery | null {
-    let nearestBattery: IronDomeBattery | null = null;
+  private findNearestOperationalBattery(position: THREE.Vector3): IBattery | null {
+    let nearestBattery: IBattery | null = null;
     let minDistance = Infinity;
 
     for (const battery of this.batteries) {
@@ -1493,67 +1498,67 @@ export class ThreatManager extends EventEmitter {
 
   // Control which threat types to spawn
   setThreatMix(threatTypes: 'rockets' | 'mixed' | 'drones' | 'mortars' | 'all'): void {
-    // Store all configs for filtering - spawn from map edges
+    // Store all configs for filtering - spawn from world edge
     const allConfigs = [
       {
         type: ThreatType.SHORT_RANGE,
-        spawnRadius: 800,
+        spawnRadius: 2500,
         targetRadius: 100,
         minInterval: 3000,
         maxInterval: 8000,
       },
       {
         type: ThreatType.MEDIUM_RANGE,
-        spawnRadius: 900,
+        spawnRadius: 2700,
         targetRadius: 150,
         minInterval: 5000,
         maxInterval: 15000,
       },
       {
         type: ThreatType.MORTAR,
-        spawnRadius: 300,
+        spawnRadius: 500,
         targetRadius: 50,
         minInterval: 2000,
         maxInterval: 5000,
-      }, // Mortars still closer
+      }, // Mortars still closer for realism
       {
         type: ThreatType.DRONE_SLOW,
-        spawnRadius: 850,
+        spawnRadius: 2600,
         targetRadius: 100,
         minInterval: 10000,
         maxInterval: 20000,
       },
       {
         type: ThreatType.DRONE_FAST,
-        spawnRadius: 900,
+        spawnRadius: 2800,
         targetRadius: 120,
         minInterval: 15000,
         maxInterval: 30000,
       },
       {
         type: ThreatType.CRUISE_MISSILE,
-        spawnRadius: 950,
+        spawnRadius: 3000,
         targetRadius: 150,
         minInterval: 30000,
         maxInterval: 60000,
       },
       {
         type: ThreatType.QASSAM_1,
-        spawnRadius: 700,
+        spawnRadius: 2400,
         targetRadius: 80,
         minInterval: 4000,
         maxInterval: 8000,
       },
       {
         type: ThreatType.GRAD_ROCKET,
-        spawnRadius: 850,
+        spawnRadius: 2600,
         targetRadius: 100,
         minInterval: 8000,
         maxInterval: 15000,
       },
       {
         type: ThreatType.DECOY,
-        spawnRadius: 900,
+        spawnRadius: 2700,
         targetRadius: 150,
         minInterval: 10000,
         maxInterval: 25000,
@@ -1587,28 +1592,28 @@ export class ThreatManager extends EventEmitter {
         this.spawnConfigs = [
           {
             type: ThreatType.SHORT_RANGE,
-            spawnRadius: 800,
+            spawnRadius: 2500,
             targetRadius: 100,
             minInterval: 3000,
             maxInterval: 8000,
           },
           {
             type: ThreatType.MORTAR,
-            spawnRadius: 300,
+            spawnRadius: 500,
             targetRadius: 50,
             minInterval: 2000,
             maxInterval: 5000,
           },
           {
             type: ThreatType.DRONE_SLOW,
-            spawnRadius: 850,
+            spawnRadius: 2600,
             targetRadius: 100,
             minInterval: 10000,
             maxInterval: 20000,
           },
           {
             type: ThreatType.QASSAM_2,
-            spawnRadius: 750,
+            spawnRadius: 2500,
             targetRadius: 80,
             minInterval: 4000,
             maxInterval: 8000,
@@ -1617,7 +1622,7 @@ export class ThreatManager extends EventEmitter {
         // Add decoys to the mixed set
         this.spawnConfigs.push({
           type: ThreatType.DECOY,
-          spawnRadius: 900,
+          spawnRadius: 2700,
           targetRadius: 150,
           minInterval: 10000,
           maxInterval: 25000,
@@ -1625,7 +1630,7 @@ export class ThreatManager extends EventEmitter {
         // Also add ballistic missiles, but make them rare
         this.spawnConfigs.push({
           type: ThreatType.BALLISTIC_MISSILE,
-          spawnRadius: 950, // Launch from far away
+          spawnRadius: 3000, // Launch from far away
           targetRadius: 150,
           minInterval: 45000, // Very long interval (45s)
           maxInterval: 90000, // (90s)
@@ -1701,7 +1706,7 @@ export class ThreatManager extends EventEmitter {
     // Create a config for this specific threat
     const config = {
       type: threatType,
-      spawnRadius: 800,
+      spawnRadius: 2500,
       targetRadius: 100,
       minInterval: 0,
       maxInterval: 0,
@@ -1712,11 +1717,11 @@ export class ThreatManager extends EventEmitter {
 
     // Adjust spawn radius based on threat type
     if (threatStats.isDrone) {
-      config.spawnRadius = 850;
+      config.spawnRadius = 2700;
     } else if (threatStats.isMortar) {
-      config.spawnRadius = 300; // Mortars still closer
+      config.spawnRadius = 500; // Mortars still closer for realism
     } else if (threatType === ThreatType.CRUISE_MISSILE) {
-      config.spawnRadius = 950;
+      config.spawnRadius = 3000;
     }
 
     // Temporarily store current configs
@@ -1794,7 +1799,7 @@ export class ThreatManager extends EventEmitter {
         const threat = salvoThreats[currentIndex];
         const config = {
           type: threat.type,
-          spawnRadius: 800,
+          spawnRadius: 2500,
           targetRadius: 100,
           minInterval: 0,
           maxInterval: 0,
@@ -1803,11 +1808,11 @@ export class ThreatManager extends EventEmitter {
         // Adjust spawn radius based on threat type
         const threatStats = THREAT_CONFIGS[threat.type];
         if (threatStats.isDrone) {
-          config.spawnRadius = 200;
+          config.spawnRadius = 2700;
         } else if (threatStats.isMortar) {
-          config.spawnRadius = 80;
+          config.spawnRadius = 500;
         } else if (threat.type === ThreatType.CRUISE_MISSILE) {
-          config.spawnRadius = 250;
+          config.spawnRadius = 3000;
         }
 
         // Temporarily set config and spawn

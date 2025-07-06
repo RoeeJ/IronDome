@@ -216,13 +216,6 @@ export class ModelManager {
     // Debug: Check if visibility was preserved after clone
     if (model.hiddenParts.length > 0) {
       debug.module('ModelManager').log('Checking cloned model visibility:');
-      model.hiddenParts.forEach(partName => {
-        newScene.traverse(child => {
-          if (child.name === partName) {
-            debug.module('ModelManager').log(`Cloned part ${partName}: visible = ${child.visible}`);
-          }
-        });
-      });
 
       // Re-hide parts after cloning (THREE.js clone doesn't preserve visibility correctly)
       this.hidePartsInModel(newScene, model.hiddenParts);

@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import * as CANNON from 'cannon-es';
+import { IBattery } from '../entities/IBattery';
 import { IronDomeBattery } from '../entities/IronDomeBattery';
 import { Threat } from '../entities/Threat';
 import { Projectile } from '../entities/Projectile';
@@ -30,8 +31,8 @@ interface Interception {
 export class InterceptionSystem {
   private scene: THREE.Scene;
   private world: CANNON.World;
-  private batteries: IronDomeBattery[] = [];
-  private batteryIdMap: Map<IronDomeBattery, string> = new Map();
+  private batteries: IBattery[] = [];
+  private batteryIdMap: Map<IBattery, string> = new Map();
   private activeInterceptions: Interception[] = [];
   private interceptors: Projectile[] = [];
   private successfulInterceptions: number = 0;
@@ -73,7 +74,7 @@ export class InterceptionSystem {
     this.threatManager = threatManager;
   }
 
-  addBattery(battery: IronDomeBattery, batteryId?: string): void {
+  addBattery(battery: IBattery, batteryId?: string): void {
     this.batteries.push(battery);
     // Use provided ID or generate one based on index
     const id = batteryId || `battery_${this.batteries.length - 1}`;
@@ -81,7 +82,7 @@ export class InterceptionSystem {
     this.batteryCoordinator.registerBattery(id, battery);
   }
 
-  removeBattery(battery: IronDomeBattery, batteryId?: string): void {
+  removeBattery(battery: IBattery, batteryId?: string): void {
     const index = this.batteries.indexOf(battery);
     if (index !== -1) {
       this.batteries.splice(index, 1);
@@ -275,7 +276,7 @@ export class InterceptionSystem {
       // The allocation system returns batteries from the array we passed
       // But we need to match them with our ID map
       let batteryId: string | undefined;
-      let actualBattery: IronDomeBattery = battery;
+      let actualBattery: IBattery = battery;
 
       // First try direct lookup
       batteryId = this.batteryIdMap.get(battery);
@@ -286,6 +287,7 @@ export class InterceptionSystem {
           if (
             mapBattery === battery ||
             (mapBattery.getPosition().equals(battery.getPosition()) &&
+              mapBattery instanceof IronDomeBattery && battery instanceof IronDomeBattery &&
               mapBattery.getInterceptorCount() === battery.getInterceptorCount())
           ) {
             batteryId = mapId;
@@ -299,15 +301,18 @@ export class InterceptionSystem {
         return;
       }
 
-      // Fire interceptors with improved targeting
+      // Fire interceptors with improved targeting (only IronDomeBattery can fire interceptors)
       let interceptorsFired = 0;
-      battery.fireInterceptors(threat, allocation.interceptorCount, interceptor => {
+      
+      if (battery instanceof IronDomeBattery) {
+        battery.fireInterceptors(threat, allocation.interceptorCount, interceptor => {
         interceptorsFired++;
         // Use predictive targeting for lead calculation
+        const interceptorSpeed = (battery.getConfig?.() as any)?.interceptorSpeed || 250;
         const leadPrediction = this.predictiveTargeting.calculateLeadPrediction(
           threat,
           battery.getPosition(),
-          battery.getConfig().interceptorSpeed
+          interceptorSpeed
         );
 
         // Don't use setTargetPoint - it creates a static target!
@@ -341,6 +346,7 @@ export class InterceptionSystem {
           trailRenderer.addTrail(interceptor, trailColor);
         }
       });
+      } // Close if (battery instanceof IronDomeBattery)
 
       // Only record assignment if interceptors were actually fired
       if (interceptorsFired > 0) {
@@ -398,12 +404,14 @@ export class InterceptionSystem {
           .log(`No capable battery for ${isDrone ? 'DRONE' : 'threat'} ${threat.id}`);
         continue;
       }
-      if (battery.getInterceptorCount() === 0) {
+      if (battery instanceof IronDomeBattery && battery.getInterceptorCount() === 0) {
         debug.module('Interception').log(`Battery has no loaded interceptors`);
         continue;
       }
 
-      const interceptorsToFire = battery.calculateInterceptorCount(threat, existingInterceptors);
+      const interceptorsToFire = battery instanceof IronDomeBattery 
+        ? battery.calculateInterceptorCount(threat, existingInterceptors)
+        : 0;
 
       if (interceptorsToFire > 0) {
         debug.category('Interception', `Firing ${interceptorsToFire} interceptor(s) at threat`);
@@ -419,7 +427,8 @@ export class InterceptionSystem {
 
         this.batteryCoordinator.assignThreatToBattery(threat.id, batteryId, interceptorsToFire);
 
-        battery.fireInterceptors(threat, interceptorsToFire, interceptor => {
+        if (battery instanceof IronDomeBattery) {
+          battery.fireInterceptors(threat, interceptorsToFire, interceptor => {
           interceptor.detonationCallback = (position: THREE.Vector3, quality: number) => {
             this.handleProximityDetonation(interceptor, threat, position, quality);
           };
@@ -438,6 +447,7 @@ export class InterceptionSystem {
             renderer.addProjectile(interceptor);
           }
         });
+        } // Close if (battery instanceof IronDomeBattery)
       }
     }
   }
@@ -451,9 +461,16 @@ export class InterceptionSystem {
       .length;
   }
 
-  private findBestBattery(threat: Threat): IronDomeBattery | null {
+  private findBestBattery(threat: Threat): IBattery | null {
     // Find all batteries that can intercept
-    const capableBatteries = this.batteries.filter(b => b.canIntercept(threat));
+    const capableBatteries = this.batteries.filter(b => {
+      // Only IronDomeBattery has canIntercept method
+      if (b instanceof IronDomeBattery) {
+        return b.canIntercept(threat);
+      }
+      // For other battery types (like LaserBattery), just check if operational
+      return b.isOperational();
+    });
 
     if (capableBatteries.length === 0) {
       return null;
@@ -843,7 +860,8 @@ export class InterceptionSystem {
       totalFired: this.totalInterceptorsFired,
       active: this.interceptors.length,
       batteries: operationalBatteries.length,
-      totalInterceptors: operationalBatteries.reduce((sum, b) => sum + b.getInterceptorCount(), 0),
+      totalInterceptors: operationalBatteries.reduce((sum, b) => 
+        sum + (b instanceof IronDomeBattery ? b.getInterceptorCount() : 0), 0),
       activeInterceptors: this.interceptors.length,
       coordination: coordinatorStats,
       algorithmMode: this.useImprovedAlgorithms ? 'improved' : 'legacy',
@@ -866,12 +884,16 @@ export class InterceptionSystem {
     this.batteryCoordinator.setCoordinationEnabled(enabled);
   }
 
-  getNearestBattery(threat: Threat): IronDomeBattery | null {
-    let nearestBattery: IronDomeBattery | null = null;
+  getNearestBattery(threat: Threat): IBattery | null {
+    let nearestBattery: IBattery | null = null;
     let minDistance = Infinity;
 
     for (const battery of this.batteries) {
-      if (battery.isOperational() && battery.canIntercept(threat)) {
+      if (battery.isOperational()) {
+        // Check if battery can intercept (only IronDomeBattery has this method)
+        if (battery instanceof IronDomeBattery && !battery.canIntercept(threat)) {
+          continue;
+        }
         const distance = battery.getPosition().distanceTo(threat.getPosition());
         if (distance < minDistance) {
           minDistance = distance;
@@ -883,7 +905,7 @@ export class InterceptionSystem {
     return nearestBattery;
   }
 
-  getBatteries(): IronDomeBattery[] {
+  getBatteries(): IBattery[] {
     return [...this.batteries];
   }
 }

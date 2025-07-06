@@ -237,6 +237,10 @@ export class Threat extends Projectile {
   private phaseTimer: number = 0;
   public shouldDeployPayload: boolean = false;
   private hasPassedApex: boolean = false; // For payload deployment logic
+  
+  // Health system for laser damage
+  private health: number = 100;
+  private maxHealth: number = 100;
 
   constructor(scene: THREE.Scene, world: CANNON.World, options: ThreatOptions) {
     const config = THREAT_CONFIGS[options.type];
@@ -637,5 +641,33 @@ export class Threat extends Projectile {
 
   isBeingIntercepted(): boolean {
     return this._isBeingIntercepted;
+  }
+  
+  // Health system methods
+  takeDamage(amount: number): void {
+    this.health = Math.max(0, this.health - amount);
+    
+    // Visual feedback for damage
+    if (this.mesh instanceof THREE.Mesh && this.mesh.material) {
+      const material = this.mesh.material as THREE.MeshStandardMaterial;
+      // Flash red briefly to indicate damage
+      const originalColor = material.color.clone();
+      material.color.setHex(0xff0000);
+      setTimeout(() => {
+        material.color.copy(originalColor);
+      }, 100);
+    }
+  }
+  
+  getHealth(): number {
+    return this.health;
+  }
+  
+  getMaxHealth(): number {
+    return this.maxHealth;
+  }
+  
+  isDestroyed(): boolean {
+    return this.health <= 0;
   }
 }

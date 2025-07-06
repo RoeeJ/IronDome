@@ -18,6 +18,7 @@ export interface GameData {
     id: string;
     position: { x: number; z: number };
     level: number;
+    type?: string; // Battery type (IRON_DOME, LASER, etc.)
   }>;
   autoRepairLevel: number; // 0 = off, 1 = slow, 2 = medium, 3 = fast
 
@@ -201,18 +202,18 @@ export class GameState extends EventEmitter {
     return 1000 * Math.pow(2, this.data.unlockedDomes - 1);
   }
 
-  getDomePlacements(): Array<{ id: string; position: { x: number; z: number }; level: number }> {
+  getDomePlacements(): Array<{ id: string; position: { x: number; z: number }; level: number; type?: string }> {
     return [...this.data.domePlacements];
   }
 
-  addDomePlacement(id: string, position: { x: number; z: number }): void {
+  addDomePlacement(id: string, position: { x: number; z: number }, type: string = 'IRON_DOME'): void {
     // Check if already exists
     const existing = this.data.domePlacements.find(d => d.id === id);
     if (existing) {
       return;
     }
 
-    this.data.domePlacements.push({ id, position, level: 1 });
+    this.data.domePlacements.push({ id, position, level: 1, type });
     this.saveState();
     this.emit('domePlaced', { id, position });
   }

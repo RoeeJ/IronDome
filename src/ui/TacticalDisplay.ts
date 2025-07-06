@@ -8,7 +8,7 @@ export class TacticalDisplay {
   private ctx: CanvasRenderingContext2D;
   private radarCenter: { x: number; y: number };
   private radarRadius: number;
-  private scale: number = 0.1; // World units to pixels - reduced to show more area (1000m radius)
+  private scale: number = 0.025; // World units to pixels - shows entire world (4000m radius)
   private threatTracks: Map<
     Threat,
     {
@@ -307,12 +307,22 @@ export class TacticalDisplay {
     ctx.stroke();
     ctx.shadowBlur = 0;
 
-    // Draw range labels with better styling - only show alternating ones to avoid overlap
+    // Draw range labels with better styling - show only 1km intervals to reduce clutter
     ctx.fillStyle = 'rgba(0, 255, 255, 0.7)';
     ctx.font = '9px "Courier New", monospace';
-    // Show only 500m and 1km labels to avoid crowding
-    ctx.fillText('500m', this.radarCenter.x + this.radarRadius / 2 - 20, this.radarCenter.y - 5);
-    ctx.fillText('1km', this.radarCenter.x + this.radarRadius - 15, this.radarCenter.y - 5);
+    
+    // Draw labels only at 1km intervals
+    for (let i = 1; i <= 4; i++) {
+      const distanceKm = i; // 1km, 2km, 3km, 4km
+      const pixelRadius = distanceKm * 1000 * this.scale; // Convert km to pixels
+      
+      // Only draw if the ring is within our radar radius
+      if (pixelRadius <= this.radarRadius) {
+        const labelX = this.radarCenter.x + pixelRadius - 15;
+        const labelY = this.radarCenter.y - 5;
+        ctx.fillText(`${distanceKm}km`, labelX, labelY);
+      }
+    }
 
     // Draw rotating sweep with enhanced effect
     this.drawRadarSweep();

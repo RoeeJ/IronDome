@@ -69,7 +69,7 @@ updateLoadingStatus('Setting up 3D scene...');
 const scene = new THREE.Scene();
 
 // CHAINSAW: Simple solid color background instead of gradient texture
-scene.background = new THREE.Color(0x2a5298);
+scene.background = new THREE.Color(0x1a3560); // Darker blue for better contrast
 
 // Camera setup
 const camera = new THREE.PerspectiveCamera(
@@ -153,11 +153,11 @@ const cameraController = new CameraController(camera, controls);
 // Ensure controls are enabled
 controls.enabled = true;
 
-// Lighting
-const ambientLight = new THREE.AmbientLight(0xffffff, 0.6);
+// Lighting - reduced intensity for better contrast
+const ambientLight = new THREE.AmbientLight(0xffffff, 0.35); // Reduced from 0.6
 scene.add(ambientLight);
 
-const directionalLight = new THREE.DirectionalLight(0xffffff, 0.8);
+const directionalLight = new THREE.DirectionalLight(0xffffff, 0.65); // Reduced from 0.8
 // Position light further away to cover more area
 directionalLight.position.set(200, 400, 200);
 directionalLight.castShadow = true;
@@ -223,7 +223,7 @@ updateLoadingStatus('Creating environment...');
 const environmentSystem = new EnvironmentSystem(scene);
 environmentSystem.initialize({
   fogEnabled: true,
-  skyboxEnabled: true,
+  skyboxEnabled: false, // Re-enabled skybox for day/night cycle
   terrainEnabled: true,
   cloudsEnabled: false,
   atmosphericScattering: false, // CHAINSAW: Disabled expensive atmosphere
@@ -243,6 +243,7 @@ worldScaleIndicators.optimizeGeometry();
 
 // CHAINSAW OPTIMIZED: Initialize time-sliced polish systems
 const optimizedDayNight = new OptimizedDayNightCycle(scene, ambientLight, directionalLight);
+optimizedDayNight.setEnvironmentSystem(environmentSystem); // Connect for skybox updates
 optimizedDayNight.setTime(14); // Start at 2 PM
 
 // PERFORMANCE: Defer city generation until after loading screen
@@ -725,10 +726,12 @@ renderer.domElement.addEventListener('click', event => {
         // Try each battery until one can fire
         for (const battery of batteries) {
           if (battery.isOperational()) {
-            const interceptor = battery.fireInterceptorManual(threat);
-            if (interceptor) {
-              // Set up detonation callback for manual interceptor
-              interceptor.detonationCallback = (position: THREE.Vector3, quality: number) => {
+            // Check if this is an Iron Dome battery (has fireInterceptorManual method)
+            if ('fireInterceptorManual' in battery && typeof battery.fireInterceptorManual === 'function') {
+              const interceptor = battery.fireInterceptorManual(threat);
+              if (interceptor) {
+                // Set up detonation callback for manual interceptor
+                interceptor.detonationCallback = (position: THREE.Vector3, quality: number) => {
                 // Create explosion effect
                 interceptionSystem.createExplosion(position, Math.max(0.8, quality));
 
@@ -793,6 +796,13 @@ renderer.domElement.addEventListener('click', event => {
               (interceptionSystem as any).totalInterceptorsFired =
                 ((interceptionSystem as any).totalInterceptorsFired || 0) + 1;
               debug.category('Combat', 'Manual intercept fired!');
+              interceptorFired = true;
+              break;
+            }
+            } else if (battery.constructor.name === 'LaserBattery') {
+              // Laser batteries use fireAt method for manual targeting
+              battery.fireAt(threat);
+              debug.category('Combat', 'Manual laser targeting activated!');
               interceptorFired = true;
               break;
             }
@@ -1178,10 +1188,12 @@ soundFolder
     soundSystem.setCategoryVolume('ui', value);
   });
 
-// Apply initial settings to all batteries
+// Apply initial settings to all batteries (only Iron Dome batteries have these methods)
 domePlacementSystem.getAllBatteries().forEach(battery => {
-  battery.setLaunchOffset(new THREE.Vector3(-2, 14.5, -0.1));
-  battery.setLaunchDirection(new THREE.Vector3(0.3, 1.5, 0.1).normalize()); // More vertical launch angle
+  if (battery instanceof IronDomeBattery) {
+    battery.setLaunchOffset(new THREE.Vector3(-2, 14.5, -0.1));
+    battery.setLaunchDirection(new THREE.Vector3(0.3, 1.5, 0.1).normalize()); // More vertical launch angle
+  }
 });
 
 // Set radar model facing direction (90 degrees = +X)
@@ -1763,8 +1775,10 @@ function animate() {
     let totalCapacity = 0;
 
     allBatteries.forEach(battery => {
-      totalLoaded += battery.getInterceptorCount();
-      totalCapacity += battery.getConfig().launcherCount;
+      if (battery instanceof IronDomeBattery) {
+        totalLoaded += battery.getInterceptorCount();
+        totalCapacity += battery.getConfig().launcherCount;
+      }
     });
 
     // Battery info is now displayed in the UI, not in debug controls

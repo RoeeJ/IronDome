@@ -100,7 +100,7 @@ export class Projectile {
       useExhaustTrail = true,
       failureMode = 'none',
       failureTime = 0,
-      maxLifetime = isInterceptor ? 10 : 30, // 10s for interceptors, 30s for threats
+      maxLifetime = isInterceptor ? 15 : 120, // 15s for interceptors, 120s for threats (longer flight from world edge)
       batteryPosition,
       useInstancing = false,
       instanceManager,

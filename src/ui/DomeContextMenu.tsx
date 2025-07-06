@@ -1,9 +1,12 @@
 import React, { useState, useEffect } from 'react';
 import { IronDomeBattery } from '../entities/IronDomeBattery';
+import { LaserBattery } from '../entities/LaserBattery';
+import { IBattery } from '../entities/IBattery';
 import { DomePlacementSystem } from '../game/DomePlacementSystem';
+import { BatteryType } from '../config/BatteryTypes';
 
 interface DomeContextMenuProps {
-  battery: IronDomeBattery | null;
+  battery: IBattery | null;
   batteryId: string | null;
   position: { x: number; y: number };
   onClose: () => void;
@@ -27,7 +30,7 @@ export const DomeContextMenu: React.FC<DomeContextMenuProps> = ({
   const [placementInfo, setPlacementInfo] = useState<any>(() => {
     const placements = placementSystem.getPlacementInfo();
     const domePlacement = placementSystem.getDomePlacements().find(p => p.id === batteryId);
-    return { ...placements, level: domePlacement?.level || 1 };
+    return { ...placements, level: domePlacement?.level || 1, type: domePlacement?.type || BatteryType.IRON_DOME };
   });
 
   useEffect(() => {
@@ -51,7 +54,7 @@ export const DomeContextMenu: React.FC<DomeContextMenuProps> = ({
     const updatePlacementInfo = () => {
       const placements = placementSystem.getPlacementInfo();
       const domePlacement = placementSystem.getDomePlacements().find(p => p.id === batteryId);
-      setPlacementInfo({ ...placements, level: domePlacement?.level || 1 });
+      setPlacementInfo({ ...placements, level: domePlacement?.level || 1, type: domePlacement?.type || BatteryType.IRON_DOME });
     };
 
     // Update placement info with battery stats
@@ -344,7 +347,7 @@ export const DomeContextMenu: React.FC<DomeContextMenuProps> = ({
         </button>
 
         <div className="context-menu-title">
-          Iron Dome Battery
+          {placementInfo.type === BatteryType.LASER ? 'Laser Cannon' : 'Iron Dome Battery'}
           <span className="battery-level">Level {placementInfo.level}</span>
         </div>
 
@@ -361,22 +364,45 @@ export const DomeContextMenu: React.FC<DomeContextMenuProps> = ({
             <span className="stat-value">{batteryConfig.maxRange}m</span>
           </div>
 
-          <div className="stat-row">
-            <span className="stat-label">Reload Time</span>
-            <span className="stat-value">{(batteryConfig.reloadTime / 1000).toFixed(1)}s</span>
-          </div>
+          {placementInfo.type === BatteryType.IRON_DOME ? (
+            <>
+              <div className="stat-row">
+                <span className="stat-label">Reload Time</span>
+                <span className="stat-value">{(batteryConfig.reloadTime / 1000).toFixed(1)}s</span>
+              </div>
 
-          <div className="stat-row">
-            <span className="stat-label">Loaded Tubes</span>
-            <span className="stat-value">
-              {batteryStats.loadedTubes}/{batteryStats.totalTubes}
-            </span>
-          </div>
+              <div className="stat-row">
+                <span className="stat-label">Loaded Tubes</span>
+                <span className="stat-value">
+                  {batteryStats.loadedTubes}/{batteryStats.totalTubes}
+                </span>
+              </div>
 
-          <div className="stat-row">
-            <span className="stat-label">Success Rate</span>
-            <span className="stat-value">{(batteryConfig.successRate * 100).toFixed(0)}%</span>
-          </div>
+              <div className="stat-row">
+                <span className="stat-label">Success Rate</span>
+                <span className="stat-value">{(batteryConfig.successRate * 100).toFixed(0)}%</span>
+              </div>
+            </>
+          ) : (
+            <>
+              <div className="stat-row">
+                <span className="stat-label">Damage/Second</span>
+                <span className="stat-value">{batteryConfig.damagePerSecond} DPS</span>
+              </div>
+
+              <div className="stat-row">
+                <span className="stat-label">Energy</span>
+                <span className="stat-value">
+                  {batteryStats.energy.current.toFixed(0)}/{batteryStats.energy.max}
+                </span>
+              </div>
+
+              <div className="stat-row">
+                <span className="stat-label">Status</span>
+                <span className="stat-value">{batteryStats.isFiring ? 'Firing' : 'Ready'}</span>
+              </div>
+            </>
+          )}
 
           {isGameMode && (
             <div className="stat-row">
@@ -399,6 +425,24 @@ export const DomeContextMenu: React.FC<DomeContextMenuProps> = ({
                 }`}
                 style={{ width: `${batteryStats.health.percent * 100}%` }}
               />
+            </div>
+          )}
+          
+          {placementInfo.type === BatteryType.LASER && (
+            <div className="stat-row">
+              <span className="stat-label">Energy Level</span>
+              <div className="battery-health" style={{ marginTop: 0, width: '60%', display: 'inline-block', verticalAlign: 'middle', marginLeft: '10px' }}>
+                <div
+                  className={`battery-health-fill ${
+                    batteryStats.energy.percent < 0.2
+                      ? 'health-critical'
+                      : batteryStats.energy.percent < 0.5
+                        ? 'health-warning'
+                        : ''
+                  }`}
+                  style={{ width: `${batteryStats.energy.percent * 100}%`, background: batteryStats.isFiring ? '#ff6600' : '#00ffff' }}
+                />
+              </div>
             </div>
           )}
         </div>
@@ -429,33 +473,35 @@ export const DomeContextMenu: React.FC<DomeContextMenuProps> = ({
             </button>
           )}
 
-          <button
-            className="context-menu-button"
-            onClick={e => {
-              e.stopPropagation();
-              handleUpgrade();
-            }}
-            disabled={placementInfo.level >= 5 || !placementSystem.canUpgradeBattery(batteryId)}
-            title={
-              placementInfo.level >= 5
-                ? 'Maximum level reached'
-                : `Level ${placementInfo.level + 1} Benefits:\n` +
-                  `• Reload: ${(3.0 - placementInfo.level * 0.4).toFixed(1)}s (from ${(3.0 - (placementInfo.level - 1) * 0.4).toFixed(1)}s)\n` +
-                  `• Range: ${1000 + placementInfo.level * 100}m (from ${1000 + (placementInfo.level - 1) * 100}m)\n` +
-                  `• Speed: ${250 + placementInfo.level * 30} m/s (from ${250 + (placementInfo.level - 1) * 30} m/s)\n` +
-                  `• Accuracy: ${(95 + placementInfo.level).toFixed(0)}% (from ${(95 + placementInfo.level - 1).toFixed(0)}%)\n` +
-                  `• Health: ${100 + placementInfo.level * 50} (from ${100 + (placementInfo.level - 1) * 50})`
-            }
-          >
-            Upgrade Battery
-            {placementInfo.level >= 5 ? (
-              <span className="upgrade-cost">(Max Level)</span>
-            ) : isGameMode ? (
-              <span className="upgrade-cost">
-                (Cost: {placementSystem.getUpgradeCost(batteryId)})
-              </span>
-            ) : null}
-          </button>
+          {placementInfo.type === BatteryType.IRON_DOME && (
+            <button
+              className="context-menu-button"
+              onClick={e => {
+                e.stopPropagation();
+                handleUpgrade();
+              }}
+              disabled={placementInfo.level >= 5 || !placementSystem.canUpgradeBattery(batteryId)}
+              title={
+                placementInfo.level >= 5
+                  ? 'Maximum level reached'
+                  : `Level ${placementInfo.level + 1} Benefits:\n` +
+                    `• Reload: ${(3.0 - placementInfo.level * 0.4).toFixed(1)}s (from ${(3.0 - (placementInfo.level - 1) * 0.4).toFixed(1)}s)\n` +
+                    `• Range: ${1000 + placementInfo.level * 100}m (from ${1000 + (placementInfo.level - 1) * 100}m)\n` +
+                    `• Speed: ${250 + placementInfo.level * 30} m/s (from ${250 + (placementInfo.level - 1) * 30} m/s)\n` +
+                    `• Accuracy: ${(95 + placementInfo.level).toFixed(0)}% (from ${(95 + placementInfo.level - 1).toFixed(0)}%)\n` +
+                    `• Health: ${100 + placementInfo.level * 50} (from ${100 + (placementInfo.level - 1) * 50})`
+              }
+            >
+              Upgrade Battery
+              {placementInfo.level >= 5 ? (
+                <span className="upgrade-cost">(Max Level)</span>
+              ) : isGameMode ? (
+                <span className="upgrade-cost">
+                  (Cost: {placementSystem.getUpgradeCost(batteryId)})
+                </span>
+              ) : null}
+            </button>
+          )}
 
           <button
             className="context-menu-button danger"

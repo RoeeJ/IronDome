@@ -1,4 +1,5 @@
 import { Threat } from '@/entities/Threat';
+import { IBattery } from '@/entities/IBattery';
 import { IronDomeBattery } from '@/entities/IronDomeBattery';
 import { debug } from '@/utils/DebugLogger';
 
@@ -12,7 +13,7 @@ interface ThreatMetrics {
 }
 
 interface BatteryCapability {
-  battery: IronDomeBattery;
+  battery: IBattery;
   availableInterceptors: number;
   coverage: Set<string>; // Threat IDs this battery can intercept
   averageInterceptTime: number;
@@ -31,17 +32,17 @@ interface AllocationResult {
 export class InterceptorAllocation {
   private historicalSuccessRates: Map<string, number> = new Map();
   private readonly defaultSuccessRate = 0.85;
-  private batteries: IronDomeBattery[] = [];
+  private batteries: IBattery[] = [];
 
   /**
    * Optimize interceptor allocation across multiple batteries and threats
    */
-  optimizeAllocation(threats: Threat[], batteries: IronDomeBattery[]): AllocationResult {
+  optimizeAllocation(threats: Threat[], batteries: IBattery[]): AllocationResult {
     // Store batteries for threat analysis
     this.batteries = batteries;
 
     // Create a map to track battery indices
-    const batteryIndexMap = new Map<IronDomeBattery, number>();
+    const batteryIndexMap = new Map<IBattery, number>();
     batteries.forEach((battery, index) => {
       batteryIndexMap.set(battery, index);
     });
@@ -174,54 +175,60 @@ export class InterceptorAllocation {
     };
   }
 
-  private assessBatteries(batteries: IronDomeBattery[], threats: Threat[]): BatteryCapability[] {
-    const batteryCapabilities = batteries.map((battery, index) => {
-      const coverage = new Set<string>();
-      let totalInterceptTime = 0;
-      let coverageCount = 0;
-      const interceptorCount = battery.getInterceptorCount();
+  private assessBatteries(batteries: IBattery[], threats: Threat[]): BatteryCapability[] {
+    // Only process Iron Dome batteries for interceptor allocation
+    const batteryCapabilities = batteries
+      .filter(battery => battery instanceof IronDomeBattery)
+      .map((battery, index) => {
+        const ironDomeBattery = battery as IronDomeBattery;
+        const coverage = new Set<string>();
+        let totalInterceptTime = 0;
+        let coverageCount = 0;
+        const interceptorCount = ironDomeBattery.getInterceptorCount();
 
-      // Determine which threats this battery can intercept
-      for (const threat of threats) {
-        const canIntercept = battery.canIntercept(threat);
-        if (canIntercept) {
-          coverage.add(threat.id);
+        // Determine which threats this battery can intercept
+        for (const threat of threats) {
+          const canIntercept = ironDomeBattery.canIntercept(threat);
+          if (canIntercept) {
+            coverage.add(threat.id);
 
-          // Estimate intercept time
-          const distance = threat.getPosition().distanceTo(battery.getPosition());
-          const interceptTime = distance / battery.getConfig().interceptorSpeed;
-          totalInterceptTime += interceptTime;
-          coverageCount++;
+            // Estimate intercept time
+            const distance = threat.getPosition().distanceTo(battery.getPosition());
+            const interceptorSpeed = ironDomeBattery.getConfig().interceptorSpeed;
+            const interceptTime = distance / interceptorSpeed;
+            totalInterceptTime += interceptTime;
+            coverageCount++;
+          }
         }
-      }
 
-      return {
-        battery,
-        availableInterceptors: interceptorCount,
-        coverage,
-        averageInterceptTime: coverageCount > 0 ? totalInterceptTime / coverageCount : Infinity,
-        successRate: this.getBatterySuccessRate(battery),
-      };
-    });
+        return {
+          battery,
+          availableInterceptors: interceptorCount,
+          coverage,
+          averageInterceptTime: coverageCount > 0 ? totalInterceptTime / coverageCount : Infinity,
+          successRate: this.getBatterySuccessRate(battery),
+        };
+      });
 
     return batteryCapabilities;
   }
 
   private dynamicAllocation(
     threats: ThreatMetrics[],
-    capabilities: BatteryCapability[]
-  ): Map<string, { battery: IronDomeBattery; interceptorCount: number }> {
-    const allocations = new Map<string, { battery: IronDomeBattery; interceptorCount: number }>();
+    capabilities: BatteryCapability[],
+    batteryIndexMap?: Map<IBattery, number>
+  ): Map<string, { battery: IronDomeBattery; interceptorCount: number; batteryIndex?: number }> {
+    const allocations = new Map<string, { battery: IronDomeBattery; interceptorCount: number; batteryIndex?: number }>();
 
     // Track remaining interceptors per battery
-    const remainingInterceptors = new Map<IronDomeBattery, number>();
+    const remainingInterceptors = new Map<IBattery, number>();
     capabilities.forEach(cap => {
       remainingInterceptors.set(cap.battery, cap.availableInterceptors);
     });
 
     // Greedy allocation with look-ahead
     for (const threatMetric of threats) {
-      let bestAllocation: { battery: IronDomeBattery; score: number } | null = null;
+      let bestAllocation: { battery: IBattery; score: number } | null = null;
       const skippedReasons: string[] = [];
 
       // Find best battery for this threat
@@ -248,10 +255,12 @@ export class InterceptorAllocation {
       }
 
       // Make allocation if found
-      if (bestAllocation) {
+      if (bestAllocation && bestAllocation.battery instanceof IronDomeBattery) {
+        const batteryIndex = batteryIndexMap ? batteryIndexMap.get(bestAllocation.battery) : undefined;
         allocations.set(threatMetric.threat.id, {
-          battery: bestAllocation.battery,
+          battery: bestAllocation.battery as IronDomeBattery,
           interceptorCount: threatMetric.requiredInterceptors,
+          batteryIndex,
         });
 
         // Update remaining interceptors
@@ -287,8 +296,11 @@ export class InterceptorAllocation {
     score += timeFactor;
 
     // Resource efficiency (0-20)
-    const batteryConfig = capability.battery.getConfig();
-    const maxInterceptors = batteryConfig.launcherCount || 20; // Use launcher count as max
+    let maxInterceptors = 20; // Default
+    if (capability.battery instanceof IronDomeBattery) {
+      const batteryConfig = capability.battery.getConfig();
+      maxInterceptors = batteryConfig.launcherCount || 20;
+    }
     const resourceEfficiency = availableInterceptors / maxInterceptors;
     score += resourceEfficiency * 20;
 
@@ -315,13 +327,13 @@ export class InterceptorAllocation {
     return this.historicalSuccessRates.get(threatType) || this.defaultSuccessRate;
   }
 
-  private getBatterySuccessRate(battery: IronDomeBattery): number {
+  private getBatterySuccessRate(battery: IBattery): number {
     // Could track per-battery success rates
     return this.defaultSuccessRate;
   }
 
   private calculateAllocationEfficiency(
-    allocations: Map<string, { battery: IronDomeBattery; interceptorCount: number }>,
+    allocations: Map<string, { battery: IronDomeBattery; interceptorCount: number; batteryIndex?: number }>,
     threats: ThreatMetrics[]
   ): number {
     if (threats.length === 0) return 1;

@@ -18,7 +18,7 @@ export interface EnvironmentConfig {
 export class EnvironmentSystem {
   private scene: THREE.Scene;
   private sun: THREE.Vector3 = new THREE.Vector3();
-  private sky: Sky | null = null;
+  public sky: Sky | null = null; // Made public for day/night cycle access
   private terrain: THREE.Group = new THREE.Group();
   private windDirection: THREE.Vector3 = new THREE.Vector3(1, 0, 0.5).normalize();
   private windSpeed: number = 5;
@@ -27,12 +27,12 @@ export class EnvironmentSystem {
   private targetWindAngle: number = this.windAngle;
   private windTransitionSpeed: number = 0.1; // How fast wind changes direction
 
-  // Skybox parameters
-  private turbidity: number = 10;
-  private rayleigh: number = 2;
-  private mieCoefficient: number = 0.005;
-  private mieDirectionalG: number = 0.8;
-  private elevation: number = 2;
+  // Skybox parameters - heavily adjusted to reduce sun brightness
+  private turbidity: number = 50; // Very high turbidity for maximum haze
+  private rayleigh: number = 0.5; // Much lower for minimal scattering
+  private mieCoefficient: number = 0.05; // Much higher for thick atmospheric haze
+  private mieDirectionalG: number = 0.999; // Near maximum to diffuse the sun
+  private elevation: number = 1; // Lower sun position
   private azimuth: number = 180;
 
   // Terrain parameters
@@ -48,9 +48,9 @@ export class EnvironmentSystem {
   initialize(config: Partial<EnvironmentConfig> = {}) {
     const defaultConfig: EnvironmentConfig = {
       fogEnabled: true,
-      fogColor: new THREE.Color(0x2a5298),
-      fogNear: 2000, // Start fog well beyond city limits
-      fogFar: 4000, // Extended fog distance for much larger world
+      fogColor: new THREE.Color(0x1a3560), // Darker fog to match scene background
+      fogNear: 2500, // Start fog further away for better visibility
+      fogFar: 5000, // Extended fog distance for clearer view
       skyboxEnabled: true,
       terrainEnabled: true,
       cloudsEnabled: false, // Disabled clouds
@@ -83,7 +83,7 @@ export class EnvironmentSystem {
   private setupSkybox() {
     // Create sky
     this.sky = new Sky();
-    this.sky.scale.setScalar(450000);
+    this.sky.scale.setScalar(100000); // Reduced from 450000 for less prominent sky
     this.scene.add(this.sky);
 
     const skyUniforms = this.sky.material.uniforms;

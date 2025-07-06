@@ -38,27 +38,27 @@ export class ThreatLauncherSystem {
   private intensityMultiplier: number = 1.0;
   private volleySizeMultiplier: number = 1.0;
 
-  // Predefined launcher positions - farther from the city
+  // Predefined launcher positions - at the edge of the world for maximum flight time
   private readonly LAUNCHER_POSITIONS = {
     north: [
-      { x: 0, z: -1200, name: 'North Alpha' },
-      { x: -300, z: -1100, name: 'North Bravo' },
-      { x: 300, z: -1100, name: 'North Charlie' },
+      { x: 0, z: -2800, name: 'North Alpha' },
+      { x: -600, z: -2700, name: 'North Bravo' },
+      { x: 600, z: -2700, name: 'North Charlie' },
     ],
     south: [
-      { x: 0, z: 1200, name: 'South Alpha' },
-      { x: -300, z: 1100, name: 'South Bravo' },
-      { x: 300, z: 1100, name: 'South Charlie' },
+      { x: 0, z: 2800, name: 'South Alpha' },
+      { x: -600, z: 2700, name: 'South Bravo' },
+      { x: 600, z: 2700, name: 'South Charlie' },
     ],
     east: [
-      { x: 1200, z: 0, name: 'East Alpha' },
-      { x: 1100, z: -300, name: 'East Bravo' },
-      { x: 1100, z: 300, name: 'East Charlie' },
+      { x: 2800, z: 0, name: 'East Alpha' },
+      { x: 2700, z: -600, name: 'East Bravo' },
+      { x: 2700, z: 600, name: 'East Charlie' },
     ],
     west: [
-      { x: -1200, z: 0, name: 'West Alpha' },
-      { x: -1100, z: -300, name: 'West Bravo' },
-      { x: -1100, z: 300, name: 'West Charlie' },
+      { x: -2800, z: 0, name: 'West Alpha' },
+      { x: -2700, z: -600, name: 'West Bravo' },
+      { x: -2700, z: 600, name: 'West Charlie' },
     ],
   };
 
