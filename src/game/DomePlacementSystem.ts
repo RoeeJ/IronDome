@@ -596,8 +596,8 @@ export class DomePlacementSystem {
       });
     }
 
-    // Hide individual meshes if using instanced rendering
-    if (this.useInstancedRendering) {
+    // Hide individual meshes if using instanced rendering (except laser batteries)
+    if (this.useInstancedRendering && batteryType !== BatteryType.LASER) {
       battery.setVisualVisibility(false);
     }
 
@@ -980,9 +980,11 @@ export class DomePlacementSystem {
       // Create instanced renderer
       this.instancedRenderer = new InstancedBatteryRenderer(this.scene, 50);
 
-      // Hide all individual dome meshes
+      // Hide all individual dome meshes (except laser batteries)
       this.placedDomes.forEach(dome => {
-        dome.battery.setVisualVisibility(false);
+        if (dome.batteryType !== BatteryType.LASER) {
+          dome.battery.setVisualVisibility(false);
+        }
       });
 
       // Update renderer

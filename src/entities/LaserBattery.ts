@@ -2,8 +2,7 @@ import * as THREE from 'three';
 import * as CANNON from 'cannon-es';
 import { IBattery } from './IBattery';
 import { Threat } from './Threat';
-import { ModelManager } from '../utils/ModelManager';
-import { MODEL_IDS } from '../config/ModelRegistry';
+import { ProceduralLaserTurret } from './ProceduralLaserTurret';
 import { LaserBeam } from './LaserBeam';
 import { debug } from '../utils/logger';
 import { ExplosionManager, ExplosionType } from '../systems/ExplosionManager';
@@ -24,8 +23,7 @@ export class LaserBattery implements IBattery {
   private world: CANNON.World;
   private position: THREE.Vector3;
   private group: THREE.Group;
-  private model?: THREE.Object3D;
-  private modelOffset: THREE.Vector3 = new THREE.Vector3(); // Offset from centering
+  private turret?: ProceduralLaserTurret;
   private firing: boolean = false;
   private currentTarget: LaserTarget | null = null;
   private laserBeam: LaserBeam | null = null;
@@ -52,63 +50,34 @@ export class LaserBattery implements IBattery {
     this.maxRange = config.capabilities.maxRange;
     this.damagePerSecond = config.capabilities.damagePerSecond || 20;
 
-    this.loadModel();
+    this.createTurret();
   }
 
-  private async loadModel() {
-    try {
-      const modelManager = ModelManager.getInstance();
-      const { scene: model } = await modelManager.loadModel(MODEL_IDS.LASER_CANNON);
-      this.model = model;
+  private createTurret() {
+    // Create the procedural laser turret
+    this.turret = new ProceduralLaserTurret();
+    
+    // Scale to match game scale
+    this.turret.scale.setScalar(5);
+    
+    // Add to group
+    this.group.add(this.turret);
 
-      // Hide parts before calculating bounds
-      const cylinder = this.model.getObjectByName('Cylinder007_0');
-      if (cylinder) {
-        cylinder.visible = false;
-      }
+    // Create hitbox for raycasting
+    const hitboxGeometry = GeometryFactory.getInstance().getBox(20, 40, 20);
+    const hitboxMaterial = MaterialCache.getInstance().getMeshBasicMaterial({
+      transparent: true,
+      opacity: 0,
+      depthWrite: false,
+    });
+    const hitbox = new THREE.Mesh(hitboxGeometry, hitboxMaterial);
+    hitbox.position.y = 20; // Center of the turret
+    hitbox.userData.isHitbox = true;
+    hitbox.userData.battery = this; // Store reference to battery
+    hitbox.name = 'laser-hitbox';
+    this.group.add(hitbox);
 
-      // Hide the firing effect (Cube_2) by default
-      this.setFiringEffectVisible(false);
-
-      // Calculate bounds to find center offset
-      const box = new THREE.Box3().setFromObject(this.model);
-      const center = box.getCenter(new THREE.Vector3());
-
-      // Scale the laser cannon to match game scale
-      this.model.scale.setScalar(10);
-
-      // Center the model and store the offset
-      this.modelOffset.set(-center.x * 10, -box.min.y * 10, -center.z * 10);
-      this.model.position.copy(this.modelOffset);
-
-      this.group.add(this.model);
-
-      // Create hitbox for raycasting
-      const hitboxGeometry = GeometryFactory.getInstance().getBox(15, 30, 15);
-      const hitboxMaterial = MaterialCache.getInstance().getMeshBasicMaterial({
-        transparent: true,
-        opacity: 0,
-        depthWrite: false,
-      });
-      const hitbox = new THREE.Mesh(hitboxGeometry, hitboxMaterial);
-      hitbox.position.y = 15; // Center of the model
-      hitbox.userData.isHitbox = true;
-      hitbox.userData.battery = this; // Store reference to battery
-      hitbox.name = 'laser-hitbox';
-      this.group.add(hitbox);
-
-      debug.category('LaserBattery', 'Model loaded successfully');
-    } catch (error) {
-      debug.error('Failed to load laser cannon model:', error);
-    }
-  }
-  private setFiringEffectVisible(visible: boolean) {
-    if (!this.model) return;
-
-    const firingPart = this.model.getObjectByName('Cube_2');
-    if (firingPart) {
-      firingPart.visible = visible;
-    }
+    debug.category('LaserBattery', 'Procedural turret created successfully');
   }
 
   private selectTarget(threats: Threat[]): Threat | null {
@@ -155,24 +124,10 @@ export class LaserBattery implements IBattery {
   }
 
   private rotateTowardsTarget(target: THREE.Vector3, deltaTime: number) {
-    if (!this.model) return;
+    if (!this.turret) return;
 
-    const direction = new THREE.Vector3().subVectors(target, this.position);
-    direction.y = 0; // Only rotate on Y axis
-    direction.normalize();
-
-    const targetAngle = Math.atan2(direction.x, direction.z);
-    const currentAngle = this.model.rotation.y;
-
-    // Calculate shortest rotation path
-    let angleDiff = targetAngle - currentAngle;
-    while (angleDiff > Math.PI) angleDiff -= 2 * Math.PI;
-    while (angleDiff < -Math.PI) angleDiff += 2 * Math.PI;
-
-    // Rotate towards target
-    const rotationStep =
-      Math.sign(angleDiff) * Math.min(Math.abs(angleDiff), this.rotationSpeed * deltaTime);
-    this.model.rotation.y += rotationStep;
+    // Use the turret's built-in aiming system
+    this.turret.aimAt(target);
   }
 
   public fireAt(threat: Threat) {
@@ -193,12 +148,11 @@ export class LaserBattery implements IBattery {
     // Mark threat as targeted
     LaserBattery.targetedThreats.add(threat.id);
 
-    if (!this.laserBeam) {
-      // The laser should fire from the battery's position, not from the offset model
-      this.laserBeam = new LaserBeam(this.scene, this.position, threat.getPosition());
+    if (!this.laserBeam && this.turret) {
+      // The laser should fire from the emitter position
+      const emitterPos = this.turret.getEmitterWorldPosition();
+      this.laserBeam = new LaserBeam(this.scene, emitterPos, threat.getPosition());
     }
-
-    this.setFiringEffectVisible(true);
 
     // TODO: Play laser sound when audio assets are available
     // const soundSystem = SoundSystem.getInstance();
@@ -222,12 +176,15 @@ export class LaserBattery implements IBattery {
       this.laserBeam.destroy();
       this.laserBeam = null;
     }
-
-    this.setFiringEffectVisible(false);
   }
 
   public update(deltaTime: number, threats: Threat[]) {
     if (!this.operational) return;
+
+    // Update turret animations
+    if (this.turret) {
+      this.turret.update();
+    }
 
     // Recharge energy when not firing
     if (!this.firing && this.resourceManagementEnabled) {
@@ -264,8 +221,9 @@ export class LaserBattery implements IBattery {
       this.rotateTowardsTarget(targetPos, deltaTime);
 
       // Update laser beam position with pulse effect
-      // Use the battery position (the beam should come from the battery center)
-      this.laserBeam.update(this.position, targetPos, deltaTime);
+      // Use the emitter position for accurate laser origin
+      const emitterPos = this.turret ? this.turret.getEmitterWorldPosition() : this.position;
+      this.laserBeam.update(emitterPos, targetPos, deltaTime);
 
       // Apply DoT
       const damageThisFrame = this.damagePerSecond * deltaTime;
@@ -319,6 +277,9 @@ export class LaserBattery implements IBattery {
 
   public destroy(): void {
     this.stopFiring();
+    if (this.turret) {
+      this.turret.destroy();
+    }
     this.scene.remove(this.group);
     this.operational = false;
   }
@@ -406,9 +367,5 @@ export class LaserBattery implements IBattery {
 
   public isFiring(): boolean {
     return this.firing;
-  }
-
-  public getModelOffset(): THREE.Vector3 {
-    return this.modelOffset.clone();
   }
 }

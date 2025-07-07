@@ -333,8 +333,9 @@ export class InstancedBatteryRenderer {
         this.updateIronDomeBattery(battery, this.ironDomeActiveCount);
         this.ironDomeActiveCount++;
       } else if (type === BatteryType.LASER && battery instanceof LaserBattery) {
-        this.updateLaserBattery(battery as LaserBattery, this.laserActiveCount, id);
-        this.laserActiveCount++;
+        // Skip laser batteries - they use procedural rendering now
+        // Don't hide their visual meshes
+        return;
       }
     });
 
