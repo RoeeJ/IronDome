@@ -1,0 +1,182 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Iron Dome - Rigger Tool</title>
+    <link rel="stylesheet" href="./rigger/styles.css">
+  </head>
+  <body>
+    <div id="rigger-app">
+      <!-- Left Panel: Model Hierarchy & Parts -->
+      <div id="left-panel" class="panel">
+        <h2>Model Hierarchy</h2>
+        <div id="model-selector">
+          <select id="model-dropdown">
+            <option value="procedural-turret">Procedural Turret</option>
+            <option value="laser-cannon">Laser Cannon (GLTF)</option>
+            <option value="battery">Iron Dome Battery</option>
+            <option value="radar">Radar System</option>
+          </select>
+          <button id="load-model">Load Model</button>
+        </div>
+        
+        <div id="hierarchy-tree">
+          <h3>Parts</h3>
+          <div id="parts-list">
+            <!-- Will be populated dynamically -->
+          </div>
+        </div>
+
+        <div id="bone-controls">
+          <h3>Bone System</h3>
+          <button id="add-bone">Add Bone</button>
+          <button id="toggle-bones">Show/Hide Bones</button>
+          <div id="bone-list">
+            <!-- Will be populated dynamically -->
+          </div>
+        </div>
+      </div>
+
+      <!-- Center: 3D Viewport -->
+      <div id="viewport">
+        <canvas id="canvas"></canvas>
+        <div id="loading" style="display: none;">
+          <div class="spinner"></div>
+          <p>Loading model...</p>
+        </div>
+        
+        <!-- Viewport Controls -->
+        <div id="viewport-controls">
+          <button id="reset-camera" title="Reset Camera">🎥</button>
+          <button id="toggle-grid" title="Toggle Grid">⊞</button>
+          <button id="toggle-axes" title="Toggle Axes">🎯</button>
+          <button id="screenshot" title="Screenshot">📷</button>
+        </div>
+
+        <!-- Info Display -->
+        <div id="info-overlay">
+          <div id="fps-counter">FPS: 0</div>
+          <div id="aim-info">
+            <div>Target: <span id="target-name">None</span></div>
+            <div>Angle: <span id="aim-angle">0°</span></div>
+            <div>Distance: <span id="target-distance">0m</span></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Right Panel: Rigging Controls -->
+      <div id="right-panel" class="panel">
+        <h2>Rigging Controls</h2>
+        
+        <!-- Transform Controls -->
+        <div class="control-section">
+          <h3>Transform</h3>
+          <div class="control-group">
+            <label>Selected Part: <span id="selected-part">None</span></label>
+          </div>
+          
+          <div class="control-group">
+            <label>Position</label>
+            <div class="vector-input">
+              <input type="number" id="pos-x" step="0.1" placeholder="X">
+              <input type="number" id="pos-y" step="0.1" placeholder="Y">
+              <input type="number" id="pos-z" step="0.1" placeholder="Z">
+            </div>
+          </div>
+          
+          <div class="control-group">
+            <label>Rotation</label>
+            <div class="vector-input">
+              <input type="number" id="rot-x" step="1" placeholder="X°">
+              <input type="number" id="rot-y" step="1" placeholder="Y°">
+              <input type="number" id="rot-z" step="1" placeholder="Z°">
+            </div>
+          </div>
+        </div>
+
+        <!-- Aiming Controls -->
+        <div class="control-section">
+          <h3>Aiming System</h3>
+          <div class="control-group">
+            <label>Mode</label>
+            <select id="aim-mode">
+              <option value="manual">Manual</option>
+              <option value="look-at">Look At Target</option>
+              <option value="ik">IK Solver</option>
+            </select>
+          </div>
+          
+          <div class="control-group">
+            <label>Target Position</label>
+            <div class="vector-input">
+              <input type="number" id="target-x" step="1" value="10">
+              <input type="number" id="target-y" step="1" value="5">
+              <input type="number" id="target-z" step="1" value="10">
+            </div>
+            <button id="place-target">Place Target</button>
+          </div>
+          
+          <div class="control-group">
+            <label>Constraints</label>
+            <div>
+              <label>Yaw Limit: 
+                <input type="range" id="yaw-limit" min="0" max="360" value="360">
+                <span id="yaw-limit-value">360°</span>
+              </label>
+            </div>
+            <div>
+              <label>Pitch Min: 
+                <input type="range" id="pitch-min" min="-90" max="0" value="-30">
+                <span id="pitch-min-value">-30°</span>
+              </label>
+            </div>
+            <div>
+              <label>Pitch Max: 
+                <input type="range" id="pitch-max" min="0" max="90" value="80">
+                <span id="pitch-max-value">80°</span>
+              </label>
+            </div>
+          </div>
+          
+          <div class="control-group">
+            <label>Smoothing</label>
+            <input type="range" id="rotation-smoothing" min="0" max="1" step="0.01" value="0.1">
+            <span id="smoothing-value">0.1</span>
+          </div>
+        </div>
+
+        <!-- Animation Controls -->
+        <div class="control-section">
+          <h3>Animation</h3>
+          <button id="start-aim-test">Start Aim Test</button>
+          <button id="stop-aim-test">Stop</button>
+          <div class="control-group">
+            <label>
+              <input type="checkbox" id="auto-rotate-target">
+              Auto-rotate Target
+            </label>
+          </div>
+          <div class="control-group">
+            <label>Target Speed: 
+              <input type="range" id="target-speed" min="0.1" max="5" step="0.1" value="1">
+              <span id="target-speed-value">1.0</span>
+            </label>
+          </div>
+        </div>
+
+        <!-- Export Controls -->
+        <div class="control-section">
+          <h3>Export</h3>
+          <button id="export-rig">Export Rigged Model</button>
+          <button id="export-config">Export Rig Config</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Tooltip for hover info -->
+    <div id="tooltip" class="tooltip" style="display: none;"></div>
+
+    <script type="module" src="./rigger/RiggerApp.ts"></script>
+  </body>
+</html>

@@ -208,4 +208,14 @@ if (existsSync(builtTubeEditorHtml)) {
   console.log('✓ Created /tube-editor/index.html with fixed asset paths');
 }
 
+// Create rigger route
+const riggerDir = path.join(outdir, 'rigger');
+const riggerHtml = path.join(outdir, 'rigger.html');
+if (existsSync(riggerHtml)) {
+  await mkdir(riggerDir, { recursive: true });
+  await copyFile(riggerHtml, path.join(riggerDir, 'index.html'));
+  await fixAssetPaths(path.join(riggerDir, 'index.html'), 1);
+  console.log('✓ Created /rigger/index.html with fixed asset paths');
+}
+
 console.log('🎯 Route structure ready for production');

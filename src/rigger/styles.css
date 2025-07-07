@@ -1,0 +1,338 @@
+/* Rigger Tool Styles */
+
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+body {
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  background: #0a0a0a;
+  color: #e0e0e0;
+  overflow: hidden;
+}
+
+#rigger-app {
+  display: flex;
+  height: 100vh;
+  width: 100vw;
+}
+
+/* Panels */
+.panel {
+  background: #1a1a1a;
+  border: 1px solid #333;
+  overflow-y: auto;
+  padding: 20px;
+}
+
+#left-panel {
+  width: 280px;
+  border-right: 1px solid #333;
+}
+
+#right-panel {
+  width: 320px;
+  border-left: 1px solid #333;
+}
+
+/* Viewport */
+#viewport {
+  flex: 1;
+  position: relative;
+  background: #0f0f0f;
+}
+
+#canvas {
+  width: 100%;
+  height: 100%;
+  display: block;
+}
+
+/* Loading */
+#loading {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  text-align: center;
+}
+
+.spinner {
+  width: 50px;
+  height: 50px;
+  border: 3px solid #333;
+  border-top-color: #4488ff;
+  border-radius: 50%;
+  animation: spin 1s linear infinite;
+  margin: 0 auto 20px;
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+/* Viewport Controls */
+#viewport-controls {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  display: flex;
+  gap: 5px;
+}
+
+#viewport-controls button {
+  width: 36px;
+  height: 36px;
+  background: rgba(30, 30, 30, 0.9);
+  border: 1px solid #444;
+  color: #e0e0e0;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 18px;
+  transition: all 0.2s;
+}
+
+#viewport-controls button:hover {
+  background: rgba(68, 136, 255, 0.3);
+  border-color: #4488ff;
+}
+
+/* Info Overlay */
+#info-overlay {
+  position: absolute;
+  top: 10px;
+  left: 10px;
+  background: rgba(0, 0, 0, 0.7);
+  padding: 10px 15px;
+  border-radius: 4px;
+  font-size: 14px;
+  font-family: monospace;
+}
+
+#aim-info {
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px solid #333;
+}
+
+#aim-info div {
+  margin: 5px 0;
+}
+
+#aim-info span {
+  color: #4488ff;
+}
+
+/* Headers */
+h2 {
+  font-size: 18px;
+  margin-bottom: 20px;
+  color: #fff;
+  border-bottom: 2px solid #4488ff;
+  padding-bottom: 10px;
+}
+
+h3 {
+  font-size: 16px;
+  margin: 20px 0 10px;
+  color: #ccc;
+}
+
+/* Model Selector */
+#model-selector {
+  margin-bottom: 20px;
+}
+
+#model-dropdown {
+  width: 100%;
+  padding: 8px;
+  background: #2a2a2a;
+  border: 1px solid #444;
+  color: #e0e0e0;
+  border-radius: 4px;
+  margin-bottom: 10px;
+}
+
+/* Buttons */
+button {
+  background: #2a2a2a;
+  color: #e0e0e0;
+  border: 1px solid #444;
+  padding: 8px 16px;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: all 0.2s;
+  font-size: 14px;
+}
+
+button:hover {
+  background: #3a3a3a;
+  border-color: #4488ff;
+}
+
+button:active {
+  background: #222;
+}
+
+#load-model {
+  width: 100%;
+}
+
+/* Hierarchy Tree */
+#hierarchy-tree {
+  margin-bottom: 20px;
+}
+
+#parts-list, #bone-list {
+  background: #222;
+  border: 1px solid #333;
+  border-radius: 4px;
+  padding: 10px;
+  max-height: 200px;
+  overflow-y: auto;
+}
+
+.part-item, .bone-item {
+  padding: 5px 10px;
+  cursor: pointer;
+  transition: background 0.2s;
+  border-radius: 3px;
+  margin: 2px 0;
+}
+
+.part-item:hover, .bone-item:hover {
+  background: #333;
+}
+
+.part-item.selected, .bone-item.selected {
+  background: #4488ff;
+  color: #fff;
+}
+
+/* Control Sections */
+.control-section {
+  margin-bottom: 30px;
+  padding-bottom: 20px;
+  border-bottom: 1px solid #333;
+}
+
+.control-section:last-child {
+  border-bottom: none;
+}
+
+.control-group {
+  margin-bottom: 15px;
+}
+
+.control-group label {
+  display: block;
+  margin-bottom: 5px;
+  font-size: 14px;
+  color: #aaa;
+}
+
+/* Vector Inputs */
+.vector-input {
+  display: flex;
+  gap: 5px;
+}
+
+.vector-input input {
+  flex: 1;
+  padding: 6px;
+  background: #2a2a2a;
+  border: 1px solid #444;
+  color: #e0e0e0;
+  border-radius: 3px;
+  font-size: 14px;
+}
+
+.vector-input input:focus {
+  outline: none;
+  border-color: #4488ff;
+}
+
+/* Select Inputs */
+select {
+  width: 100%;
+  padding: 8px;
+  background: #2a2a2a;
+  border: 1px solid #444;
+  color: #e0e0e0;
+  border-radius: 4px;
+  font-size: 14px;
+}
+
+/* Range Inputs */
+input[type="range"] {
+  width: 100%;
+  margin: 5px 0;
+}
+
+/* Checkboxes */
+input[type="checkbox"] {
+  margin-right: 8px;
+}
+
+/* Bone Controls */
+#bone-controls {
+  margin-top: 20px;
+}
+
+#bone-controls button {
+  margin-right: 10px;
+  margin-bottom: 10px;
+}
+
+/* Animation Controls */
+#start-aim-test, #stop-aim-test {
+  margin-right: 10px;
+}
+
+#stop-aim-test {
+  background: #aa3333;
+}
+
+#stop-aim-test:hover {
+  background: #cc4444;
+}
+
+/* Export Controls */
+#export-rig, #export-config {
+  width: 100%;
+  margin-bottom: 10px;
+}
+
+/* Tooltip */
+.tooltip {
+  position: fixed;
+  background: rgba(0, 0, 0, 0.9);
+  color: #fff;
+  padding: 5px 10px;
+  border-radius: 4px;
+  font-size: 12px;
+  pointer-events: none;
+  z-index: 1000;
+  border: 1px solid #333;
+}
+
+/* Scrollbar Styling */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: #1a1a1a;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #444;
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #555;
+}

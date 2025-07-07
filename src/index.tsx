@@ -2,6 +2,7 @@ import { serve } from 'bun';
 import index from './index.html';
 import tubeEditor from './tools/tube-editor/index.html';
 import modelViewer from './model-viewer.html';
+import rigger from './rigger.html';
 
 const server = serve({
   routes: {
@@ -10,6 +11,9 @@ const server = serve({
 
     // Serve model viewer
     '/model-viewer': modelViewer,
+
+    // Serve rigger tool
+    '/rigger': rigger,
 
     // Serve assets
     '/assets/*': async req => {
