@@ -730,6 +730,11 @@ export class RiggerApp {
       this.targetMesh.position.y = baseHeight + Math.sin(time * waveFrequency) * waveAmplitude;
     }
 
+    // Update procedural turret animations
+    if (this.proceduralTurret) {
+      this.proceduralTurret.update();
+    }
+
     // Update aiming if test is running
     if (this.isAimTestRunning && this.targetMesh && this.currentModel) {
       // Check if we're using the procedural turret
