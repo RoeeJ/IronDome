@@ -93,6 +93,9 @@ export class SandboxControls {
 
       clearSkies: () => {
         this.config.threatManager.clearAll();
+        (
+          window as unknown as { __interceptionSystem?: { clearInterceptors(): void } }
+        ).__interceptionSystem?.clearInterceptors();
         this.config.showNotification('All threats cleared');
       },
 

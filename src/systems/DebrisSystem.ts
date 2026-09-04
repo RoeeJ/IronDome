@@ -1,3 +1,4 @@
+import { simulationClock } from '@/simulation/SimulationClock';
 import * as THREE from 'three';
 import * as CANNON from 'cannon-es';
 import { GeometryFactory } from '../utils/GeometryFactory';
@@ -181,9 +182,9 @@ export class DebrisSystem {
     this.scene.add(impact);
 
     // Animate and remove
-    const startTime = Date.now();
+    const startTime = simulationClock.nowMs;
     const animate = () => {
-      const elapsed = (Date.now() - startTime) / 1000;
+      const elapsed = (simulationClock.nowMs - startTime) / 1000;
       if (elapsed > 0.5) {
         this.scene.remove(impact);
         // Don't dispose cached geometry and materials

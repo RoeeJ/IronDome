@@ -1,11 +1,16 @@
 import * as THREE from 'three';
+import { gameplayRandom } from '@/simulation/Random';
+import { isFiniteVector } from '@/physics/numerics';
 import { debug } from '../utils/logger';
 
 export interface BlastConfig {
-  // Warhead characteristics
-  warheadMass: number; // kg of explosive
-  fragmentationRadius: number; // Effective radius for fragments (meters)
-  blastRadius: number; // Overpressure damage radius (meters)
+  // Legacy descriptive metadata; the game probability model uses only the four damage zones.
+  /** @deprecated Metadata only; not an input to the game probability model. */
+  warheadMass: number;
+  /** @deprecated Metadata only. */
+  fragmentationRadius: number;
+  /** @deprecated Metadata only. */
+  blastRadius: number;
 
   // Damage zones
   lethalRadius: number; // 100% kill probability (meters)
@@ -15,7 +20,7 @@ export interface BlastConfig {
 }
 
 export class BlastPhysics {
-  // Tamir interceptor warhead specifications (based on public info)
+  // Simulator tuning values; not a validated real-world lethality model.
   static readonly TAMIR_CONFIG: BlastConfig = {
     warheadMass: 11, // ~11kg warhead
     fragmentationRadius: 20, // Effective fragment range
@@ -30,24 +35,45 @@ export class BlastPhysics {
 
   /**
    * Calculate damage probability based on distance from blast center
-   * Uses realistic fragmentation pattern and blast physics
+   * Deterministic game damage-zone model; stochastic resolution is a separate operation.
    */
-  static calculateDamage(
+  static evaluateDamage(
     blastPosition: THREE.Vector3,
     targetPosition: THREE.Vector3,
     targetVelocity: THREE.Vector3,
     config: BlastConfig = BlastPhysics.TAMIR_CONFIG,
     interceptorVelocity?: THREE.Vector3
   ): {
-    hit: boolean;
     damage: number;
     killProbability: number;
     damageType: 'direct' | 'severe' | 'moderate' | 'light' | 'none';
   } {
+    const zones = [
+      config.lethalRadius,
+      config.severeRadius,
+      config.moderateRadius,
+      config.lightRadius,
+    ];
+    if (
+      ![
+        blastPosition,
+        targetPosition,
+        targetVelocity,
+        interceptorVelocity ?? new THREE.Vector3(),
+      ].every(isFiniteVector) ||
+      !zones.every(Number.isFinite) ||
+      zones[0] < 0 ||
+      zones.some((value, i) => i > 0 && value <= zones[i - 1])
+    ) {
+      throw new RangeError('Invalid game blast inputs');
+    }
     const distance = blastPosition.distanceTo(targetPosition);
 
     // Account for relative velocity (crossing targets are harder to hit)
-    const relativeSpeed = targetVelocity.length();
+    const relativeSpeed = targetVelocity
+      .clone()
+      .sub(interceptorVelocity ?? new THREE.Vector3())
+      .length();
     const crossingFactor = Math.min(1, 300 / (relativeSpeed + 100)); // Penalty for fast targets
 
     // Calculate directional damage bonus for head-on intercepts
@@ -113,25 +139,29 @@ export class BlastPhysics {
       damageType = 'light';
     }
 
-    // Add some randomness for edge cases
-    const randomFactor = 0.9 + Math.random() * 0.2;
-    killProbability *= randomFactor;
+    killProbability = Math.max(0, Math.min(1, killProbability));
+    return { damage: killProbability, killProbability, damageType };
+  }
 
-    // Determine if hit based on probability
-    const hit = Math.random() < killProbability;
-
-    debug.category(
-      'BlastPhysics',
-      `Distance: ${distance.toFixed(1)}m, Type: ${damageType}, ` +
-        `Kill%: ${(killProbability * 100).toFixed(0)}%, Hit: ${hit}`
+  static calculateDamage(
+    blastPosition: THREE.Vector3,
+    targetPosition: THREE.Vector3,
+    targetVelocity: THREE.Vector3,
+    config: BlastConfig = BlastPhysics.TAMIR_CONFIG,
+    interceptorVelocity?: THREE.Vector3,
+    random: () => number = () => gameplayRandom.next()
+  ) {
+    const damage = this.evaluateDamage(
+      blastPosition,
+      targetPosition,
+      targetVelocity,
+      config,
+      interceptorVelocity
     );
-
-    return {
-      hit,
-      damage: killProbability,
-      killProbability: Math.min(1, killProbability),
-      damageType,
-    };
+    const sample = random();
+    if (!Number.isFinite(sample) || sample < 0 || sample >= 1)
+      throw new RangeError('Random sample must be in [0, 1)');
+    return { ...damage, hit: sample < damage.killProbability };
   }
 
   /**
@@ -158,9 +188,9 @@ export class BlastPhysics {
     const relVel = targetVel.clone().sub(interceptorVel);
 
     // Calculate closest approach
-    const timeToClosest = -relPos.dot(relVel) / relVel.lengthSq();
+    const timeToClosest = relVel.lengthSq() > 1e-12 ? -relPos.dot(relVel) / relVel.lengthSq() : 0;
 
-    if (timeToClosest < 0) {
+    if (timeToClosest <= 0) {
       // Already passed closest approach
       const currentDistance = relPos.length();
       return {

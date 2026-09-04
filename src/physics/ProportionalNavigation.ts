@@ -1,5 +1,6 @@
 import * as THREE from 'three';
-import { debug } from '@/utils/DebugLogger';
+import { calculateProportionalNavigation } from '@/physics/interception';
+import { isFiniteVector } from '@/physics/numerics';
 
 export interface GuidanceCommand {
   acceleration: THREE.Vector3;
@@ -12,82 +13,36 @@ export class ProportionalNavigation {
   private readonly maxAcceleration: number = 300; // m/s² (~30G)
   private readonly minClosingVelocity: number = 50; // m/s
 
-  // State for augmented PN
-  private previousLOS: THREE.Vector3 | null = null;
-  private previousTime: number = 0;
-
+  /** Analytic LOS derivative uses current kinematics, with no shared or wall-clock history.
+   * The legacy augmented flag is retained; acceleration augmentation is explicit in terminal guidance.
+   */
   calculateGuidanceCommand(
     interceptorPos: THREE.Vector3,
     interceptorVel: THREE.Vector3,
     targetPos: THREE.Vector3,
     targetVel: THREE.Vector3,
-    useAugmented: boolean = true
+    _useAugmented = true
   ): GuidanceCommand {
-    // Calculate relative position and velocity
+    if (![interceptorPos, interceptorVel, targetPos, targetVel].every(isFiniteVector)) {
+      throw new RangeError('Navigation requires finite position and velocity');
+    }
     const r = targetPos.clone().sub(interceptorPos);
-    const vr = targetVel.clone().sub(interceptorVel);
-
     const range = r.length();
-    const closingVelocity = -r.dot(vr) / range;
-
-    // Time to go estimation
-    const timeToGo = range / Math.max(closingVelocity, this.minClosingVelocity);
-
-    // Calculate line of sight (LOS) unit vector
-    const los = r.normalize();
-
-    // Calculate LOS rate
-    let omega: THREE.Vector3;
-
-    if (useAugmented && this.previousLOS) {
-      // Augmented PN: Use actual LOS rate measurement
-      const currentTime = Date.now() / 1000;
-      const dt = currentTime - this.previousTime;
-
-      if (dt > 0) {
-        const losChange = los.clone().sub(this.previousLOS);
-        omega = losChange.divideScalar(dt);
-      } else {
-        // Fallback to true PN
-        omega = this.calculateLOSRate(r, vr, range);
-      }
-
-      this.previousTime = currentTime;
-    } else {
-      // True PN: Calculate from kinematics
-      omega = this.calculateLOSRate(r, vr, range);
-    }
-
-    this.previousLOS = los.clone();
-
-    // Apply proportional navigation law: a = N * Vc * ω
-    const commandAccel = omega.multiplyScalar(this.navigationConstant * closingVelocity);
-
-    // Apply acceleration limits
-    const requiredG = commandAccel.length() / 9.81;
-    if (commandAccel.length() > this.maxAcceleration) {
-      commandAccel.normalize().multiplyScalar(this.maxAcceleration);
-    }
-
-    debug.module('Guidance').log('PN Command', {
-      range: range.toFixed(1),
-      closingVelocity: closingVelocity.toFixed(1),
-      timeToGo: timeToGo.toFixed(2),
-      requiredG: requiredG.toFixed(1),
-      commandedG: (commandAccel.length() / 9.81).toFixed(1),
-    });
-
+    if (range < 1e-9) return { acceleration: new THREE.Vector3(), requiredG: 0, timeToGo: 0 };
+    const closingVelocity = -r.dot(targetVel.clone().sub(interceptorVel)) / range;
+    const acceleration = calculateProportionalNavigation(
+      interceptorPos,
+      interceptorVel,
+      targetPos,
+      targetVel,
+      this.navigationConstant,
+      this.maxAcceleration
+    );
     return {
-      acceleration: commandAccel,
-      requiredG: commandAccel.length() / 9.81,
-      timeToGo,
+      acceleration,
+      requiredG: acceleration.length() / 9.82,
+      timeToGo: range / Math.max(closingVelocity, this.minClosingVelocity),
     };
-  }
-
-  private calculateLOSRate(r: THREE.Vector3, vr: THREE.Vector3, range: number): THREE.Vector3 {
-    // ω = (r × vr) / r²
-    const crossProduct = r.clone().cross(vr);
-    return crossProduct.divideScalar(range * range);
   }
 
   // Advanced guidance for terminal phase
@@ -108,7 +63,7 @@ export class ProportionalNavigation {
     );
 
     // Add target acceleration compensation
-    const compensationFactor = (baseCommand.timeToGo * this.navigationConstant) / 2;
+    const compensationFactor = this.navigationConstant / 2;
     const accelCompensation = targetAccel.clone().multiplyScalar(compensationFactor);
 
     const totalAccel = baseCommand.acceleration.add(accelCompensation);
@@ -120,7 +75,7 @@ export class ProportionalNavigation {
 
     return {
       acceleration: totalAccel,
-      requiredG: totalAccel.length() / 9.81,
+      requiredG: totalAccel.length() / 9.82,
       timeToGo: baseCommand.timeToGo,
     };
   }
@@ -137,6 +92,7 @@ export class ProportionalNavigation {
     const r = targetPos.clone().sub(interceptorPos);
     const v = targetVel.clone().sub(interceptorVel);
 
+    if (v.lengthSq() < 1e-12) return r.length();
     const timeToGo = -r.dot(v) / v.lengthSq();
 
     if (timeToGo <= 0) {
@@ -171,7 +127,7 @@ export class ProportionalNavigation {
     const direction = predictedPos.sub(launchPos).normalize();
 
     // Convert to spherical coordinates
-    const azimuth = Math.atan2(direction.x, direction.z);
+    const azimuth = Math.atan2(direction.z, direction.x);
     const elevation = Math.asin(direction.y);
 
     // Apply energy-optimal elevation bias

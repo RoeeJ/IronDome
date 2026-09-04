@@ -1,4 +1,6 @@
+import { cosmeticRandom } from '@/simulation/Random';
 import * as THREE from 'three';
+import { BuildingState, createBuildingState } from '@/world/BuildingState';
 import { MaterialCache } from '../utils/MaterialCache';
 import { GeometryFactory } from '../utils/GeometryFactory';
 import { debug } from '../utils/logger';
@@ -10,7 +12,7 @@ interface BuildingType {
   material: THREE.MeshStandardMaterial;
 }
 
-interface BuildingInstance {
+interface BuildingInstance extends BuildingState {
   id: string;
   typeIndex: number;
   position: THREE.Vector3;
@@ -41,9 +43,7 @@ export class InstancedBuildingRenderer {
   private litWindowPool: number[] = [];
   private unlitWindowPool: number[] = [];
 
-  // Error throttling
-  private lastPoolExhaustionWarning = 0;
-  private poolExhaustionWarningInterval = 5000; // Only warn once every 5 seconds
+  private nextBuildingId = 0;
 
   // Building categories based on size
   private readonly SIZE_CATEGORIES = [
@@ -153,14 +153,84 @@ export class InstancedBuildingRenderer {
     this.scene.add(this.unlitWindowMesh);
   }
 
+  dispose(): void {
+    for (const mesh of [...this.instancedMeshes, this.litWindowMesh, this.unlitWindowMesh]) {
+      this.scene.remove(mesh);
+      mesh.dispose();
+    }
+    // Window materials are owned here; all geometries and building materials are cached.
+    (this.litWindowMesh.material as THREE.Material).dispose();
+    (this.unlitWindowMesh.material as THREE.Material).dispose();
+    this.buildings.clear();
+    this.windowInstances.clear();
+  }
+
+  private growMesh(mesh: THREE.InstancedMesh, capacity: number): THREE.InstancedMesh {
+    const replacement = new THREE.InstancedMesh(mesh.geometry, mesh.material, capacity);
+    replacement.name = mesh.name;
+    replacement.castShadow = mesh.castShadow;
+    replacement.receiveShadow = mesh.receiveShadow;
+    replacement.renderOrder = mesh.renderOrder;
+    replacement.frustumCulled = mesh.frustumCulled;
+    replacement.instanceMatrix.setUsage(mesh.instanceMatrix.usage);
+    const matrix = new THREE.Matrix4();
+    const color = new THREE.Color();
+    const zero = new THREE.Matrix4().makeScale(0, 0, 0);
+    for (let i = 0; i < capacity; i++) {
+      if (i < mesh.count) mesh.getMatrixAt(i, matrix);
+      replacement.setMatrixAt(i, i < mesh.count ? matrix : zero);
+      if (mesh.instanceColor && i < mesh.count) {
+        mesh.getColorAt(i, color);
+        replacement.setColorAt(i, color);
+      }
+    }
+    replacement.instanceMatrix.needsUpdate = true;
+    replacement.computeBoundingSphere();
+    this.scene.remove(mesh);
+    mesh.dispose(); // Release only instance buffers; geometry and materials are shared.
+    this.scene.add(replacement);
+    return replacement;
+  }
+
+  private ensureWindowCapacity(required: number): void {
+    if (required <= this.maxWindowsPerMesh) return;
+    const capacity = Math.max(required, this.maxWindowsPerMesh * 2);
+    this.litWindowMesh = this.growMesh(this.litWindowMesh, capacity);
+    this.unlitWindowMesh = this.growMesh(this.unlitWindowMesh, capacity);
+    for (let i = this.maxWindowsPerMesh; i < capacity; i++) {
+      this.litWindowPool.push(i);
+      this.unlitWindowPool.push(i);
+    }
+    this.maxWindowsPerMesh = capacity;
+  }
+
+  updateDamage(id: string): void {
+    const building = this.buildings.get(id);
+    if (!building) return;
+    if (building.isDestroyed) {
+      this.removeBuilding(id);
+      return;
+    }
+    const mesh = this.instancedMeshes[building.typeIndex];
+    const brightness = 0.25 + (0.75 * building.health) / building.maxHealth;
+    mesh.setColorAt(building.instanceIndex, new THREE.Color(brightness, brightness, brightness));
+    if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
+  }
+
   /**
    * Create a building instance
    */
-  createBuilding(position: THREE.Vector3, width: number, height: number, depth: number): string {
-    const id = `building_${Date.now()}_${Math.random()}`;
+  createBuilding(
+    position: THREE.Vector3,
+    width: number,
+    height: number,
+    depth: number,
+    state = createBuildingState(`building_${this.nextBuildingId++}`, position, width, height, depth)
+  ): string {
+    const id = state.id;
 
     // Determine category based on height
-    let categoryIndex = 0;
+    let categoryIndex = this.SIZE_CATEGORIES.length - 1;
     for (let i = 0; i < this.SIZE_CATEGORIES.length; i++) {
       if (height <= this.SIZE_CATEGORIES[i].maxHeight) {
         categoryIndex = i;
@@ -169,11 +239,11 @@ export class InstancedBuildingRenderer {
     }
 
     // Find available instance in the category
-    const instancedMesh = this.instancedMeshes[categoryIndex];
+    let instancedMesh = this.instancedMeshes[categoryIndex];
     let instanceIndex = -1;
 
     // Find first unused instance (scale is 0)
-    for (let i = 0; i < this.SIZE_CATEGORIES[categoryIndex].maxCount; i++) {
+    for (let i = 0; i < instancedMesh.count; i++) {
       const matrix = new THREE.Matrix4();
       instancedMesh.getMatrixAt(i, matrix);
       const scale = new THREE.Vector3();
@@ -186,12 +256,13 @@ export class InstancedBuildingRenderer {
     }
 
     if (instanceIndex === -1) {
-      debug.warn(`Building category ${this.SIZE_CATEGORIES[categoryIndex].name} is full`);
-      return id; // Still return ID but building won't be visible
+      instanceIndex = instancedMesh.count;
+      instancedMesh = this.growMesh(instancedMesh, instancedMesh.count * 2);
+      this.instancedMeshes[categoryIndex] = instancedMesh;
     }
 
     // Create building instance
-    const building: BuildingInstance = {
+    const building: BuildingInstance = Object.assign(state, {
       id,
       typeIndex: categoryIndex,
       position: position.clone(),
@@ -201,10 +272,12 @@ export class InstancedBuildingRenderer {
       windowIndices: [],
       health: 100,
       maxHealth: 100,
-    };
+    });
 
     // Set instance matrix
     this.updateBuildingTransform(building);
+    instancedMesh.setColorAt(instanceIndex, new THREE.Color(1, 1, 1));
+    if (instancedMesh.instanceColor) instancedMesh.instanceColor.needsUpdate = true;
 
     // Create windows
     this.createBuildingWindows(building);
@@ -218,7 +291,7 @@ export class InstancedBuildingRenderer {
     const mesh = this.instancedMeshes[building.typeIndex];
 
     this.dummy.position.copy(building.position);
-    this.dummy.position.y = building.scale.y / 2; // Adjust for bottom-centered buildings
+    this.dummy.position.y = building.position.y + building.scale.y / 2; // Adjust for bottom-centered buildings
     this.dummy.rotation.y = building.rotation;
     this.dummy.scale.copy(building.scale);
     this.dummy.updateMatrix();
@@ -242,14 +315,10 @@ export class InstancedBuildingRenderer {
 
     // ALL SIDES GET WINDOWS: No random side selection
     const totalWindowsNeeded = (windowColsX * 2 + windowColsZ * 2) * windowRows;
-    const availableWindows = this.litWindowPool.length + this.unlitWindowPool.length;
-
-    // Check if we have enough windows available
-    if (availableWindows < totalWindowsNeeded * 0.5) {
-      debug.warn(
-        `Low window pool: ${availableWindows} available, ${totalWindowsNeeded} needed for building ${building.id}`
-      );
-    }
+    // Each pool can hold the entire city, including a complete day/night transition.
+    const allocated =
+      this.maxWindowsPerMesh * 2 - this.litWindowPool.length - this.unlitWindowPool.length;
+    this.ensureWindowCapacity(allocated + totalWindowsNeeded);
 
     const windowIds: { lit: number[]; unlit: number[] } = { lit: [], unlit: [] };
 
@@ -266,7 +335,7 @@ export class InstancedBuildingRenderer {
         for (let col = 0; col < side.cols; col++) {
           // High window density for full coverage
           const windowDensity = 1.0; // 100% window density like the legacy algorithm
-          if (Math.random() > windowDensity) {
+          if (cosmeticRandom.next() > windowDensity) {
             continue;
           }
 
@@ -290,22 +359,11 @@ export class InstancedBuildingRenderer {
               litChance = 0.5; // Late night - 50% lit
             }
           }
-          const isLit = Math.random() < litChance;
+          const isLit = cosmeticRandom.next() < litChance;
 
           const pool = isLit ? this.litWindowPool : this.unlitWindowPool;
           const mesh = isLit ? this.litWindowMesh : this.unlitWindowMesh;
           const windowList = isLit ? windowIds.lit : windowIds.unlit;
-
-          if (pool.length === 0) {
-            const now = Date.now();
-            if (now - this.lastPoolExhaustionWarning > this.poolExhaustionWarningInterval) {
-              debug.error(
-                `Window pool exhausted: ${isLit ? 'lit' : 'unlit'} pool empty at building ${building.id}. Pool size: ${this.maxWindowsPerMesh}`
-              );
-              this.lastPoolExhaustionWarning = now;
-            }
-            continue;
-          }
 
           const windowIndex = pool.pop()!;
           windowList.push(windowIndex);
@@ -376,6 +434,7 @@ export class InstancedBuildingRenderer {
     }
 
     this.buildings.delete(id);
+    this.updateBoundingSpheres();
   }
 
   /**
@@ -525,6 +584,8 @@ export class InstancedBuildingRenderer {
     if (totalSwitched > 0) {
       this.litWindowMesh.instanceMatrix.needsUpdate = true;
       this.unlitWindowMesh.instanceMatrix.needsUpdate = true;
+      this.litWindowMesh.computeBoundingSphere();
+      this.unlitWindowMesh.computeBoundingSphere();
       debug.log(`Switched ${totalSwitched} windows for time ${hours.toFixed(1)}h`);
     }
   }

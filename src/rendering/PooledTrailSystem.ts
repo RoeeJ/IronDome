@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { simulationClock } from '@/simulation/SimulationClock';
 import { debug } from '../utils/logger';
 
 interface TrailSegment {
@@ -37,6 +38,9 @@ export class PooledTrailSystem {
   // Trail management
   private trails = new Map<string, TrailSegment>();
   private nextTrailId = 0;
+  private reservedVertices = 0;
+  private membershipDirty = false;
+  private rejectedTrails = 0;
 
   // Optimization
   private updateQueue = new Set<string>();
@@ -96,6 +100,18 @@ export class PooledTrailSystem {
    * Create a new trail
    */
   createTrail(maxLength: number = 50, color: number = 0xffffff): string {
+    if (!Number.isSafeInteger(maxLength) || maxLength < 2) {
+      throw new RangeError('Trail length must be an integer of at least two points');
+    }
+    const vertices = 2 * (maxLength - 1);
+    if (
+      this.trails.size >= this.MAX_TRAILS ||
+      this.reservedVertices + vertices > this.MAX_TOTAL_POINTS
+    ) {
+      this.rejectedTrails++;
+      return ''; // Explicit visual degradation: gameplay continues without a trail.
+    }
+    this.reservedVertices += vertices;
     const id = `trail_${this.nextTrailId++}`;
 
     // Convert hex color to RGB
@@ -115,7 +131,7 @@ export class PooledTrailSystem {
       currentIndex: 0,
       pointCount: 0, // Start with no valid points
       active: true,
-      lastUpdateTime: Date.now(),
+      lastUpdateTime: simulationClock.nowMs,
     };
 
     // Initialize trail colors
@@ -126,6 +142,7 @@ export class PooledTrailSystem {
     }
 
     this.trails.set(id, trail);
+    this.membershipDirty = true;
     return id;
   }
 
@@ -136,7 +153,7 @@ export class PooledTrailSystem {
     const trail = this.trails.get(id);
     if (!trail || !trail.active) return;
 
-    trail.lastUpdateTime = Date.now();
+    trail.lastUpdateTime = simulationClock.nowMs;
 
     // Add new position to trail buffer
     const idx = trail.currentIndex * 3;
@@ -164,7 +181,9 @@ export class PooledTrailSystem {
     if (!trail) return;
 
     trail.active = false;
+    this.reservedVertices -= 2 * (trail.maxLength - 1);
     this.trails.delete(id);
+    this.membershipDirty = true;
 
     // Mark all trails for update to recalculate positions
     this.trails.forEach((t, tid) => {
@@ -178,9 +197,15 @@ export class PooledTrailSystem {
    * Update all active trails - call this in the render loop
    */
   update(): void {
-    const now = Date.now();
+    const now = simulationClock.nowMs;
 
-    // Always update all trails for correct rendering
+    if (now - this.lastCleanupTime > this.CLEANUP_INTERVAL) {
+      this.cleanupInactiveTrails();
+      this.lastCleanupTime = now;
+    }
+    if (!this.membershipDirty && this.updateQueue.size === 0) return;
+
+    // Repack only when points or membership changed.
     let totalSegments = 0;
 
     // First pass: calculate total segments needed (points - 1 per trail)
@@ -237,25 +262,22 @@ export class PooledTrailSystem {
 
     // Update buffer attributes for the exact range we wrote
     if (totalPoints > 0) {
-      this.positionAttribute.needsUpdate = true;
-      this.colorAttribute.needsUpdate = true;
+      this.positionAttribute.clearUpdateRanges();
+      this.colorAttribute.clearUpdateRanges();
+      this.positionAttribute.addUpdateRange(0, totalPoints * 3);
+      this.colorAttribute.addUpdateRange(0, totalPoints * 3);
 
-      // Mark attributes as needing update
+      // Upload only the occupied range.
       this.positionAttribute.needsUpdate = true;
       this.colorAttribute.needsUpdate = true;
     }
 
     this.updateQueue.clear();
-
-    // Periodic cleanup of inactive trails
-    if (now - this.lastCleanupTime > this.CLEANUP_INTERVAL) {
-      this.cleanupInactiveTrails();
-      this.lastCleanupTime = now;
-    }
+    this.membershipDirty = false;
   }
 
   private cleanupInactiveTrails(): void {
-    const now = Date.now();
+    const now = simulationClock.nowMs;
     const inactiveTimeout = 2000; // Remove trails inactive for 2 seconds
 
     const toRemove: string[] = [];
@@ -279,16 +301,20 @@ export class PooledTrailSystem {
     activeTrails: number;
     totalCapacity: number;
     usedPoints: number;
+    reservedVertices: number;
+    rejectedTrails: number;
   } {
     let usedPoints = 0;
     this.trails.forEach(trail => {
-      if (trail.active) usedPoints += trail.length;
+      if (trail.active) usedPoints += Math.max(0, trail.pointCount - 1) * 2;
     });
 
     return {
       activeTrails: this.trails.size,
       totalCapacity: this.MAX_TOTAL_POINTS,
       usedPoints,
+      reservedVertices: this.reservedVertices,
+      rejectedTrails: this.rejectedTrails,
     };
   }
 }

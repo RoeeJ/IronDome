@@ -26,10 +26,14 @@ export class DeviceCapabilities {
   private static instance: DeviceCapabilities;
   private deviceInfo: DeviceInfo;
   private performanceProfile: PerformanceProfile;
+  private qualityWindow: number[] = [];
+  private qualityWindowsHealthy = 0;
+  private initialProfile: PerformanceProfile;
 
   private constructor() {
     this.deviceInfo = this.detectDevice();
     this.performanceProfile = this.determinePerformanceProfile();
+    this.initialProfile = { ...this.performanceProfile };
     this.logCapabilities();
   }
 
@@ -244,26 +248,31 @@ export class DeviceCapabilities {
     return this.performanceProfile.renderScale;
   }
 
-  // Dynamic quality adjustment based on runtime performance
-  adjustQualityForFPS(currentFPS: number): void {
-    const targetFPS = this.performanceProfile.targetFPS;
-    const threshold = targetFPS * 0.9; // 90% of target
-
-    if (currentFPS < threshold) {
-      // Reduce quality
-      if (this.performanceProfile.particleCount > 20) {
-        this.performanceProfile.particleCount = Math.floor(
-          this.performanceProfile.particleCount * 0.8
+  // A two-second rolling frame sample and asymmetric recovery prevent oscillation.
+  // Returns true when the drawing-buffer scale must be reapplied by the renderer owner.
+  adjustQualityForFPS(currentFPS: number): boolean {
+    if (!Number.isFinite(currentFPS) || currentFPS <= 0) return false;
+    this.qualityWindow.push(1 / currentFPS);
+    const seconds = this.qualityWindow.reduce((sum, dt) => sum + dt, 0);
+    if (seconds < 2) return false;
+    const fps = this.qualityWindow.length / seconds;
+    this.qualityWindow = [];
+    const before = this.performanceProfile.renderScale;
+    const profile = this.performanceProfile;
+    if (fps < profile.targetFPS * 0.8) {
+      this.qualityWindowsHealthy = 0;
+      profile.particleCount = Math.max(20, Math.floor(profile.particleCount * 0.8));
+      profile.renderScale = Math.max(0.5, profile.renderScale - 0.1);
+    } else if (fps >= profile.targetFPS * 0.95) {
+      if (++this.qualityWindowsHealthy >= 3) {
+        this.qualityWindowsHealthy = 0;
+        profile.particleCount = Math.min(
+          this.initialProfile.particleCount,
+          Math.ceil(profile.particleCount * 1.2)
         );
-        debug.log('Reducing particle count due to low FPS:', this.performanceProfile.particleCount);
+        profile.renderScale = Math.min(this.initialProfile.renderScale, profile.renderScale + 0.1);
       }
-      if (this.performanceProfile.renderScale > 0.5) {
-        this.performanceProfile.renderScale = Math.max(
-          0.5,
-          this.performanceProfile.renderScale - 0.1
-        );
-        debug.log('Reducing render scale due to low FPS:', this.performanceProfile.renderScale);
-      }
-    }
+    } else this.qualityWindowsHealthy = 0;
+    return before !== profile.renderScale;
   }
 }

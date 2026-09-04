@@ -47,7 +47,9 @@ export const GameUI: React.FC<GameUIProps> = ({
   const [highScore, setHighScore] = useState(0);
   const [showShop, setShowShop] = useState(false);
   const [placementMode, setPlacementMode] = useState(false);
-  const [selectedBatteryType, setSelectedBatteryType] = useState<BatteryType>(BatteryType.IRON_DOME);
+  const [selectedBatteryType, setSelectedBatteryType] = useState<BatteryType>(
+    BatteryType.IRON_DOME
+  );
   const [gameOver, setGameOver] = useState<GameOverData | null>(null);
   const [contextMenu, setContextMenu] = useState<{
     battery: any;
@@ -75,7 +77,7 @@ export const GameUI: React.FC<GameUIProps> = ({
   const cameraModesSandbox = [...cameraModesGame, { value: 'first_person', label: 'First Person' }];
 
   // Store interval reference to clear it when needed
-  const preparationIntervalRef = React.useRef<NodeJS.Timeout | null>(null);
+  const shopPreviousTimeScale = React.useRef(1);
 
   const gameState = GameState.getInstance();
   const resourceManager = ResourceManager.getInstance();
@@ -137,7 +139,6 @@ export const GameUI: React.FC<GameUIProps> = ({
       setCurrentWave(data.waveNumber);
       setIsWaveActive(false);
       setPreparationTime(data.preparationTime);
-      startPreparationCountdown(data.preparationTime);
     };
 
     const handleWaveProgress = (data: any) => {
@@ -372,6 +373,9 @@ export const GameUI: React.FC<GameUIProps> = ({
     gameState.on('scoreChanged', handleScoreChanged);
     gameState.on('newGame', handleNewGame);
     gameState.on('domeUnlocked', handleDomeUnlocked);
+    const handlePreparationProgress = ({ remaining }: { remaining: number }) =>
+      setPreparationTime(Math.ceil(remaining));
+    waveManager.on('preparationProgress', handlePreparationProgress);
     waveManager.on('waveStarted', handleWaveStarted);
     waveManager.on('wavePreparation', handleWavePreparation);
     waveManager.on('waveProgress', handleWaveProgress);
@@ -380,10 +384,6 @@ export const GameUI: React.FC<GameUIProps> = ({
     // Cleanup
     return () => {
       // Clear preparation countdown if active
-      if (preparationIntervalRef.current) {
-        clearInterval(preparationIntervalRef.current);
-        preparationIntervalRef.current = null;
-      }
 
       // Clear intervals
       clearInterval(placementCheckInterval);
@@ -408,6 +408,7 @@ export const GameUI: React.FC<GameUIProps> = ({
       gameState.off('scoreChanged', handleScoreChanged);
       gameState.off('newGame', handleNewGame);
       gameState.off('domeUnlocked', handleDomeUnlocked);
+      waveManager.off('preparationProgress', handlePreparationProgress);
       waveManager.off('waveStarted', handleWaveStarted);
       waveManager.off('wavePreparation', handleWavePreparation);
       waveManager.off('waveProgress', handleWaveProgress);
@@ -421,81 +422,41 @@ export const GameUI: React.FC<GameUIProps> = ({
     setShopCollapsed(true); // Always start collapsed
   }, [isGameMode]);
 
-  // Handle pause functionality
   useEffect(() => {
-    const togglePause = () => {
-      if (isGameMode && !gameOver) {
-        const controls = (window as any).__simulationControls;
-        if (controls) {
-          const newPauseState = !isPaused;
-          setIsPaused(newPauseState);
-          controls.pause = newPauseState;
-
-          if (newPauseState) {
-            waveManager.pauseWave();
-          } else {
-            waveManager.resumeWave();
-          }
-        }
-      }
-    };
-
-    const handleKeyPress = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') {
-        e.preventDefault();
-
-        // Close modals first if any are open
-        if (showShop && !shopCollapsed) {
-          // Collapse shop instead of closing
-          setShopCollapsed(true);
-          // Reset time scale
-          const simulationControls = (window as any).__simulationControls;
-          if (simulationControls) {
-            simulationControls.timeScale = 1.0;
-          }
-        } else if (showHelp) {
-          setShowHelp(false);
-        } else if (contextMenu) {
-          setContextMenu(null);
-        } else {
-          // Otherwise toggle pause
-          togglePause();
-        }
-      }
-    };
-
-    window.addEventListener('keydown', handleKeyPress);
-
+    if (!showShop || shopCollapsed) return;
+    const controls = (window as unknown as { __simulationControls?: { timeScale: number } })
+      .__simulationControls;
+    if (!controls) return;
+    shopPreviousTimeScale.current = controls.timeScale;
+    controls.timeScale = 0.1;
     return () => {
-      window.removeEventListener('keydown', handleKeyPress);
+      controls.timeScale = shopPreviousTimeScale.current;
     };
-  }, [isPaused, isGameMode, gameOver, showShop, showHelp, contextMenu, shopCollapsed]);
+  }, [showShop, shopCollapsed]);
+
+  // Main owns pause. Modals may consume Escape before the global pause handler runs.
+  useEffect(() => {
+    const closeModal = (event: Event) => {
+      if (showShop && !shopCollapsed) {
+        setShopCollapsed(true);
+        event.preventDefault();
+      } else if (showHelp) {
+        setShowHelp(false);
+        event.preventDefault();
+      } else if (contextMenu) {
+        setContextMenu(null);
+        event.preventDefault();
+      }
+    };
+    window.addEventListener('simulation:escape', closeModal);
+    return () => window.removeEventListener('simulation:escape', closeModal);
+  }, [showShop, shopCollapsed, showHelp, contextMenu]);
 
   const updateResourceDisplay = () => {
     setCredits(gameState.getCredits());
     setInterceptors(gameState.getInterceptorStock());
     setScore(gameState.getScore());
     setHighScore(gameState.getHighScore());
-  };
-
-  const startPreparationCountdown = (seconds: number) => {
-    // Clear any existing countdown
-    if (preparationIntervalRef.current) {
-      clearInterval(preparationIntervalRef.current);
-      preparationIntervalRef.current = null;
-    }
-
-    let remaining = seconds;
-    preparationIntervalRef.current = setInterval(() => {
-      remaining--;
-      setPreparationTime(remaining);
-      if (remaining <= 0) {
-        if (preparationIntervalRef.current) {
-          clearInterval(preparationIntervalRef.current);
-          preparationIntervalRef.current = null;
-        }
-      }
-    }, 1000);
   };
 
   const showNotification = (message: string) => {
@@ -514,10 +475,6 @@ export const GameUI: React.FC<GameUIProps> = ({
     SoundSystem.getInstance().playUI('click');
 
     // Clear any existing countdown
-    if (preparationIntervalRef.current) {
-      clearInterval(preparationIntervalRef.current);
-      preparationIntervalRef.current = null;
-    }
     setPreparationTime(0);
 
     // Disable automatic initial battery creation during new game setup
@@ -1120,10 +1077,11 @@ export const GameUI: React.FC<GameUIProps> = ({
           align-items: flex-end;
           gap: 10px;
           z-index: 100;
-          pointer-events: auto;
+          pointer-events: none;
         }
         
         .shop-panel {
+          pointer-events: auto;
           width: 450px;
           max-width: calc(100vw - 40px);
           background: rgba(0, 0, 0, 0.95);
@@ -1142,6 +1100,7 @@ export const GameUI: React.FC<GameUIProps> = ({
         }
         
         .shop-toggle {
+          pointer-events: auto;
           background: #0038b8;
           border: 2px solid #0038b8;
           border-radius: 5px;
@@ -2058,23 +2017,25 @@ export const GameUI: React.FC<GameUIProps> = ({
       <div className="action-buttons">
         {/* Battery Type Selector - Segmented Button */}
         {!placementMode && (
-          <div style={{
-            display: 'flex',
-            background: 'rgba(0, 0, 0, 0.9)',
-            border: '1px solid rgba(0, 150, 255, 0.5)',
-            borderRadius: '25px',
-            padding: '4px',
-            marginBottom: '10px',
-            width: 'fit-content',
-            margin: '0 auto 10px'
-          }}>
+          <div
+            style={{
+              display: 'flex',
+              background: 'rgba(0, 0, 0, 0.9)',
+              border: '1px solid rgba(0, 150, 255, 0.5)',
+              borderRadius: '25px',
+              padding: '4px',
+              marginBottom: '10px',
+              width: 'fit-content',
+              margin: '0 auto 10px',
+            }}
+          >
             {Object.values(BatteryType).map((type, index) => {
               const config = BATTERY_CONFIGS[type];
               const isSelected = selectedBatteryType === type;
-              const isLocked = isGameMode && config.unlockLevel > gameState.getPlayerLevel();
+              const isLocked = isGameMode && config.unlockLevel > currentWave;
               const isFirst = index === 0;
               const isLast = index === Object.values(BatteryType).length - 1;
-              
+
               return (
                 <button
                   key={type}
@@ -2094,14 +2055,14 @@ export const GameUI: React.FC<GameUIProps> = ({
                     color: isSelected ? '#fff' : '#0095ff',
                     fontWeight: isSelected ? 'bold' : 'normal',
                     position: 'relative',
-                    overflow: 'hidden'
+                    overflow: 'hidden',
                   }}
-                  onMouseEnter={(e) => {
+                  onMouseEnter={e => {
                     if (!isLocked && !isSelected) {
                       e.currentTarget.style.background = 'rgba(0, 150, 255, 0.2)';
                     }
                   }}
-                  onMouseLeave={(e) => {
+                  onMouseLeave={e => {
                     if (!isSelected) {
                       e.currentTarget.style.background = 'transparent';
                     }
@@ -2110,14 +2071,16 @@ export const GameUI: React.FC<GameUIProps> = ({
                   <span style={{ fontSize: '18px' }}>{config.icon}</span>
                   <span style={{ fontSize: '13px' }}>{config.name}</span>
                   {isLocked && (
-                    <span style={{ 
-                      fontSize: '10px', 
-                      background: 'rgba(255, 102, 102, 0.3)',
-                      padding: '2px 4px',
-                      borderRadius: '3px',
-                      marginLeft: '4px'
-                    }}>
-                      LV{config.unlockLevel}
+                    <span
+                      style={{
+                        fontSize: '10px',
+                        background: 'rgba(255, 102, 102, 0.3)',
+                        padding: '2px 4px',
+                        borderRadius: '3px',
+                        marginLeft: '4px',
+                      }}
+                    >
+                      Wave {config.unlockLevel}
                     </span>
                   )}
                 </button>
@@ -2125,13 +2088,15 @@ export const GameUI: React.FC<GameUIProps> = ({
             })}
           </div>
         )}
-        
+
         <button
           className={`game-button ${placementMode ? 'active' : ''}`}
           onClick={handlePlaceDome}
           disabled={!placementSystem.canPlaceNewDome()}
         >
-          {placementMode ? 'Cancel Placement' : `Place ${BATTERY_CONFIGS[selectedBatteryType].name}`}
+          {placementMode
+            ? 'Cancel Placement'
+            : `Place ${BATTERY_CONFIGS[selectedBatteryType].name}`}
           {!placementMode &&
             isGameMode &&
             placementInfo.placedDomes >= placementInfo.unlockedDomes && (
@@ -2230,11 +2195,6 @@ export const GameUI: React.FC<GameUIProps> = ({
                 onClick={() => {
                   vibrate(10);
                   setShopCollapsed(true);
-                  // Reset time scale
-                  const simulationControls = (window as any).__simulationControls;
-                  if (simulationControls) {
-                    simulationControls.timeScale = 1.0;
-                  }
                 }}
               >
                 ✕
@@ -2347,11 +2307,6 @@ export const GameUI: React.FC<GameUIProps> = ({
             onClick={() => {
               vibrate(10);
               setShopCollapsed(!shopCollapsed);
-              // Toggle time dilation
-              const simulationControls = (window as any).__simulationControls;
-              if (simulationControls) {
-                simulationControls.timeScale = shopCollapsed ? 0.1 : 1.0;
-              }
             }}
           >
             <span className="shop-toggle-icon">🛒</span>

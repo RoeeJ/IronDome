@@ -202,11 +202,20 @@ export class GameState extends EventEmitter {
     return 1000 * Math.pow(2, this.data.unlockedDomes - 1);
   }
 
-  getDomePlacements(): Array<{ id: string; position: { x: number; z: number }; level: number; type?: string }> {
+  getDomePlacements(): Array<{
+    id: string;
+    position: { x: number; z: number };
+    level: number;
+    type?: string;
+  }> {
     return [...this.data.domePlacements];
   }
 
-  addDomePlacement(id: string, position: { x: number; z: number }, type: string = 'IRON_DOME'): void {
+  addDomePlacement(
+    id: string,
+    position: { x: number; z: number },
+    type: string = 'IRON_DOME'
+  ): void {
     // Check if already exists
     const existing = this.data.domePlacements.find(d => d.id === id);
     if (existing) {
@@ -281,8 +290,12 @@ export class GameState extends EventEmitter {
       totalThreatsDestroyed: this.data.totalThreatsDestroyed,
       perfectWaves: this.data.perfectWaves,
       accuracy:
-        this.data.totalInterceptions > 0
-          ? ((this.data.totalThreatsDestroyed / this.data.totalInterceptions) * 100).toFixed(1)
+        this.data.totalInterceptions + this.data.totalMisses > 0
+          ? (
+              (this.data.totalInterceptions /
+                (this.data.totalInterceptions + this.data.totalMisses)) *
+              100
+            ).toFixed(1)
           : 0,
     };
   }

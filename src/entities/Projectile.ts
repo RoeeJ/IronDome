@@ -1,3 +1,6 @@
+import { stepEvents } from '@/simulation/StepEvents';
+import { gameplayRandom } from '@/simulation/Random';
+import { simulationClock } from '@/simulation/SimulationClock';
 import * as THREE from 'three';
 import * as CANNON from 'cannon-es';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
@@ -18,7 +21,7 @@ export interface ProjectileOptions {
   mass?: number;
   trailLength?: number;
   isInterceptor?: boolean;
-  target?: THREE.Object3D;
+  target?: THREE.Object3D | Projectile;
   useExhaustTrail?: boolean;
   failureMode?: 'none' | 'motor' | 'guidance' | 'premature';
   failureTime?: number;
@@ -29,6 +32,23 @@ export interface ProjectileOptions {
 }
 
 export class Projectile {
+  public waveId: number | null = null;
+  public terminationReason:
+    | 'intercepted'
+    | 'impact'
+    | 'expired'
+    | 'payload-deployed'
+    | 'reset'
+    | 'capacity-removed'
+    | null = null;
+
+  terminate(reason: NonNullable<Projectile['terminationReason']>): void {
+    if (this.terminationReason) return;
+    this.terminationReason = reason;
+    this.isActive = false;
+  }
+
+  private static nextId = 0;
   id: string;
   mesh: THREE.Mesh | THREE.Group;
   body: CANNON.Body;
@@ -39,18 +59,23 @@ export class Projectile {
   useUnifiedTrail: boolean = false;
   isActive: boolean = true;
   isInterceptor: boolean;
-  target?: THREE.Object3D;
+  target?: THREE.Object3D | Projectile;
   proximityFuse?: ProximityFuse;
-  detonationCallback?: (position: THREE.Vector3, quality: number) => void;
+  detonationCallback?: (
+    position: THREE.Vector3,
+    quality: number,
+    targetPosition?: THREE.Vector3
+  ) => void;
   exhaustTrailId?: string;
   mainTrailId?: string;
   thrustControl?: ThrustVectorControl;
   private scene: THREE.Scene;
   private failureMode: string;
   private failureTime: number;
-  private launchTime: number;
+  protected launchTime: number;
   private hasFailed: boolean = false;
   private radius: number;
+  public readonly previousPosition = new THREE.Vector3();
   private maxLifetime: number;
   private batteryPosition?: THREE.Vector3;
   useInstancing: boolean = false;
@@ -106,14 +131,15 @@ export class Projectile {
       instanceManager,
     } = options;
 
-    this.id = `projectile_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+    this.id = `projectile_${Projectile.nextId++}`;
     this.scene = scene;
     this.isInterceptor = isInterceptor;
     this.target = target;
     this.failureMode = failureMode;
     this.failureTime = failureTime;
-    this.launchTime = Date.now();
+    this.launchTime = simulationClock.nowMs;
     this.radius = radius;
+    this.previousPosition.copy(position);
     this.maxLifetime = maxLifetime;
     this.batteryPosition = batteryPosition;
     this.useInstancing = useInstancing;
@@ -132,11 +158,11 @@ export class Projectile {
     }
 
     // Create mesh using missile model factory or instancing
-    if (useInstancing && instanceManager) {
+    if (useInstancing) {
       // For instanced rendering, we still need a mesh for physics
       // The instance manager will handle hiding it and using instanced rendering
       // Create dummy mesh for physics sync
-      this.mesh = new THREE.Object3D() as any;
+      this.mesh = new THREE.Group();
       this.mesh.position.copy(position);
       // Don't add to scene yet - instance manager will handle it
       this.instanceId = 0; // Placeholder, will be set by instance manager
@@ -176,7 +202,7 @@ export class Projectile {
       shape,
       position: new CANNON.Vec3(position.x, position.y, position.z),
       velocity: new CANNON.Vec3(velocity.x, velocity.y, velocity.z),
-      linearDamping: 0.01, // Small amount of drag for stability
+      linearDamping: 0, // Vacuum baseline shared with trajectory prediction
       angularDamping: 0.3, // Moderate damping - allows turning but prevents spin
     });
     world.addBody(this.body);
@@ -216,35 +242,97 @@ export class Projectile {
     }
   }
 
-  update(deltaTime: number = 0.016): void {
+  /** Force generation belongs before each physics step; update resolves the completed step. */
+  getCollisionRadius(): number {
+    return this.radius;
+  }
+
+  preparePhysics(deltaTime: number): void {
+    this.previousPosition.set(this.body.position.x, this.body.position.y, this.body.position.z);
+    this.mesh.position.copy(this.previousPosition);
+    // Mid-flight guidance for interceptors (if not failed)
+    if (this.isInterceptor && this.target && !this.hasFailed && this.failureMode !== 'guidance') {
+      this.updateGuidance(deltaTime);
+    }
+  }
+
+  update(deltaTime: number = 1 / 60): void {
     if (!this.isActive) return;
+
+    // Resolve a swept fuse before later lifetime/ground events in the same step.
+    if (this.isInterceptor && this.proximityFuse && this.target) {
+      const target = this.target;
+      const targetPosition = 'getPosition' in target ? target.getPosition() : target.position;
+      const previousTarget =
+        'previousPosition' in target ? target.previousPosition : targetPosition;
+      const current = this.getPosition();
+      const flightStart = (simulationClock.nowMs - this.launchTime) / 1000 - deltaTime;
+      let endFraction = Math.min(1, (this.maxLifetime - flightStart) / deltaTime);
+      if (current.y <= 0 && this.previousPosition.y > 0) {
+        endFraction = Math.min(
+          endFraction,
+          this.previousPosition.y / (this.previousPosition.y - current.y)
+        );
+      }
+      const targetActive = !('isActive' in target) || target.isActive;
+      if (targetActive && endFraction >= 0) {
+        const result = this.proximityFuse.update(
+          current,
+          targetPosition,
+          deltaTime,
+          simulationClock.nowMs,
+          previousTarget instanceof THREE.Vector3 ? previousTarget : targetPosition,
+          endFraction
+        );
+        if (result.shouldDetonate) {
+          stepEvents.add(result.fraction!, 1, () => {
+            if (!this.isActive || ('isActive' in target && !target.isActive)) return;
+            this.body.position.set(result.position!.x, result.position!.y, result.position!.z);
+            this.mesh.position.copy(result.position!);
+            this.terminate('intercepted');
+            if (this.exhaustTrailId)
+              PooledTrailSystem.getInstance(this.scene).removeTrail(this.exhaustTrailId);
+            this.detonationCallback?.(
+              result.position!,
+              result.detonationQuality,
+              result.targetPosition
+            );
+          });
+          return;
+        }
+      }
+    }
 
     // Check for failure conditions
     if (!this.hasFailed && this.failureMode !== 'none') {
-      const elapsed = (Date.now() - this.launchTime) / 1000;
+      const elapsed = (simulationClock.nowMs - this.launchTime) / 1000;
       if (elapsed >= this.failureTime) {
         this.handleFailure();
       }
     }
 
     // Check max lifetime for self-destruct
-    const flightTime = (Date.now() - this.launchTime) / 1000;
+    const flightTime = (simulationClock.nowMs - this.launchTime) / 1000;
     if (flightTime >= this.maxLifetime) {
-      debug.category(
-        'Projectile',
-        `${
-          this.isInterceptor ? 'Interceptor' : 'Threat'
-        } self-destructing after ${flightTime.toFixed(1)}s`
-      );
+      stepEvents.add((this.maxLifetime - (flightTime - deltaTime)) / deltaTime, 2, () => {
+        if (!this.isActive) return;
+        this.terminate('expired');
+        debug.category(
+          'Projectile',
+          `${
+            this.isInterceptor ? 'Interceptor' : 'Threat'
+          } self-destructing after ${flightTime.toFixed(1)}s`
+        );
 
-      // Trigger detonation callback if available (for visual explosion)
-      if (this.detonationCallback) {
-        this.detonationCallback(this.mesh.position.clone(), 0.3); // Low quality explosion
-      }
+        // Trigger detonation callback if available (for visual explosion)
+        if (this.detonationCallback) {
+          this.detonationCallback(this.getPosition(), 0.3); // Low quality explosion
+        }
 
-      // Exhaust trail removed for performance
+        // Exhaust trail removed for performance
 
-      this.isActive = false;
+        this.isActive = false;
+      });
       return;
     }
 
@@ -284,7 +372,7 @@ export class Projectile {
 
           // Trigger detonation
           if (this.detonationCallback) {
-            this.detonationCallback(this.mesh.position.clone(), 0.5); // Medium quality explosion
+            this.detonationCallback(this.getPosition(), 0.5); // Medium quality explosion
           }
 
           // Stop exhaust trail
@@ -352,39 +440,6 @@ export class Projectile {
       const pooledTrail = PooledTrailSystem.getInstance(this.scene);
       pooledTrail.updateTrail(this.exhaustTrailId, emitPosition);
     }
-
-    // Mid-flight guidance for interceptors (if not failed)
-    if (this.isInterceptor && this.target && !this.hasFailed && this.failureMode !== 'guidance') {
-      this.updateGuidance(deltaTime);
-    }
-
-    // Check proximity fuse for interceptors
-    if (this.isInterceptor && this.proximityFuse && this.target) {
-      const targetPosition =
-        'getPosition' in this.target ? (this.target as any).getPosition() : this.target.position;
-      const currentTime = Date.now();
-
-      const { shouldDetonate, detonationQuality } = this.proximityFuse.update(
-        this.mesh.position,
-        targetPosition,
-        deltaTime,
-        currentTime
-      );
-
-      if (shouldDetonate) {
-        // Stop exhaust trail
-        if (this.exhaustTrailId) {
-          const pooledTrail = PooledTrailSystem.getInstance(this.scene);
-          pooledTrail.removeTrail(this.exhaustTrailId);
-        }
-
-        // Trigger detonation
-        if (this.detonationCallback) {
-          this.detonationCallback(this.mesh.position.clone(), detonationQuality);
-        }
-        this.isActive = false;
-      }
-    }
   }
 
   destroy(scene: THREE.Scene, world: CANNON.World): void {
@@ -438,7 +493,18 @@ export class Projectile {
   }
 
   getPosition(): THREE.Vector3 {
-    return this.mesh.position.clone();
+    return new THREE.Vector3(this.body.position.x, this.body.position.y, this.body.position.z);
+  }
+
+  getRenderPosition(alpha = 1): THREE.Vector3 {
+    return this.previousPosition
+      .clone()
+      .lerp(this.getPosition(), THREE.MathUtils.clamp(alpha, 0, 1));
+  }
+
+  renderFrame(alpha: number): void {
+    if (!this.isActive) return;
+    this.mesh.position.copy(this.getRenderPosition(alpha));
   }
 
   getVelocity(): THREE.Vector3 {
@@ -461,7 +527,7 @@ export class Projectile {
     return this.mesh.scale.clone();
   }
 
-  retarget(newTarget: THREE.Object3D): void {
+  retarget(newTarget: THREE.Object3D | Projectile): void {
     // Change target for an interceptor mid-flight
     if (!this.isInterceptor || this.hasFailed) return;
 
@@ -528,9 +594,9 @@ export class Projectile {
       case 'guidance': {
         // Guidance failure - veer off course
         const randomVeer = new THREE.Vector3(
-          (Math.random() - 0.5) * 50,
-          (Math.random() - 0.5) * 30,
-          (Math.random() - 0.5) * 50
+          (gameplayRandom.next() - 0.5) * 50,
+          (gameplayRandom.next() - 0.5) * 30,
+          (gameplayRandom.next() - 0.5) * 50
         );
         this.body.velocity.x += randomVeer.x;
         this.body.velocity.y += randomVeer.y;
@@ -543,7 +609,7 @@ export class Projectile {
       case 'premature':
         // Premature detonation
         if (this.detonationCallback) {
-          this.detonationCallback(this.mesh.position.clone(), 0.3); // Low quality detonation
+          this.detonationCallback(this.getPosition(), 0.3); // Low quality detonation
         }
         this.isActive = false;
         break;
@@ -678,9 +744,13 @@ export class Projectile {
       maxGForce = 60; // Allow higher G-forces for turnaround
 
       // Add additional turning force perpendicular to current velocity
-      const turnAxis = currentVelocity.clone().cross(los).normalize();
-      const turnForce = turnAxis.multiplyScalar(this.body.mass * 100);
-      velocityError.add(turnForce);
+      // Turn within the engagement plane. This is a velocity correction (m/s),
+      // not a mass-scaled force added to velocity error.
+      const forward = currentVelocity.clone().normalize();
+      const lateral = desiredVelocity
+        .clone()
+        .sub(forward.multiplyScalar(desiredVelocity.dot(forward)));
+      if (lateral.lengthSq() > 1e-12) velocityError.add(lateral.normalize().multiplyScalar(100));
 
       // Removed re-engage logging
     }
@@ -688,7 +758,7 @@ export class Projectile {
     const correctionForce = velocityError.multiplyScalar(correctionGain);
 
     // Realistic missile constraints scaled for simulator
-    const gravity = 9.81;
+    const gravity = 9.82;
     const maxAcceleration = maxGForce * gravity;
     const maxForce = this.body.mass * maxAcceleration;
     const forceBeforeLimit = correctionForce.length();
@@ -699,7 +769,7 @@ export class Projectile {
     // Removed excessive force logging
 
     // Apply the force with gravity compensation
-    const gravityCompensation = this.body.mass * 9.81;
+    const gravityCompensation = this.body.mass * 9.82;
     this.body.applyForce(
       new CANNON.Vec3(
         correctionForce.x,
@@ -729,7 +799,9 @@ export class Projectile {
 
     // Check if re-engagement is complete (heading back toward target)
     if (this.isReEngaging && distance < 20) {
-      const closingVelocity = -toTarget.normalize().dot(currentVelocity);
+      const targetVelocity =
+        'getVelocity' in this.target ? this.target.getVelocity() : new THREE.Vector3();
+      const closingVelocity = toTarget.normalize().dot(currentVelocity.clone().sub(targetVelocity));
       if (closingVelocity > 0) {
         // Removed re-engage success logging
         this.isReEngaging = false;

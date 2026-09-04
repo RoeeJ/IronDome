@@ -1,3 +1,6 @@
+import { runSimulationStep } from '@/simulation/runSimulationStep';
+import { FixedStepDriver } from '@/simulation/FixedStepDriver';
+import { simulationClock } from '@/simulation/SimulationClock';
 // CHAINSAW: Removed seq-config overhead
 
 import './index.css';
@@ -9,6 +12,7 @@ import React from 'react';
 import { createRoot } from 'react-dom/client';
 import { Projectile } from './entities/Projectile';
 import { Threat } from './entities/Threat';
+import { LaserBattery } from './entities/LaserBattery';
 import { ThreatManager } from './scene/ThreatManager';
 import { UnifiedTrajectorySystem as TrajectoryCalculator } from './systems/UnifiedTrajectorySystem';
 import { IronDomeBattery } from './entities/IronDomeBattery';
@@ -341,6 +345,7 @@ const simulationControls = {
   gameMode: savedGameMode !== null ? savedGameMode === 'true' : false, // Default to false (sandbox mode) if not saved
   autoIntercept: savedInterceptMode !== null ? savedInterceptMode === 'true' : true, // Default to auto-intercept for larger terrain
   pause: false,
+  suspended: false,
   timeScale: 1.0,
   showTrajectories: true,
   enableFog: false,
@@ -420,6 +425,7 @@ const renderUI = () => {
 
             // Clear all existing threats and projectiles
             threatManager.clearAll();
+            interceptionSystem.clearInterceptors();
             projectiles.forEach(p => p.destroy(scene, world));
             projectiles = [];
 
@@ -727,81 +733,78 @@ renderer.domElement.addEventListener('click', event => {
         for (const battery of batteries) {
           if (battery.isOperational()) {
             // Check if this is an Iron Dome battery (has fireInterceptorManual method)
-            if ('fireInterceptorManual' in battery && typeof battery.fireInterceptorManual === 'function') {
+            if (
+              'fireInterceptorManual' in battery &&
+              typeof battery.fireInterceptorManual === 'function'
+            ) {
               const interceptor = battery.fireInterceptorManual(threat);
               if (interceptor) {
                 // Set up detonation callback for manual interceptor
-                interceptor.detonationCallback = (position: THREE.Vector3, quality: number) => {
-                // Create explosion effect
-                interceptionSystem.createExplosion(position, Math.max(0.8, quality));
+                interceptor.detonationCallback = (
+                  position: THREE.Vector3,
+                  quality: number,
+                  targetPosition?: THREE.Vector3
+                ) => {
+                  // Create explosion effect
+                  interceptionSystem.createExplosion(position, Math.max(0.8, quality));
 
-                // Use physics-based blast damage
-                if (threat.isActive) {
-                  const wasMarked = threat.markAsBeingIntercepted();
+                  // Use physics-based blast damage
+                  if (threat.isActive && targetPosition) {
+                    const wasMarked = threat.markAsBeingIntercepted();
 
-                  // Use BlastPhysics for damage calculation
-                  const damage = BlastPhysics.calculateDamage(
-                    position,
-                    threat.getPosition(),
-                    threat.getVelocity()
-                  );
+                    // Use BlastPhysics for damage calculation
+                    const damage = BlastPhysics.calculateDamage(
+                      position,
+                      targetPosition,
+                      threat.getVelocity()
+                    );
 
-                  debug.category(
-                    'Combat',
-                    `Manual intercept blast: ${damage.damageType} damage, ${(damage.killProbability * 100).toFixed(0)}% kill probability`
-                  );
+                    debug.category(
+                      'Combat',
+                      `Manual intercept blast: ${damage.damageType} damage, ${(damage.killProbability * 100).toFixed(0)}% kill probability`
+                    );
 
-                  if (wasMarked && damage.hit) {
-                    // Use threatManager to properly destroy and count the threat
-                    threatManager.markThreatIntercepted(threat);
+                    if (wasMarked && damage.hit) {
+                      // Use threatManager to properly destroy and count the threat
+                      threatManager.markThreatIntercepted(threat);
 
-                    // Remove threat from active threats array
-                    const threatIndex = threats.indexOf(threat);
-                    if (threatIndex !== -1) {
-                      threats.splice(threatIndex, 1);
+                      // Remove threat from active threats array
+                      const threatIndex = threats.indexOf(threat);
+                      if (threatIndex !== -1) {
+                        threats.splice(threatIndex, 1);
+                      }
+
+                      // Update game stats
+                    } else if (wasMarked && !damage.hit) {
+                      // Failed to destroy - unmark so other interceptors can try
+                      threat.unmarkAsBeingIntercepted();
+                      debug.category('Combat', 'Manual intercept failed - unmarking threat');
+                      gameState.recordMiss();
                     }
-
-                    // Update game stats
-                    gameState.recordInterception();
-                    gameState.recordThreatDestroyed();
-
-                    // Update interception system stats
-                    (interceptionSystem as any).successfulInterceptions =
-                      ((interceptionSystem as any).successfulInterceptions || 0) + 1;
-                  } else if (wasMarked && !damage.hit) {
-                    // Failed to destroy - unmark so other interceptors can try
-                    threat.unmarkAsBeingIntercepted();
-                    debug.category('Combat', 'Manual intercept failed - unmarking threat');
-                    gameState.recordMiss();
                   }
-                }
 
-                // Always destroy the interceptor
-                interceptor.destroy(scene, world);
+                  // Always destroy the interceptor
+                  interceptor.destroy(scene, world);
 
-                // Remove interceptor from arrays
-                const interceptorIndex = projectiles.indexOf(interceptor);
-                if (interceptorIndex !== -1) {
-                  projectiles.splice(interceptorIndex, 1);
-                }
-                const sysIndex = (interceptionSystem as any).interceptors.indexOf(interceptor);
-                if (sysIndex !== -1) {
-                  (interceptionSystem as any).interceptors.splice(sysIndex, 1);
-                }
-              };
+                  // Remove interceptor from arrays
+                  const interceptorIndex = projectiles.indexOf(interceptor);
+                  if (interceptorIndex !== -1) {
+                    projectiles.splice(interceptorIndex, 1);
+                  }
+                  const sysIndex = (interceptionSystem as any).interceptors.indexOf(interceptor);
+                  if (sysIndex !== -1) {
+                    (interceptionSystem as any).interceptors.splice(sysIndex, 1);
+                  }
+                };
 
-              projectiles.push(interceptor);
-              // Track manual interceptor in interception system
-              (interceptionSystem as any).interceptors.push(interceptor);
-              (interceptionSystem as any).totalInterceptorsFired =
-                ((interceptionSystem as any).totalInterceptorsFired || 0) + 1;
-              debug.category('Combat', 'Manual intercept fired!');
-              interceptorFired = true;
-              break;
-            }
-            } else if (battery.constructor.name === 'LaserBattery') {
+                interceptionSystem.registerManualInterceptor(interceptor);
+                debug.category('Combat', 'Manual intercept fired!');
+                interceptorFired = true;
+                break;
+              }
+            } else if (battery instanceof LaserBattery) {
               // Laser batteries use fireAt method for manual targeting
-              battery.fireAt(threat);
+              battery.fireAt?.(threat);
               debug.category('Combat', 'Manual laser targeting activated!');
               interceptorFired = true;
               break;
@@ -1409,97 +1412,104 @@ let previousTime = 0;
 // CHAINSAW: Removed all performance monitoring systems
 
 // Keyboard event handlers
-window.addEventListener('keydown', e => {
-  // CHAINSAW: Removed stats display keyboard handlers
+window.addEventListener(
+  'keydown',
+  e => {
+    // CHAINSAW: Removed stats display keyboard handlers
 
-  // ESC key toggles pause menu
-  if (e.key === 'Escape') {
-    pauseMenuOpen = !pauseMenuOpen;
-    isPaused = pauseMenuOpen;
+    // ESC key toggles pause menu
+    if (e.key === 'Escape') {
+      e.preventDefault();
+      e.stopImmediatePropagation();
+      if (!window.dispatchEvent(new Event('simulation:escape', { cancelable: true }))) return;
+      pauseMenuOpen = !pauseMenuOpen;
+      isPaused = pauseMenuOpen;
 
-    if (isPaused) {
-      simulationControls.pause = true;
-      if (simulationControls.gameMode) {
-        if (waveManager) waveManager.pauseWave();
+      if (isPaused) {
+        simulationControls.pause = true;
+        if (simulationControls.gameMode) {
+          if (waveManager) waveManager.pauseWave();
+        } else {
+          // Stop threat spawning in sandbox mode to prevent timer issues
+          threatManager.stopSpawning();
+        }
+        // Disable controls when paused
+        controls.enabled = false;
+        // Hide GUI when paused
+        gui.domElement.style.display = 'none';
+        // Hide tactical display when paused
+        const tacticalContainer = tacticalDisplay.getContainer();
+        if (tacticalContainer) {
+          tacticalContainer.style.display = 'none';
+        }
       } else {
-        // Stop threat spawning in sandbox mode to prevent timer issues
-        threatManager.stopSpawning();
+        simulationControls.pause = false;
+        if (simulationControls.gameMode) {
+          if (waveManager) waveManager.resumeWave();
+        } else {
+          // Resume threat spawning in sandbox mode
+          threatManager.startSpawning();
+        }
+        // Re-enable controls when unpaused
+        controls.enabled = true;
+        // Show GUI when unpaused (only if not in game mode or on mobile)
+        if (!simulationControls.gameMode && !deviceInfo.isMobile && !deviceInfo.isTablet) {
+          gui.domElement.style.display = 'block';
+        }
+        // Show tactical display when unpaused
+        const tacticalContainer2 = tacticalDisplay.getContainer();
+        if (tacticalContainer2) {
+          tacticalContainer2.style.display = 'block';
+        }
       }
-      // Disable controls when paused
-      controls.enabled = false;
-      // Hide GUI when paused
-      gui.domElement.style.display = 'none';
-      // Hide tactical display when paused
-      const tacticalContainer = tacticalDisplay.getContainer();
-      if (tacticalContainer) {
-        tacticalContainer.style.display = 'none';
+
+      // Re-render UI with pause menu state
+      renderUI();
+    }
+
+    // Camera mode shortcuts
+    if (e.key === '1') cameraController.setMode(CameraMode.ORBIT);
+    if (e.key === '2') cameraController.setMode(CameraMode.TACTICAL);
+    if (e.key === '3') cameraController.setMode(CameraMode.BATTLE_OVERVIEW);
+    if (e.key === '4') cameraController.setMode(CameraMode.CINEMATIC);
+    if (e.key === '5') {
+      const threats = threatManager.getActiveThreats();
+      if (threats.length > 0) {
+        cameraController.setMode(CameraMode.FOLLOW_THREAT, threats[0]);
       }
-    } else {
-      simulationControls.pause = false;
-      if (simulationControls.gameMode) {
-        if (waveManager) waveManager.resumeWave();
-      } else {
-        // Resume threat spawning in sandbox mode
-        threatManager.startSpawning();
-      }
-      // Re-enable controls when unpaused
-      controls.enabled = true;
-      // Show GUI when unpaused (only if not in game mode or on mobile)
-      if (!simulationControls.gameMode && !deviceInfo.isMobile && !deviceInfo.isTablet) {
-        gui.domElement.style.display = 'block';
-      }
-      // Show tactical display when unpaused
-      const tacticalContainer2 = tacticalDisplay.getContainer();
-      if (tacticalContainer2) {
-        tacticalContainer2.style.display = 'block';
+    }
+    if (e.key === '6') {
+      if (projectiles.length > 0) {
+        cameraController.setMode(CameraMode.FOLLOW_INTERCEPTOR, projectiles[0]);
       }
     }
 
-    // Re-render UI with pause menu state
-    renderUI();
-  }
+    // Mouse wheel zoom
+    if (e.key === '+' || e.key === '=') cameraController.zoom(-5);
+    if (e.key === '-' || e.key === '_') cameraController.zoom(5);
 
-  // Camera mode shortcuts
-  if (e.key === '1') cameraController.setMode(CameraMode.ORBIT);
-  if (e.key === '2') cameraController.setMode(CameraMode.TACTICAL);
-  if (e.key === '3') cameraController.setMode(CameraMode.BATTLE_OVERVIEW);
-  if (e.key === '4') cameraController.setMode(CameraMode.CINEMATIC);
-  if (e.key === '5') {
-    const threats = threatManager.getActiveThreats();
-    if (threats.length > 0) {
-      cameraController.setMode(CameraMode.FOLLOW_THREAT, threats[0]);
+    // R key toggles render stats
+    if (e.key === 'r' || e.key === 'R') {
+      (window as any).toggleRenderStats();
     }
-  }
-  if (e.key === '6') {
-    if (projectiles.length > 0) {
-      cameraController.setMode(CameraMode.FOLLOW_INTERCEPTOR, projectiles[0]);
+
+    // B key forces all buildings visible (fixes culling issues)
+    if (e.key === 'b' || e.key === 'B') {
+      buildingSystem.forceAllBuildingsVisible();
+      showNotification('Updated building & street light bounds');
     }
-  }
 
-  // Mouse wheel zoom
-  if (e.key === '+' || e.key === '=') cameraController.zoom(-5);
-  if (e.key === '-' || e.key === '_') cameraController.zoom(5);
-
-  // R key toggles render stats
-  if (e.key === 'r' || e.key === 'R') {
-    (window as any).toggleRenderStats();
-  }
-
-  // B key forces all buildings visible (fixes culling issues)
-  if (e.key === 'b' || e.key === 'B') {
-    buildingSystem.forceAllBuildingsVisible();
-    showNotification('Updated building & street light bounds');
-  }
-
-  // Shift+B disables frustum culling entirely (nuclear option)
-  if ((e.key === 'b' || e.key === 'B') && e.shiftKey) {
-    const instancedRenderer = (buildingSystem as any).instancedBuildingRenderer;
-    if (instancedRenderer) {
-      instancedRenderer.disableFrustumCulling();
-      showNotification('Disabled building frustum culling');
+    // Shift+B disables frustum culling entirely (nuclear option)
+    if ((e.key === 'b' || e.key === 'B') && e.shiftKey) {
+      const instancedRenderer = (buildingSystem as any).instancedBuildingRenderer;
+      if (instancedRenderer) {
+        instancedRenderer.disableFrustumCulling();
+        showNotification('Disabled building frustum culling');
+      }
     }
-  }
-});
+  },
+  { capture: true }
+);
 
 // Mouse wheel zoom
 renderer.domElement.addEventListener(
@@ -1636,6 +1646,13 @@ window.addEventListener('pagehide', cleanup);
 const frameCount = 0;
 const renderBottleneckLogged = false;
 
+const simulationDriver = new FixedStepDriver(simulationClock);
+(window as unknown as { __simulationDriver: FixedStepDriver }).__simulationDriver =
+  simulationDriver;
+document.addEventListener('visibilitychange', () => {
+  clock.getDelta();
+});
+
 function animate() {
   animationId = requestAnimationFrame(animate);
 
@@ -1652,13 +1669,13 @@ function animate() {
   // Clamp deltaTime to prevent large jumps when tab regains focus
   const deltaTime = Math.min(rawDeltaTime, 0.1); // Max 100ms per frame
   const currentTime = clock.getElapsedTime();
-  const fps = 1 / deltaTime;
+  const fps = rawDeltaTime > 0 ? 1 / rawDeltaTime : 0;
 
   // CHAINSAW: Removed performance monitoring overhead
 
   // Mobile-specific dynamic quality adjustment
   if (deviceInfo.isMobile || deviceInfo.isTablet) {
-    deviceCaps.adjustQualityForFPS(fps);
+    if (deviceCaps.adjustQualityForFPS(fps)) onWindowResize();
 
     // Adjust max interceptors based on performance
     const maxInterceptors = deviceCaps.getMaxSimultaneousInterceptors();
@@ -1671,89 +1688,37 @@ function animate() {
     }
   }
 
-  // Get active threats (needed for rendering even when paused)
+  const suspended = simulationControls.pause || document.hidden || isOrientationLocked;
+  simulationControls.suspended = suspended;
+  simulationDriver.advance(rawDeltaTime, simulationControls.timeScale, suspended, dt => {
+    runSimulationStep(dt, {
+      gameMode: simulationControls.gameMode,
+      autoIntercept: simulationControls.autoIntercept,
+      repairRate: [0, 0.5, 1, 2][gameState.getAutoRepairLevel()] ?? 0,
+      wave: waveManager,
+      batteries: domePlacementSystem.getAllBatteries(),
+      threats: threatManager,
+      interceptions: interceptionSystem,
+      radar: radarNetwork,
+      world,
+      projectiles,
+      destroyProjectile: projectile => projectile.destroy(scene, world),
+      dayNight: optimizedDayNight,
+      debris: instancedDebrisRenderer,
+    });
+  });
+
   const activeThreats = threatManager.getActiveThreats();
-
-  // Update world systems
-
-  // CHAINSAW OPTIMIZED: Update time-sliced systems (minimal performance impact)
-  optimizedDayNight.update(deltaTime);
+  const systemInterceptors = interceptionSystem.getActiveInterceptors();
+  const alpha = suspended ? 1 : simulationDriver.interpolationAlpha;
+  threatManager.renderFrame(alpha);
+  for (const projectile of [...projectiles, ...systemInterceptors]) projectile.renderFrame(alpha);
+  cameraController.update(deltaTime, activeThreats, [...projectiles, ...systemInterceptors]);
   const dayNightTime = optimizedDayNight.getTime();
   buildingSystem.updateTimeOfDay(dayNightTime.hours);
   environmentSystem.setTimeOfDay(dayNightTime.hours);
-
-  // Keep visuals but NO dynamic updates during gameplay for performance
-
-  // CHAINSAW: Removed battlefield zones update
-
-  // Update camera controller with all interceptors
-  const allInterceptors = [...projectiles, ...interceptionSystem.getActiveInterceptors()];
-  cameraController.update(deltaTime, activeThreats, allInterceptors);
-
-  // Update game systems only when not paused
-  if (!simulationControls.pause) {
-    // Update physics with time scale
-    const scaledDelta = deltaTime * simulationControls.timeScale;
-    world.step(1 / 60, scaledDelta, 3);
-
-    // Update threat manager
-    threatManager.update(deltaTime);
-
-    // Update all batteries (includes health bar orientation and reloading)
-    const allBatteries = domePlacementSystem.getAllBatteries();
-
-    // Apply auto-repair based on upgrade level
-    const autoRepairLevel = gameState.getAutoRepairLevel();
-    const repairRates = [0, 0.5, 1.0, 2.0]; // Health per second for each level
-
-    allBatteries.forEach(battery => {
-      battery.setAutoRepairRate(repairRates[autoRepairLevel]);
-      battery.update(deltaTime, activeThreats);
-    });
-
-    // Update radar network - pass threats directly instead of mapping
-    if (activeThreats.length > 0) {
-      if (radarNetwork) radarNetwork.update(activeThreats);
-    }
-
-    // Update projectiles
-    const projectileCount = projectiles.length;
-    if (projectileCount > 0) {
-      for (let i = projectiles.length - 1; i >= 0; i--) {
-        const projectile = projectiles[i];
-        projectile.update();
-
-        // Remove projectiles that fall below ground
-        if (projectile.body.position.y < -10) {
-          projectile.destroy(scene, world);
-          projectiles.splice(i, 1);
-        }
-      }
-    }
-
-    // Update pooled trail system for all trails
-    PooledTrailSystem.getInstance(scene).update();
-  }
-
-  // Update interception system and other systems
-  let systemInterceptors: Projectile[] = [];
-
-  if (!simulationControls.pause) {
-    // Always update interception system to handle active interceptors
-    // but only launch new ones if autoIntercept is enabled
-    systemInterceptors = interceptionSystem.update(
-      activeThreats,
-      !simulationControls.autoIntercept
-    );
-
-    // Update dome placement system (for instanced rendering)
-    domePlacementSystem.update();
-
-    // CHAINSAW: Update instanced debris renderer
-    instancedDebrisRenderer.update(deltaTime);
-
-    // CHAINSAW: Removed instanced rendering update - using standard meshes
-  }
+  domePlacementSystem.update();
+  PooledTrailSystem.getInstance(scene).update();
 
   // Update GUI at 30 Hz (33ms) for smooth tactical display
   if (currentTime - previousTime > 0.033) {
@@ -1791,7 +1756,8 @@ function animate() {
       activeThreats,
       displayPosition,
       totalLoaded,
-      0.95, // Default success rate
+      gameState.getStats().totalInterceptions /
+        Math.max(1, gameState.getStats().totalInterceptions + gameState.getStats().totalMisses), // Observed resolved attempt ratio
       totalCapacity // Total launcher capacity
     );
 
@@ -1840,50 +1806,13 @@ if (debug.isEnabled()) {
 
 // Orientation handling for mobile
 let animationId: number | null = null;
-const isOrientationLocked = false;
+let isOrientationLocked = false;
 
 function checkOrientation() {
-  const orientationOverlay = document.getElementById('orientation-overlay');
-  if (!orientationOverlay) return false;
-
-  // Disable orientation lock for now to debug touch issues
-  return false;
-
-  /* 
-  // Commented out unreachable code to fix lint error
-  // Only check on small mobile devices
-  const isSmallMobile = window.innerWidth <= 768 && deviceInfo.isMobile;
-  const isPortrait = window.innerHeight > window.innerWidth;
-
-  const shouldLock = isSmallMobile && isPortrait;
-
-  if (shouldLock && !isOrientationLocked) {
-    // Lock orientation - pause game
-    isOrientationLocked = true;
-    orientationOverlay?.classList.add('active');
-    if (animationId !== null) {
-      cancelAnimationFrame(animationId as number);
-      animationId = null;
-    }
-    // Pause game systems
-    simulationControls.pause = true;
-    if (waveManager) waveManager.pauseWave();
-    debug.log('Orientation locked - game paused');
-  } else if (!shouldLock && isOrientationLocked) {
-    // Unlock orientation - resume game
-    isOrientationLocked = false;
-    orientationOverlay?.classList.remove('active');
-    if (!animationId) {
-      animate(); // Restart animation loop
-    }
-    // Resume game systems
-    simulationControls.pause = false;
-    if (waveManager && simulationControls.gameMode) waveManager.resumeWave();
-    debug.log('Orientation unlocked - game resumed');
-  }
-
-  return shouldLock;
-  */
+  isOrientationLocked = window.innerWidth <= 768 && window.innerHeight > window.innerWidth;
+  document.getElementById('orientation-overlay')?.classList.toggle('active', isOrientationLocked);
+  // Suspension is independent of user pause; rotating back cannot accidentally resume a paused game.
+  return isOrientationLocked;
 }
 
 // Check orientation on load and resize
@@ -1891,7 +1820,7 @@ window.addEventListener('resize', checkOrientation);
 window.addEventListener('orientationchange', checkOrientation);
 
 // Initial orientation check
-const isLocked = checkOrientation();
+checkOrientation();
 
 // Check for inspector mode
 const urlParams = new URLSearchParams(window.location.search);
@@ -1972,9 +1901,7 @@ document.addEventListener('keydown', handleFirstInteraction, { passive: true });
 updateUIMode();
 
 // Start the animation loop only if not orientation locked
-if (!isLocked) {
-  animate();
-}
+animate();
 
 // Final fallback after animation starts
 setTimeout(hideLoadingScreen, 100);

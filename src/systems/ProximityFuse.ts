@@ -1,160 +1,136 @@
 import * as THREE from 'three';
-import { debug } from '../utils/logger';
+import { isFiniteVector } from '@/physics/numerics';
 
 export interface ProximityFuseConfig {
-  armingDistance: number; // Minimum distance before fuse arms (meters)
-  detonationRadius: number; // Maximum distance for detonation (meters)
-  optimalRadius: number; // Optimal detonation distance (meters)
-  scanRate: number; // How often to check proximity (ms)
+  armingDistance: number;
+  detonationRadius: number;
+  optimalRadius: number;
+  /** @deprecated Continuous safety checks run every simulation step. */
+  scanRate: number;
 }
 
+export interface FuseResult {
+  shouldDetonate: boolean;
+  detonationQuality: number;
+  fraction?: number;
+  position?: THREE.Vector3;
+  targetPosition?: THREE.Vector3;
+}
+
+/** Sweeps relative motion over each step, restricted to its armed, airborne interval. */
 export class ProximityFuse {
   private config: ProximityFuseConfig;
-  private armed: boolean = false;
-  private detonated: boolean = false;
-  private distanceTraveled: number = 0;
+  private armed = false;
+  private detonated = false;
+  private distanceTraveled = 0;
   private lastPosition: THREE.Vector3;
-  private lastScanTime: number = 0;
 
   constructor(startPosition: THREE.Vector3, config: Partial<ProximityFuseConfig> = {}) {
     this.config = {
-      armingDistance: 15, // Arms after 15m of flight
-      detonationRadius: 8, // Detonates within 8m (severe damage zone)
-      optimalRadius: 4, // Best detonation at 4m (lethal/severe transition)
-      scanRate: 1, // Check every frame for better accuracy
+      armingDistance: 15,
+      detonationRadius: 8,
+      optimalRadius: 4,
+      scanRate: 1,
       ...config,
     };
-
+    const c = this.config;
+    if (
+      !isFiniteVector(startPosition) ||
+      ![c.armingDistance, c.detonationRadius, c.optimalRadius].every(Number.isFinite) ||
+      c.armingDistance < 0 ||
+      c.optimalRadius <= 0 ||
+      c.detonationRadius < c.optimalRadius
+    ) {
+      throw new RangeError('Invalid proximity fuse configuration');
+    }
     this.lastPosition = startPosition.clone();
+    this.armed = c.armingDistance === 0;
   }
 
   update(
     currentPosition: THREE.Vector3,
     targetPosition: THREE.Vector3,
     deltaTime: number,
-    currentTime: number
-  ): { shouldDetonate: boolean; detonationQuality: number } {
-    // Update distance traveled
-    const distanceThisFrame = currentPosition.distanceTo(this.lastPosition);
-    this.distanceTraveled += distanceThisFrame;
+    _currentTime: number,
+    previousTargetPosition = targetPosition,
+    endFraction = 1
+  ): FuseResult {
+    const miss = { shouldDetonate: false, detonationQuality: 0 };
+    if (
+      this.detonated ||
+      deltaTime <= 0 ||
+      !Number.isFinite(deltaTime) ||
+      !isFiniteVector(currentPosition) ||
+      !isFiniteVector(targetPosition) ||
+      !isFiniteVector(previousTargetPosition)
+    )
+      return miss;
+    const start = this.lastPosition.clone();
+    const travel = currentPosition.distanceTo(start);
+    const needed = Math.max(0, this.config.armingDistance - this.distanceTraveled);
+    const armedFraction = needed === 0 ? 0 : travel > 0 ? needed / travel : Infinity;
+    this.distanceTraveled += travel;
     this.lastPosition.copy(currentPosition);
-
-    // DEBUG: Log distance traveled and current distance to target
-    const distanceToTarget = currentPosition.distanceTo(targetPosition);
-    // Commented out - too verbose for every frame
-    // debug.category(
-    //   'ProximityFuse',
-    //   `[UPDATE] Distance traveled: ${this.distanceTraveled.toFixed(1)}m, Distance to target: ${distanceToTarget.toFixed(1)}m, Armed: ${this.armed}, Detonated: ${this.detonated}`
-    // );
-
-    // Check if fuse should arm
-    if (!this.armed && this.distanceTraveled >= this.config.armingDistance) {
-      this.armed = true;
-      debug.category(
-        'ProximityFuse',
-        `[ARMED] Fuse armed at distance: ${this.distanceTraveled.toFixed(1)}m, Current distance to target: ${distanceToTarget.toFixed(1)}m`
-      );
+    this.armed = this.distanceTraveled >= this.config.armingDistance;
+    const end = Math.max(0, Math.min(1, endFraction));
+    if (!this.armed || armedFraction > end) return miss;
+    const relativeStart = start.clone().sub(previousTargetPosition);
+    const relativeDelta = currentPosition
+      .clone()
+      .sub(start)
+      .sub(targetPosition.clone().sub(previousTargetPosition));
+    const atArm = relativeStart.clone().addScaledVector(relativeDelta, armedFraction);
+    let fraction = armedFraction;
+    if (atArm.lengthSq() > this.config.detonationRadius ** 2) {
+      const a = relativeDelta.lengthSq();
+      const b = 2 * relativeStart.dot(relativeDelta);
+      const c = relativeStart.lengthSq() - this.config.detonationRadius ** 2;
+      const discriminant = b * b - 4 * a * c;
+      if (a === 0 || discriminant < 0) return miss;
+      fraction = (-b - Math.sqrt(discriminant)) / (2 * a);
+      if (fraction < armedFraction - 1e-10 || fraction > end + 1e-10) return miss;
     }
-
-    // Don't check for detonation if not armed or already detonated
-    if (!this.armed || this.detonated) {
-      debug.category(
-        'ProximityFuse',
-        `[SKIP CHECK] Not checking detonation - Armed: ${this.armed}, Detonated: ${this.detonated}`
-      );
-      return { shouldDetonate: false, detonationQuality: 0 };
-    }
-
-    // Rate limit proximity checks
-    if (currentTime - this.lastScanTime < this.config.scanRate) {
-      debug.category(
-        'ProximityFuse',
-        `[RATE LIMIT] Skipping scan - Time since last: ${(currentTime - this.lastScanTime).toFixed(1)}ms, Required: ${this.config.scanRate}ms`
-      );
-      return { shouldDetonate: false, detonationQuality: 0 };
-    }
-    this.lastScanTime = currentTime;
-
-    // DEBUG: Log proximity check details
-    debug.category(
-      'ProximityFuse',
-      `[PROXIMITY CHECK] Distance: ${distanceToTarget.toFixed(1)}m, Detonation radius: ${this.config.detonationRadius}m, Within range: ${distanceToTarget <= this.config.detonationRadius}`
-    );
-
-    // Check if within detonation radius
-    if (distanceToTarget <= this.config.detonationRadius) {
-      this.detonated = true;
-
-      // Calculate detonation quality (1.0 at optimal radius, decreasing linearly)
-      const detonationQuality = this.calculateDetonationQuality(distanceToTarget);
-
-      debug.category(
-        'ProximityFuse',
-        `[DETONATION] Triggering detonation at ${distanceToTarget.toFixed(1)}m, quality: ${(detonationQuality * 100).toFixed(0)}%, Optimal radius: ${this.config.optimalRadius}m`
-      );
-
-      return { shouldDetonate: true, detonationQuality };
-    }
-
-    debug.category(
-      'ProximityFuse',
-      `[NO DETONATION] Target too far: ${distanceToTarget.toFixed(1)}m > ${this.config.detonationRadius}m`
-    );
-    return { shouldDetonate: false, detonationQuality: 0 };
+    this.detonated = true;
+    const position = start.lerp(currentPosition, fraction);
+    const targetAtContact = previousTargetPosition.clone().lerp(targetPosition, fraction);
+    const distance = position.distanceTo(targetAtContact);
+    const quality =
+      distance <= this.config.optimalRadius
+        ? 1 - (0.1 * distance) / this.config.optimalRadius
+        : Math.max(
+            0.5,
+            0.9 -
+              (0.4 * (distance - this.config.optimalRadius)) /
+                (this.config.detonationRadius - this.config.optimalRadius)
+          );
+    return {
+      shouldDetonate: true,
+      detonationQuality: quality,
+      fraction,
+      position,
+      targetPosition: targetAtContact,
+    };
   }
 
-  private calculateDetonationQuality(distance: number): number {
-    // Quality based on how close to optimal the detonation is
-    // This affects visual explosion size but not damage (damage uses BlastPhysics)
-    if (distance <= this.config.optimalRadius) {
-      // Near-optimal detonation
-      return 0.9 + (1 - distance / this.config.optimalRadius) * 0.1;
-    } else {
-      // Sub-optimal but still effective
-      const falloffRange = this.config.detonationRadius - this.config.optimalRadius;
-      const distanceFromOptimal = distance - this.config.optimalRadius;
-      return Math.max(0.5, 0.9 - (distanceFromOptimal / falloffRange) * 0.4);
-    }
-  }
-
-  // Check if we're getting closer or moving away from target
   checkApproach(
     currentPosition: THREE.Vector3,
     targetPosition: THREE.Vector3,
     velocity: THREE.Vector3
-  ): { isApproaching: boolean; closestApproachDistance: number } {
-    // Vector from current position to target
-    const toTarget = targetPosition.clone().sub(currentPosition);
-    const currentDistance = currentPosition.distanceTo(targetPosition);
-
-    // Check if velocity is pointing towards target
-    const dotProduct = velocity.dot(toTarget);
-    const isApproaching = dotProduct > 0;
-
-    // Calculate closest approach distance
-    // This is the minimum distance the projectile will reach if it continues on current trajectory
-    const velocityNormalized = velocity.clone().normalize();
-    const projection = velocityNormalized.multiplyScalar(toTarget.dot(velocityNormalized));
-    const closestPoint = currentPosition.clone().add(projection);
-    const closestApproachDistance = closestPoint.distanceTo(targetPosition);
-
-    // DEBUG: Log approach analysis
-    debug.category(
-      'ProximityFuse',
-      `[APPROACH CHECK] Current distance: ${currentDistance.toFixed(1)}m, Approaching: ${isApproaching}, Closest approach: ${closestApproachDistance.toFixed(1)}m, Velocity dot: ${dotProduct.toFixed(2)}`
-    );
-
-    return { isApproaching, closestApproachDistance };
+  ) {
+    const relative = targetPosition.clone().sub(currentPosition);
+    const time =
+      velocity.lengthSq() > 0 ? Math.max(0, relative.dot(velocity) / velocity.lengthSq()) : 0;
+    return {
+      isApproaching: relative.dot(velocity) > 0,
+      closestApproachDistance: relative.addScaledVector(velocity, -time).length(),
+    };
   }
-
   isArmed(): boolean {
     return this.armed;
   }
-
   hasDetonated(): boolean {
     return this.detonated;
   }
-
   getDistanceTraveled(): number {
     return this.distanceTraveled;
   }

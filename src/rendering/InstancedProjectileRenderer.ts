@@ -63,12 +63,14 @@ export class InstancedProjectileRenderer {
       this.availableIndices.push(i);
     }
     this.interceptorMesh.instanceMatrix.needsUpdate = true;
+    this.interceptorMesh.computeBoundingSphere();
 
     // Add to scene
     this.scene.add(this.interceptorMesh);
   }
 
   addProjectile(projectile: Projectile): boolean {
+    if (this.projectileToIndex.has(projectile.id)) return true;
     if (this.availableIndices.length === 0) {
       debug.warn('No available instance slots for projectile');
       return false;
@@ -98,6 +100,7 @@ export class InstancedProjectileRenderer {
     const zeroScale = new THREE.Matrix4().makeScale(0, 0, 0);
     this.interceptorMesh.setMatrixAt(index, zeroScale);
     this.interceptorMesh.instanceMatrix.needsUpdate = true;
+    this.interceptorMesh.computeBoundingSphere();
   }
 
   updateProjectiles(projectiles: Projectile[]): void {
@@ -147,6 +150,7 @@ export class InstancedProjectileRenderer {
 
     if (needsUpdate) {
       this.interceptorMesh.instanceMatrix.needsUpdate = true;
+      this.interceptorMesh.computeBoundingSphere();
     }
   }
 
@@ -157,6 +161,7 @@ export class InstancedProjectileRenderer {
       this.interceptorMesh.setMatrixAt(i, zeroScale);
     }
     this.interceptorMesh.instanceMatrix.needsUpdate = true;
+    this.interceptorMesh.computeBoundingSphere();
 
     // Reset tracking
     this.projectileToIndex.clear();
@@ -169,6 +174,7 @@ export class InstancedProjectileRenderer {
   dispose(): void {
     // Dispose the cloned geometry (it's not shared)
     this.interceptorMesh.geometry.dispose();
+    this.interceptorMesh.dispose();
     // Don't dispose shared material from MaterialCache
     this.scene.remove(this.interceptorMesh);
   }

@@ -1,3 +1,4 @@
+import { simulationClock } from '@/simulation/SimulationClock';
 import * as THREE from 'three';
 import { MaterialCache } from '../utils/MaterialCache';
 
@@ -71,7 +72,7 @@ export class InstancedDebrisRenderer {
       if (this.availableIndices.length === 0) break;
 
       const index = this.availableIndices.pop()!;
-      const id = `debris_${Date.now()}_${i}`;
+      const id = `debris_${simulationClock.nowMs}_${i}`;
 
       // Random velocity in all directions
       const randomVel = new THREE.Vector3(
@@ -101,7 +102,7 @@ export class InstancedDebrisRenderer {
         ),
         lifetime: 0,
         maxLifetime: lifetimeSeconds,
-        startTime: Date.now(),
+        startTime: simulationClock.nowMs,
         active: true,
       };
 
@@ -169,6 +170,7 @@ export class InstancedDebrisRenderer {
     // Update instance matrix if there were any active debris
     if (this.activeDebris.size > 0) {
       this.instancedMesh.instanceMatrix.needsUpdate = true;
+      this.instancedMesh.computeBoundingSphere();
     }
   }
 
@@ -179,6 +181,8 @@ export class InstancedDebrisRenderer {
     // Hide the instance
     const zeroScale = new THREE.Matrix4().makeScale(0, 0, 0);
     this.instancedMesh.setMatrixAt(debris.index, zeroScale);
+    this.instancedMesh.instanceMatrix.needsUpdate = true;
+    this.instancedMesh.computeBoundingSphere();
 
     // Return index to pool
     this.availableIndices.push(debris.index);
@@ -190,6 +194,8 @@ export class InstancedDebrisRenderer {
     const zeroScale = new THREE.Matrix4().makeScale(0, 0, 0);
     this.activeDebris.forEach(debris => {
       this.instancedMesh.setMatrixAt(debris.index, zeroScale);
+      this.instancedMesh.instanceMatrix.needsUpdate = true;
+      this.instancedMesh.computeBoundingSphere();
     });
     this.instancedMesh.instanceMatrix.needsUpdate = true;
 

@@ -1,3 +1,4 @@
+import { simulationClock } from '@/simulation/SimulationClock';
 import * as THREE from 'three';
 import { IronDomeBattery } from '@/entities/IronDomeBattery';
 import { Threat } from '@/entities/Threat';
@@ -115,7 +116,7 @@ export class NetworkCentricSystem {
 
       // Create new track group
       if (!assigned) {
-        const newTrackId = `track_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+        const newTrackId = `track_${simulationClock.nowMs}_${Math.random().toString(36).substr(2, 9)}`;
         groups.set(newTrackId, [data]);
       }
     }
@@ -167,14 +168,14 @@ export class NetworkCentricSystem {
       existingTrack.velocity.lerp(fusedVelocity, alpha);
 
       // Update acceleration estimate
-      const dt = (Date.now() - existingTrack.lastUpdate) / 1000;
+      const dt = (simulationClock.nowMs - existingTrack.lastUpdate) / 1000;
       if (dt > 0) {
         const accel = fusedVelocity.clone().sub(existingTrack.velocity).divideScalar(dt);
         existingTrack.acceleration.lerp(accel, 0.5);
       }
 
       existingTrack.confidence = Math.max(...sensors.map(s => s.confidence));
-      existingTrack.lastUpdate = Date.now();
+      existingTrack.lastUpdate = simulationClock.nowMs;
 
       // Update contributors
       sensors.forEach(s => existingTrack.contributors.set(s.sensorId, s));
@@ -367,10 +368,10 @@ export class NetworkCentricSystem {
 
     // Create handoff message
     const handoffMsg: NetworkMessage = {
-      id: `handoff_${Date.now()}`,
+      id: `handoff_${simulationClock.nowMs}`,
       type: 'handoff_request',
       sender: fromBatteryId,
-      timestamp: Date.now(),
+      timestamp: simulationClock.nowMs,
       data: {
         threatId,
         track,
@@ -402,7 +403,7 @@ export class NetworkCentricSystem {
     // Simulate network delay
     const delay = Math.random() * this.maxLatency;
 
-    setTimeout(() => {
+    simulationClock.setTimeout(() => {
       if (recipient) {
         // Direct message
         this.processMessage(message, recipient);
@@ -455,10 +456,10 @@ export class NetworkCentricSystem {
 
     // Send acknowledgment
     const response: NetworkMessage = {
-      id: `handoff_ack_${Date.now()}`,
+      id: `handoff_ack_${simulationClock.nowMs}`,
       type: 'status_update',
       sender: batteryId,
-      timestamp: Date.now(),
+      timestamp: simulationClock.nowMs,
       data: {
         handoffId: data.handoffId,
         accepted: canAccept,
@@ -487,10 +488,10 @@ export class NetworkCentricSystem {
   private broadcastAllocations(allocations: Map<string, TaskAllocation>): void {
     allocations.forEach((allocation, batteryId) => {
       const message: NetworkMessage = {
-        id: `allocation_${Date.now()}`,
+        id: `allocation_${simulationClock.nowMs}`,
         type: 'threat_assignment',
         sender: 'network_controller',
-        timestamp: Date.now(),
+        timestamp: simulationClock.nowMs,
         data: { allocation },
       };
 
@@ -499,7 +500,7 @@ export class NetworkCentricSystem {
   }
 
   private maintainTracks(): void {
-    const now = Date.now();
+    const now = simulationClock.nowMs;
     const maxAge = 5000; // 5 seconds
 
     const tracksToDelete: string[] = [];

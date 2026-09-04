@@ -1,3 +1,4 @@
+import { gameplayRandom } from '@/simulation/Random';
 import * as THREE from 'three';
 import { ThreatType } from '../entities/Threat';
 import {
@@ -134,7 +135,11 @@ export class ThreatLauncherSystem {
     launcherTypes.forEach((config, typeIndex) => {
       for (let i = 0; i < config.count; i++) {
         // Slightly offset each launcher within the site
-        const offset = new THREE.Vector3((Math.random() - 0.5) * 50, 0, (Math.random() - 0.5) * 50);
+        const offset = new THREE.Vector3(
+          (gameplayRandom.next() - 0.5) * 50,
+          0,
+          (gameplayRandom.next() - 0.5) * 50
+        );
 
         launchers.push({
           id: `${siteId}_${config.type}_${i}`,
@@ -226,13 +231,14 @@ export class ThreatLauncherSystem {
           this.currentScenarioParams?.intensity === AttackIntensity.EXTREME ? 2 : 1;
 
         for (let i = 0; i < Math.min(launchersToFire, activeLaunchers.length); i++) {
-          const launcher = activeLaunchers[Math.floor(Math.random() * activeLaunchers.length)];
+          const launcher =
+            activeLaunchers[Math.floor(gameplayRandom.next() * activeLaunchers.length)];
           readyLaunchers.push({ launcher, site });
         }
 
         // Update site fire time with intensity multiplier
         site.lastFireTime = currentTime;
-        const baseDelay = 20000 + Math.random() * 40000; // 20-60 seconds base
+        const baseDelay = 20000 + gameplayRandom.next() * 40000; // 20-60 seconds base
         site.nextFireTime = currentTime + baseDelay * this.intensityMultiplier;
       }
     }
@@ -324,7 +330,7 @@ export class ThreatLauncherSystem {
       case 'concentrated':
         // Attack from one direction only
         const directions = ['north', 'south', 'east', 'west'] as const;
-        const chosenDirection = directions[Math.floor(Math.random() * directions.length)];
+        const chosenDirection = directions[Math.floor(gameplayRandom.next() * directions.length)];
         this.activateDirection(chosenDirection);
         break;
 
@@ -342,10 +348,10 @@ export class ThreatLauncherSystem {
         // Activate random sites
         const allSiteIds = Array.from(this.launcherSites.keys());
         const sitesToActivate = Math.floor(
-          allSiteIds.length * 0.3 + Math.random() * allSiteIds.length * 0.4
+          allSiteIds.length * 0.3 + gameplayRandom.next() * allSiteIds.length * 0.4
         );
         for (let i = 0; i < sitesToActivate; i++) {
-          const randomSite = allSiteIds[Math.floor(Math.random() * allSiteIds.length)];
+          const randomSite = allSiteIds[Math.floor(gameplayRandom.next() * allSiteIds.length)];
           this.activateSite(randomSite);
         }
         break;

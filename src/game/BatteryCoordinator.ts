@@ -1,3 +1,4 @@
+import { simulationClock } from '@/simulation/SimulationClock';
 import * as THREE from 'three';
 import { IBattery } from '../entities/IBattery';
 import { IronDomeBattery } from '../entities/IronDomeBattery';
@@ -100,7 +101,8 @@ export class BatteryCoordinator {
       } else if (status.battery instanceof LaserBattery) {
         // Laser batteries can engage if operational and have energy
         const laserBattery = status.battery as LaserBattery;
-        if (laserBattery.getEnergyLevel() <= 0.1) { // Need at least 10% energy
+        if (laserBattery.getEnergyLevel() <= 0.1) {
+          // Need at least 10% energy
           return;
         }
       }
@@ -150,7 +152,7 @@ export class BatteryCoordinator {
 
     // 2. Battery load factor (prefer less loaded batteries)
     const batteryConfig = status.battery.getConfig?.() || { launcherCount: 20 };
-    const maxEngagements = Math.ceil(batteryConfig.launcherCount / 4); // Can handle multiple threats
+    const maxEngagements = Math.ceil((batteryConfig.launcherCount ?? 20) / 4); // Can handle multiple threats
     const loadFactor = Math.max(0.1, 1 - status.activeEngagements / maxEngagements);
     score *= loadFactor;
 
@@ -167,16 +169,18 @@ export class BatteryCoordinator {
 
     // 4. Time to impact check
     const threatTimeToImpact = threat.getTimeToImpact();
-    
+
+    let interceptTime = 0;
     if (status.battery instanceof IronDomeBattery) {
       const interceptorSpeed = (battery.getConfig?.() as any)?.interceptorSpeed || 250;
-      const interceptTime = distance / interceptorSpeed;
+      interceptTime = distance / interceptorSpeed;
       if (interceptTime >= threatTimeToImpact) {
         return 0; // Can't intercept in time
       }
     } else if (status.battery instanceof LaserBattery) {
       // Laser batteries engage instantly but need time to destroy
-      const timeToDestroy = 100 / 50; // health / damage per second
+      const timeToDestroy = threat.getHealth() / (battery.getConfig().damagePerSecond ?? 20);
+      interceptTime = timeToDestroy; // health / damage per second
       if (timeToDestroy >= threatTimeToImpact) {
         return 0; // Can't destroy in time
       }
@@ -187,7 +191,7 @@ export class BatteryCoordinator {
     score *= 2 - timeRatio; // Higher score for faster interception
 
     // 6. Recent firing penalty (reduced - batteries should be able to fire rapidly)
-    const timeSinceLastFire = Date.now() - status.lastFiredTime;
+    const timeSinceLastFire = simulationClock.nowMs - status.lastFiredTime;
     if (timeSinceLastFire < 200) {
       score *= 0.9; // Smaller penalty
     }
@@ -232,14 +236,14 @@ export class BatteryCoordinator {
         threatId,
         assignedBatteryId: batteryId,
         interceptorCount,
-        timeAssigned: Date.now(),
+        timeAssigned: simulationClock.nowMs,
       });
     }
 
     const status = this.batteries.get(batteryId);
     if (status) {
       status.activeEngagements++;
-      status.lastFiredTime = Date.now();
+      status.lastFiredTime = simulationClock.nowMs;
     }
 
     debug
@@ -290,7 +294,7 @@ export class BatteryCoordinator {
    * Clean up old assignments
    */
   cleanup(): void {
-    const now = Date.now();
+    const now = simulationClock.nowMs;
     const maxAge = 30000; // 30 seconds
 
     this.threatAssignments.forEach((assignment, threatId) => {
@@ -343,7 +347,8 @@ export class BatteryCoordinator {
       } else if (status.battery instanceof LaserBattery) {
         // Laser batteries can engage if operational and have energy
         const laserBattery = status.battery as LaserBattery;
-        if (laserBattery.getEnergyLevel() <= 0.1) { // Need at least 10% energy
+        if (laserBattery.getEnergyLevel() <= 0.1) {
+          // Need at least 10% energy
           return;
         }
       }

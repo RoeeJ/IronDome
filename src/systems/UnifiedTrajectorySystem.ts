@@ -1,6 +1,8 @@
 import * as THREE from 'three';
 import { TrajectoryCalculator, LaunchParameters } from '@/utils/TrajectoryCalculator';
 import { ImprovedTrajectoryCalculator } from '@/utils/ImprovedTrajectoryCalculator';
+import { ThreatTracker } from '@/utils/ThreatTracker';
+import { Threat } from '@/entities/Threat';
 import { PredictiveTargeting } from '@/utils/PredictiveTargeting';
 import { ProportionalNavigation } from '@/physics/ProportionalNavigation';
 import {
@@ -40,6 +42,7 @@ export interface TrajectoryPoint {
  */
 export class UnifiedTrajectorySystem {
   private config: TrajectoryConfig;
+  private readonly tracker = new ThreatTracker();
   private predictiveTargeting: PredictiveTargeting | null = null;
   private proportionalNav: ProportionalNavigation | null = null;
   private advancedBallistics: AdvancedBallistics | null = null;
@@ -129,9 +132,39 @@ export class UnifiedTrajectorySystem {
     interceptorPos: THREE.Vector3,
     interceptorSpeed: number,
     isDrone: boolean = false,
-    threat?: any // Optional threat object for advanced features
+    threat?: Threat,
+    environment?: { factors: EnvironmentalFactors; coefficients: BallisticCoefficients }
   ): InterceptionResult | null {
-    let result: any = null;
+    // Environmental shooting currently supports constant-velocity targets only. Missing
+    // model inputs or ballistic targets return no solution instead of a vacuum fallback.
+    if (this.config.useEnvironmental) {
+      if (!environment || !this.advancedBallistics || !isDrone) return null;
+      const solution = this.advancedBallistics.calculateFiringSolution(
+        interceptorPos,
+        threatPos,
+        threatVel,
+        interceptorSpeed,
+        environment.coefficients,
+        environment.factors
+      );
+      return solution
+        ? {
+            point: threatPos.clone().addScaledVector(threatVel, solution.timeOfFlight),
+            time: solution.timeOfFlight,
+            confidence: 0.95,
+            canIntercept: true,
+          }
+        : null;
+    }
+    if (this.config.useKalmanFilter && threat) {
+      this.tracker.update(threat);
+      const state = this.tracker.getTrackedState(threat.id);
+      if (state) {
+        threatPos = state.position;
+        threatVel = state.velocity;
+      }
+    }
+    let result: { point: THREE.Vector3; time: number; confidence?: number } | null = null;
 
     switch (this.config.mode) {
       case 'basic':
@@ -164,31 +197,7 @@ export class UnifiedTrajectorySystem {
           isDrone
         );
 
-        // Apply environmental corrections if available
-        if (result && this.advancedBallistics && this.config.useEnvironmental) {
-          // TODO: Apply wind and other environmental factors
-          // This would require environmental data to be passed in
-        }
         break;
-    }
-
-    // Apply Kalman filtering if enabled and threat object provided
-    if (result && this.predictiveTargeting && threat && this.config.useKalmanFilter) {
-      this.predictiveTargeting.updateThreatTracking(threat);
-      const prediction = this.predictiveTargeting.calculateLeadPrediction(
-        threat,
-        interceptorPos,
-        interceptorSpeed
-      );
-
-      if (prediction && prediction.confidence > 0.8) {
-        result = {
-          point: prediction.aimPoint,
-          time: prediction.timeToIntercept,
-          confidence: prediction.confidence,
-          canIntercept: true,
-        };
-      }
     }
 
     // Normalize result format
@@ -196,7 +205,7 @@ export class UnifiedTrajectorySystem {
       return {
         point: result.point,
         time: result.time,
-        confidence: result.confidence || 1.0,
+        confidence: result.confidence ?? 0.95,
         canIntercept: true,
       };
     }
@@ -217,8 +226,10 @@ export class UnifiedTrajectorySystem {
       coefficients?: BallisticCoefficients;
     }
   ): TrajectoryPoint[] {
-    const timeStep = options?.timeStep || 0.1;
-    const maxTime = options?.maxTime || 20;
+    const timeStep = options?.timeStep ?? 0.1;
+    const maxTime = options?.maxTime ?? 20;
+    if (!Number.isFinite(timeStep) || timeStep <= 0 || !Number.isFinite(maxTime) || maxTime < 0)
+      throw new RangeError('Invalid trajectory sampling');
 
     if (
       this.config.mode === 'advanced' &&
@@ -232,7 +243,10 @@ export class UnifiedTrajectorySystem {
       let currentVel = velocity.clone();
       let t = 0;
 
-      while (t <= maxTime && currentPos.y > 0) {
+      while (
+        t <= maxTime &&
+        (currentPos.y > 0 || (t === 0 && currentPos.y === 0 && currentVel.y > 0))
+      ) {
         points.push({
           position: currentPos.clone(),
           velocity: currentVel.clone(),

@@ -1,3 +1,4 @@
+import { simulationClock } from '@/simulation/SimulationClock';
 /**
  * Attack Scenarios System
  * Provides player-friendly abstractions for threat spawning patterns
@@ -229,7 +230,7 @@ export class ScenarioManager {
     }
   ) {
     this.activeScenario = scenario;
-    this.startTime = Date.now();
+    this.startTime = simulationClock.nowMs;
     this.onComplete = callbacks?.onComplete;
     this.onUpdate = callbacks?.onUpdate;
   }
@@ -252,7 +253,7 @@ export class ScenarioManager {
       return 0;
     }
 
-    const elapsed = (Date.now() - this.startTime) / 1000;
+    const elapsed = (simulationClock.nowMs - this.startTime) / 1000;
     const progress = Math.min(elapsed / this.activeScenario.parameters.duration, 1);
 
     if (progress >= 1 && this.activeScenario) {

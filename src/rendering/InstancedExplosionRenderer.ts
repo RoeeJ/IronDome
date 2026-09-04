@@ -1,3 +1,4 @@
+import { simulationClock } from '@/simulation/SimulationClock';
 import * as THREE from 'three';
 import { MaterialCache } from '../utils/MaterialCache';
 import { TextureCache } from '../utils/TextureCache';
@@ -123,13 +124,13 @@ export class InstancedExplosionRenderer {
     }
 
     const index = this.availableIndices.pop()!;
-    const id = `explosion_${Date.now()}_${Math.random()}`;
+    const id = `explosion_${simulationClock.nowMs}_${Math.random()}`;
 
     const explosion: ExplosionInstance = {
       id,
       index,
       position: position.clone(),
-      startTime: Date.now(),
+      startTime: simulationClock.nowMs,
       duration: 600 + quality * 200, // 0.6 to 0.8 seconds (faster main explosion)
       maxScale: 2 + quality * 2.5, // 2 to 4.5 based on quality (smaller)
       quality,
@@ -145,7 +146,7 @@ export class InstancedExplosionRenderer {
   }
 
   update(): void {
-    const currentTime = Date.now();
+    const currentTime = simulationClock.nowMs;
 
     // Update launch style effects
     this.activeEffects = this.activeEffects.filter(effect => effect.update());
@@ -294,7 +295,7 @@ export class InstancedExplosionRenderer {
 
     // For ground explosions, just add the dust ring
     if (type === 'ground' && quality > 0.5) {
-      setTimeout(() => {
+      simulationClock.setTimeout(() => {
         this.createGroundDustRing(position, quality);
       }, 100); // 100ms delay
     }
@@ -367,11 +368,11 @@ export class InstancedExplosionRenderer {
     this.scene.add(points);
 
     // Animate smoke
-    const startTime = Date.now();
+    const startTime = simulationClock.nowMs;
     const duration = 1500 + quality * 1000; // 1.5-2.5 seconds based on quality
     const effect = {
       update: () => {
-        const elapsed = (Date.now() - startTime) / 1000;
+        const elapsed = (simulationClock.nowMs - startTime) / 1000;
         if (elapsed > duration / 1000) {
           this.scene.remove(points);
           geometry.dispose();
@@ -439,10 +440,10 @@ export class InstancedExplosionRenderer {
     );
 
     // Animate dust ring
-    const startTime = Date.now();
+    const startTime = simulationClock.nowMs;
     const effect = {
       update: () => {
-        const elapsed = (Date.now() - startTime) / 1000;
+        const elapsed = (simulationClock.nowMs - startTime) / 1000;
         if (elapsed > 2) {
           this.scene.remove(ring);
           ringGeometry.dispose();

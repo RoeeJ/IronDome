@@ -1,3 +1,4 @@
+import { simulationClock } from '@/simulation/SimulationClock';
 import * as THREE from 'three';
 import * as CANNON from 'cannon-es';
 import { debug } from '../utils/logger';
@@ -55,7 +56,7 @@ export class ThrustVectorControl {
 
   constructor(config: Partial<ThrustControlConfig> = {}) {
     this.config = { ...ThrustVectorControl.TAMIR_CONFIG, ...config };
-    this.thrustStartTime = Date.now();
+    this.thrustStartTime = simulationClock.nowMs;
     this.currentThrust = this.config.maxThrust;
     this.gimbalAngle = new THREE.Vector2(0, 0);
     this.dacsRemainingImpulse = this.config.dacsImpulseBudget;
@@ -315,7 +316,7 @@ export class ThrustVectorControl {
     dacsRemaining: number;
     burnTimeRemaining: number;
   } {
-    const burnTime = (Date.now() - this.thrustStartTime) / 1000;
+    const burnTime = (simulationClock.nowMs - this.thrustStartTime) / 1000;
     const motorActive = burnTime < this.config.thrustDuration;
 
     return {

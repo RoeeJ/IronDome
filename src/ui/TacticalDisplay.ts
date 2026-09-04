@@ -71,8 +71,21 @@ export class TacticalDisplay {
       this.canvas.style.border = '1px solid rgba(0, 255, 255, 0.3)';
     }
 
+    this.canvas.style.width = '100%';
+    this.canvas.style.height = '100%';
+    const radarStyle = document.createElement('style');
+    radarStyle.textContent = `
+      :root { --radar-size: ${baseSize}px; }
+      @media (max-height: 500px) { :root { --radar-size: 120px; } }
+      #tactical-radar { width: var(--radar-size) !important; height: var(--radar-size) !important; }
+      .lil-gui.root { max-height: calc(100dvh - var(--radar-size) - 90px) !important; }
+      .lil-gui.root:not(.closed) { height: calc(100dvh - var(--radar-size) - 90px); }
+    `;
+    document.head.appendChild(radarStyle);
+
     // Create a container div to ensure proper layering
     this.container = document.createElement('div');
+    this.container.id = 'tactical-radar';
     this.container.style.position = 'fixed';
     this.container.style.bottom = '10px'; // Lower positioning
     this.container.style.left = '10px';
@@ -310,12 +323,12 @@ export class TacticalDisplay {
     // Draw range labels with better styling - show only 1km intervals to reduce clutter
     ctx.fillStyle = 'rgba(0, 255, 255, 0.7)';
     ctx.font = '9px "Courier New", monospace';
-    
+
     // Draw labels only at 1km intervals
     for (let i = 1; i <= 4; i++) {
       const distanceKm = i; // 1km, 2km, 3km, 4km
       const pixelRadius = distanceKm * 1000 * this.scale; // Convert km to pixels
-      
+
       // Only draw if the ring is within our radar radius
       if (pixelRadius <= this.radarRadius) {
         const labelX = this.radarCenter.x + pixelRadius - 15;

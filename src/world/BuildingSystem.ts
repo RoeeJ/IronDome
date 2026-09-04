@@ -1,11 +1,15 @@
+import { worldRandom, cosmeticRandom } from '@/simulation/Random';
 import * as THREE from 'three';
+import { BuildingState, createBuildingState } from './BuildingState';
+import { simulationClock } from '@/simulation/SimulationClock';
+import { sweptSphereBoxContact } from '@/physics/collision';
 import { MaterialCache } from '../utils/MaterialCache';
 import { debug } from '../utils/logger';
 import { StaticGeometryMerger } from '../utils/StaticGeometryMerger';
 import { StreetLightInstanceManager } from '../rendering/StreetLightInstanceManager';
 import { InstancedBuildingRenderer } from '../rendering/InstancedBuildingRenderer';
 
-interface Building {
+interface Building extends BuildingState {
   id: string;
   mesh: THREE.Mesh;
   position: THREE.Vector3;
@@ -28,6 +32,8 @@ interface BuildingInfo {
 export class BuildingSystem {
   private scene: THREE.Scene;
   private buildings = new Map<string, Building>();
+  private registry = new Map<string, BuildingState>();
+  private nextBuildingId = 0;
   private buildingGroup = new THREE.Group();
   private debrisGroup = new THREE.Group();
   private cityGenerated = false; // Flag to prevent multiple city generations
@@ -164,6 +170,13 @@ export class BuildingSystem {
   }
 
   createBuilding(position: THREE.Vector3, width: number, height: number, depth: number): string {
+    const state = createBuildingState(
+      `building_${this.nextBuildingId++}`,
+      position,
+      width,
+      height,
+      depth
+    );
     // Store building info for collision detection
     this.buildingInfos.push({
       position: position.clone(),
@@ -174,12 +187,14 @@ export class BuildingSystem {
 
     // Use instanced renderer if available
     if (this.useInstancedBuildings && this.instancedRenderer) {
-      return this.instancedRenderer.createBuilding(position, width, height, depth);
+      this.instancedRenderer.createBuilding(position, width, height, depth, state);
+      this.registry.set(state.id, state);
+      return state.id;
     }
 
     // Legacy non-instanced building creation
     const materialCache = MaterialCache.getInstance();
-    const id = `building_${Date.now()}_${Math.random()}`;
+    const id = state.id;
     const floors = Math.floor(height / 4); // Assume 4m per floor
 
     // DENSE WINDOWS: Fill buildings with windows since we're using instancing
@@ -188,14 +203,14 @@ export class BuildingSystem {
     // Create building mesh - CHAINSAW: Use standard geometry
     const geometry = new THREE.BoxGeometry(width, height, depth);
     const material = materialCache.getMeshStandardMaterial({
-      color: new THREE.Color().setHSL(0, 0, 0.3 + Math.random() * 0.2),
+      color: new THREE.Color().setHSL(0, 0, 0.3 + cosmeticRandom.next() * 0.2),
       roughness: 0.9,
       metalness: 0.1,
     });
 
     const mesh = new THREE.Mesh(geometry, material);
     mesh.position.copy(position);
-    mesh.position.y = height / 2;
+    mesh.position.y = position.y + height / 2;
     mesh.castShadow = true;
     mesh.receiveShadow = true;
     mesh.userData.buildingId = id;
@@ -238,7 +253,7 @@ export class BuildingSystem {
       } else {
         debug.warn('optimizedDayNight not available during building creation');
       }
-      const isLit = Math.random() < litChance;
+      const isLit = cosmeticRandom.next() < litChance;
       const pool = isLit ? this.litWindowPool : this.unlitWindowPool;
       const mesh = isLit ? this.litWindowMesh : this.unlitWindowMesh;
 
@@ -278,7 +293,7 @@ export class BuildingSystem {
     if (sidesWithWindows.has('front')) {
       for (let row = startRow; row < windowRows; row++) {
         for (let col = 0; col < windowColsX; col++) {
-          if (Math.random() < windowDensity) {
+          if (cosmeticRandom.next() < windowDensity) {
             const localX = (col - windowColsX / 2) * 4 + 2;
             const localY = 2.5 + row * 5; // Start 2.5m from base, go up
             const localZ = depth / 2 + 0.5;
@@ -292,7 +307,7 @@ export class BuildingSystem {
     if (sidesWithWindows.has('back')) {
       for (let row = startRow; row < windowRows; row++) {
         for (let col = 0; col < windowColsX; col++) {
-          if (Math.random() < windowDensity) {
+          if (cosmeticRandom.next() < windowDensity) {
             const localX = (col - windowColsX / 2) * 4 + 2;
             const localY = 2.5 + row * 5; // Start 2.5m from base, go up
             const localZ = -depth / 2 - 0.5;
@@ -306,7 +321,7 @@ export class BuildingSystem {
     if (sidesWithWindows.has('right')) {
       for (let row = startRow; row < windowRows; row++) {
         for (let col = 0; col < windowColsZ; col++) {
-          if (Math.random() < windowDensity) {
+          if (cosmeticRandom.next() < windowDensity) {
             const localX = width / 2 + 0.5;
             const localY = 2.5 + row * 5; // Start 2.5m from base, go up
             const localZ = (col - windowColsZ / 2) * 4 + 2;
@@ -320,7 +335,7 @@ export class BuildingSystem {
     if (sidesWithWindows.has('left')) {
       for (let row = startRow; row < windowRows; row++) {
         for (let col = 0; col < windowColsZ; col++) {
-          if (Math.random() < windowDensity) {
+          if (cosmeticRandom.next() < windowDensity) {
             const localX = -width / 2 - 0.5;
             const localY = 2.5 + row * 5; // Start 2.5m from base, go up
             const localZ = (col - windowColsZ / 2) * 4 + 2;
@@ -337,6 +352,7 @@ export class BuildingSystem {
     this.windowCount += windowIndices.length;
 
     const building: Building = {
+      ...state,
       id,
       mesh,
       position: position.clone(),
@@ -350,6 +366,7 @@ export class BuildingSystem {
     };
 
     this.buildings.set(id, building);
+    this.registry.set(id, building);
     this.buildingGroup.add(mesh);
 
     // CHAINSAW: No geometry merging - keep simple
@@ -501,7 +518,7 @@ export class BuildingSystem {
     mesh.position.y = startY;
     mesh.scale.y = 0.01;
 
-    const duration = 600 + Math.random() * 400; // 600-1000ms
+    const duration = 600 + cosmeticRandom.next() * 400; // 600-1000ms
     const startTime = Date.now();
 
     const animate = () => {
@@ -650,8 +667,8 @@ export class BuildingSystem {
     // Less aggressive randomization for cleaner look
     districts.forEach(district => {
       const jitter = 20; // Reduced from 40
-      district.center.x += (Math.random() - 0.5) * jitter;
-      district.center.z += (Math.random() - 0.5) * jitter;
+      district.center.x += (worldRandom.next() - 0.5) * jitter;
+      district.center.z += (worldRandom.next() - 0.5) * jitter;
 
       // Remove building count variation for consistency
     });
@@ -669,14 +686,14 @@ export class BuildingSystem {
         totalAttempts++;
 
         // Spread buildings across district
-        const angle = Math.random() * Math.PI * 2;
-        const distance = Math.random() * district.spread;
+        const angle = worldRandom.next() * Math.PI * 2;
+        const distance = worldRandom.next() * district.spread;
         const x = district.center.x + Math.cos(angle) * distance;
         const z = district.center.z + Math.sin(angle) * distance;
 
         // Generate building dimensions first
-        const width = 20 + Math.random() * 30;
-        const depth = 20 + Math.random() * 30;
+        const width = 20 + worldRandom.next() * 30;
+        const depth = 20 + worldRandom.next() * 30;
 
         // Check minimum distance from other buildings - account for building dimensions
         let tooClose = false;
@@ -724,7 +741,7 @@ export class BuildingSystem {
 
         if (!tooClose) {
           // SUPER SAIYAN 2: MUCH TALLER BUILDINGS!
-          const baseHeight = 40 + Math.random() * 60;
+          const baseHeight = 40 + worldRandom.next() * 60;
           const height = baseHeight * district.heightMult;
 
           const pos = new THREE.Vector3(x, 0, z);
@@ -1242,6 +1259,15 @@ export class BuildingSystem {
   }
 
   damageBuilding(buildingId: string, damage: number): void {
+    if (!Number.isFinite(damage) || damage <= 0) return;
+    const state = this.registry.get(buildingId);
+    if (!state || state.isDestroyed) return;
+    if (this.instancedRenderer) {
+      state.health = Math.max(0, state.health - damage);
+      state.isDestroyed = state.health === 0;
+      this.instancedRenderer.updateDamage(state.id);
+      return;
+    }
     const building = this.buildings.get(buildingId);
     if (!building || building.isDestroyed) return;
 
@@ -1286,7 +1312,11 @@ export class BuildingSystem {
 
   private getWindowWorldPosition(building: Building, windowIndex: number): THREE.Vector3 {
     // Approximate window position based on building
-    const offset = new THREE.Vector3((Math.random() - 0.5) * 10, (Math.random() - 0.5) * 20, 5);
+    const offset = new THREE.Vector3(
+      (cosmeticRandom.next() - 0.5) * 10,
+      (cosmeticRandom.next() - 0.5) * 20,
+      5
+    );
     return building.position.clone().add(offset);
   }
 
@@ -1330,12 +1360,12 @@ export class BuildingSystem {
     this.buildings.delete(buildingId);
   }
 
-  getNearbyBuildings(position: THREE.Vector3, radius: number): Building[] {
-    const nearby: Building[] = [];
+  getNearbyBuildings(position: THREE.Vector3, radius: number): BuildingState[] {
+    const nearby: BuildingState[] = [];
 
-    this.buildings.forEach(building => {
+    this.registry.forEach(building => {
       if (!building.isDestroyed) {
-        const distance = building.position.distanceTo(position);
+        const distance = building.bounds.distanceToPoint(position);
         if (distance <= radius) {
           nearby.push(building);
         }
@@ -1376,21 +1406,24 @@ export class BuildingSystem {
     this.buildingGroup.clear();
     this.debrisGroup.clear();
     this.buildings.clear();
+    this.registry.clear();
+    this.instancedRenderer?.dispose();
   }
 
   getStats() {
     return {
-      buildingCount: this.buildings.size,
+      buildingCount: this.registry.size,
       windowCount: this.windowCount,
       drawCalls: this.buildings.size + 2, // Buildings + lit windows + unlit windows
     };
   }
 
   checkExplosionDamage(explosionPos: THREE.Vector3, blastRadius: number): void {
-    this.buildings.forEach(building => {
+    if (!Number.isFinite(blastRadius) || blastRadius <= 0) return;
+    this.registry.forEach(building => {
       if (building.isDestroyed) return;
 
-      const distance = building.position.distanceTo(explosionPos);
+      const distance = building.bounds.distanceToPoint(explosionPos);
       if (distance <= blastRadius) {
         // Calculate damage based on distance
         const damageFactor = 1 - distance / blastRadius;
@@ -1403,10 +1436,10 @@ export class BuildingSystem {
     });
   }
 
-  getBuildingAt(position: THREE.Vector3, radius: number = 10): Building | null {
-    for (const building of this.buildings.values()) {
+  getBuildingAt(position: THREE.Vector3, radius: number = 10): BuildingState | null {
+    for (const building of this.registry.values()) {
       if (!building.isDestroyed) {
-        const distance = building.position.distanceTo(position);
+        const distance = building.bounds.distanceToPoint(position);
         if (distance <= radius) {
           return building;
         }
@@ -1415,21 +1448,34 @@ export class BuildingSystem {
     return null;
   }
 
-  getAllBuildings(): Building[] {
-    return Array.from(this.buildings.values());
+  getAllBuildings(): BuildingState[] {
+    return Array.from(this.registry.values()).filter(building => !building.isDestroyed);
+  }
+
+  findFirstCollision(
+    start: THREE.Vector3,
+    end: THREE.Vector3,
+    radius = 0
+  ): { building: BuildingState; fraction: number; position: THREE.Vector3 } | null {
+    let first: BuildingState | null = null;
+    let fraction = Infinity;
+    for (const building of this.registry.values()) {
+      if (building.isDestroyed) continue;
+      const contact = sweptSphereBoxContact(start, end, radius, building.bounds);
+      if (contact !== null && contact < fraction) {
+        first = building;
+        fraction = contact;
+      }
+    }
+    return first
+      ? { building: first, fraction, position: start.clone().lerp(end, fraction) }
+      : null;
   }
 
   // CHAINSAW OPTIMIZED: Time-sliced lighting updates every 10 seconds (but force on manual time changes)
   updateTimeOfDay(hours: number, forceUpdate: boolean = false): void {
-    // Use instanced renderer if available
-    if (this.useInstancedBuildings && this.instancedRenderer) {
-      this.instancedRenderer.updateWindowLighting(hours);
-      this.updateStreetLights(hours);
-      return;
-    }
-
     // Legacy lighting update
-    const now = Date.now();
+    const now = simulationClock.nowMs;
     const currentHour = Math.floor(hours);
 
     // Skip if too soon unless forced or hour changed significantly
@@ -1444,6 +1490,12 @@ export class BuildingSystem {
 
     this.lastUpdateHour = currentHour;
     this.lastLightingUpdate = now;
+
+    if (this.instancedRenderer) {
+      this.instancedRenderer.updateWindowLighting(hours);
+      this.updateStreetLights(hours);
+      return;
+    }
 
     // Update street lights
     this.updateStreetLights(hours);
@@ -1537,7 +1589,7 @@ export class BuildingSystem {
       for (let i = 0; i < toSwitch && i < maxWindowsPerUpdate; i++) {
         if (unlitWindows.length === 0) break;
 
-        const randomIndex = Math.floor(Math.random() * unlitWindows.length);
+        const randomIndex = Math.floor(cosmeticRandom.next() * unlitWindows.length);
         const windowKey = unlitWindows.splice(randomIndex, 1)[0];
         const switched = this.switchWindowState(windowKey, true);
         if (switched) switchedCount++;
@@ -1565,7 +1617,7 @@ export class BuildingSystem {
       for (let i = 0; i < toSwitch && i < maxWindowsPerUpdate; i++) {
         if (litWindows.length === 0) break;
 
-        const randomIndex = Math.floor(Math.random() * litWindows.length);
+        const randomIndex = Math.floor(cosmeticRandom.next() * litWindows.length);
         const windowKey = litWindows.splice(randomIndex, 1)[0];
         const switched = this.switchWindowState(windowKey, false);
         if (switched) switchedCount++;

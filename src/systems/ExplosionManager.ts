@@ -1,3 +1,4 @@
+import { simulationClock } from '@/simulation/SimulationClock';
 import * as THREE from 'three';
 import { InstancedExplosionRenderer } from '../rendering/InstancedExplosionRenderer';
 import { MaterialCache } from '../utils/MaterialCache';
@@ -183,7 +184,7 @@ export class ExplosionManager {
     const explosion: ExplosionInstance = {
       id,
       config: finalConfig,
-      startTime: Date.now(),
+      startTime: simulationClock.nowMs,
       duration: finalConfig.duration || 1500,
       normal: finalConfig.normal,
       active: true,
@@ -238,8 +239,8 @@ export class ExplosionManager {
       debug.category('Explosion', `Creating debris for explosion at`, config.position);
     }
 
-    // Check for collateral damage to nearby threats and interceptors
-    this.checkExplosionCollisions(config.position, config.radius * 2, config.type);
+    // Rendering an effect does not resolve gameplay damage. Combat owners apply damage
+    // once at the resolved event time, independently of effect quality or availability.
 
     this.explosions.set(id, explosion);
 
@@ -267,107 +268,6 @@ export class ExplosionManager {
     });
 
     return id;
-  }
-
-  private checkExplosionCollisions(
-    position: THREE.Vector3,
-    blastRadius: number,
-    explosionType: ExplosionType
-  ): void {
-    // Get threat manager and interception system
-    const threatManager = (window as any).__threatManager;
-    const interceptionSystem = (window as any).__interceptionSystem;
-
-    if (!threatManager || !interceptionSystem) return;
-
-    // Check threats
-    const threats = threatManager.getActiveThreats();
-    threats.forEach((threat: any) => {
-      if (!threat.isActive) return;
-
-      const distance = threat.getPosition().distanceTo(position);
-      if (distance <= blastRadius) {
-        // Calculate damage based on distance
-        const damageFactor = 1 - distance / blastRadius;
-        const damage = damageFactor * 100; // Max 100 damage at center
-
-        if (damage > 50) {
-          // Enough damage to destroy
-          debug.category(
-            'Explosion',
-            `Explosion destroyed nearby threat at ${distance.toFixed(1)}m`
-          );
-
-          // Mark threat as intercepted by explosion
-          threatManager.markThreatIntercepted(threat);
-
-          // Create secondary explosion at threat location
-          if (distance > 5) {
-            // Avoid infinite explosion chain
-            setTimeout(() => {
-              this.createExplosion({
-                type: ExplosionType.AIR_INTERCEPTION,
-                position: threat.getPosition(),
-                radius: 8,
-              });
-            }, 50);
-          }
-        }
-      }
-    });
-
-    // Check interceptors
-    const interceptors = interceptionSystem.getActiveInterceptors
-      ? interceptionSystem.getActiveInterceptors()
-      : [];
-    interceptors.forEach((interceptor: any) => {
-      const distance = interceptor.getPosition().distanceTo(position);
-      if (distance <= blastRadius && distance > 2) {
-        // Don't destroy self
-        const damageFactor = 1 - distance / blastRadius;
-
-        if (damageFactor > 0.3) {
-          // 30% damage threshold
-          debug.category(
-            'Explosion',
-            `Explosion destroyed nearby interceptor at ${distance.toFixed(1)}m`
-          );
-
-          // Detonate the interceptor
-          if (interceptor.detonate) {
-            interceptor.detonate();
-          }
-        }
-      }
-    });
-
-    // Check batteries if ground explosion
-    if (explosionType === ExplosionType.GROUND_IMPACT) {
-      const batteries = (window as any).__domePlacementSystem?.getAllBatteries() || [];
-      batteries.forEach((battery: any) => {
-        if (!battery.isOperational()) return;
-
-        const distance = battery.getPosition().distanceTo(position);
-        if (distance <= blastRadius) {
-          const damageFactor = 1 - distance / blastRadius;
-          const damage = Math.ceil(damageFactor * 30); // Max 30 damage from explosion
-
-          if (damage > 0) {
-            battery.takeDamage(damage);
-            debug.category(
-              'Explosion',
-              `Explosion damaged battery at ${distance.toFixed(1)}m for ${damage} damage`
-            );
-          }
-        }
-      });
-    }
-
-    // Check buildings for damage
-    const buildingSystem = (window as any).__buildingSystem;
-    if (buildingSystem) {
-      buildingSystem.checkExplosionDamage(position, blastRadius);
-    }
   }
 
   private createShockwave(
@@ -408,7 +308,7 @@ export class ExplosionManager {
       }
     }
 
-    const shockwaveId = `shockwave_${Date.now()}_${Math.random()}`;
+    const shockwaveId = `shockwave_${simulationClock.nowMs}_${Math.random()}`;
     const index = this.availableShockwaveIndices.pop()!;
 
     // Store shockwave instance data
@@ -416,7 +316,7 @@ export class ExplosionManager {
       index,
       position: position.clone(),
       radius: radius * 2,
-      startTime: Date.now(),
+      startTime: simulationClock.nowMs,
       normal: normal,
     });
 
@@ -451,7 +351,7 @@ export class ExplosionManager {
    * Update all active explosions
    */
   update(deltaTime: number): void {
-    const currentTime = Date.now();
+    const currentTime = simulationClock.nowMs;
 
     // Update instanced renderer
     this.instancedRenderer.update(deltaTime);

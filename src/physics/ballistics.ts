@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { isFiniteVector } from '@/physics/numerics';
 
 /**
  * Pure ballistics calculations used by both game and tests
@@ -55,20 +56,21 @@ export function calculateTimeToImpact(
   initialVelocity: THREE.Vector3,
   gravity: number = GRAVITY
 ): number | null {
-  const a = -0.5 * gravity;
-  const b = initialVelocity.y;
-  const c = initialPosition.y;
-
-  const discriminant = b * b - 4 * a * c;
-  if (discriminant < 0) return null;
-
-  const sqrtDisc = Math.sqrt(discriminant);
-  const t1 = (-b + sqrtDisc) / (2 * a);
-  const t2 = (-b - sqrtDisc) / (2 * a);
-
-  // Return the positive time that's greater than 0
-  const validTimes = [t1, t2].filter(t => t > 0);
-  return validTimes.length > 0 ? Math.min(...validTimes) : null;
+  if (
+    !isFiniteVector(initialPosition) ||
+    !isFiniteVector(initialVelocity) ||
+    !Number.isFinite(gravity) ||
+    gravity < 0
+  )
+    return null;
+  const y = initialPosition.y;
+  const vy = initialVelocity.y;
+  if (y < 0) return null;
+  if (y === 0 && vy <= 0) return 0;
+  if (gravity === 0) return vy < 0 ? -y / vy : null;
+  const root = Math.sqrt(vy * vy + 2 * gravity * y);
+  // Avoid cancellation for a rapidly descending object close to the ground.
+  return vy < 0 ? (2 * y) / (root - vy) : (vy + root) / gravity;
 }
 
 /**
@@ -80,7 +82,7 @@ export function calculateImpactPoint(
   gravity: number = GRAVITY
 ): THREE.Vector3 | null {
   const impactTime = calculateTimeToImpact(initialPosition, initialVelocity, gravity);
-  if (!impactTime) return null;
+  if (impactTime === null) return null;
 
   return new THREE.Vector3(
     initialPosition.x + initialVelocity.x * impactTime,
@@ -99,6 +101,11 @@ export function calculateTrajectoryPoints(
   maxTime: number = 20,
   gravity: number = GRAVITY
 ): THREE.Vector3[] {
+  if (!Number.isFinite(timeStep) || timeStep <= 0 || !Number.isFinite(maxTime) || maxTime < 0) {
+    throw new RangeError(
+      'Trajectory sampling requires a positive finite step and nonnegative horizon'
+    );
+  }
   const points: THREE.Vector3[] = [];
 
   for (let t = 0; t <= maxTime; t += timeStep) {
@@ -120,6 +127,13 @@ export function calculateLaunchAngles(
   launchVelocity: number,
   gravity: number = GRAVITY
 ): { lowAngle: number; highAngle: number } | null {
+  if (
+    ![horizontalRange, heightDifference, launchVelocity, gravity].every(Number.isFinite) ||
+    horizontalRange <= 0 ||
+    launchVelocity <= 0 ||
+    gravity <= 0
+  )
+    return null;
   const v2 = launchVelocity * launchVelocity;
   const g = gravity;
   const x = horizontalRange;
@@ -168,17 +182,18 @@ export function calculateDragAffectedVelocity(
   mass: number,
   deltaTime: number
 ): THREE.Vector3 {
+  if (
+    !isFiniteVector(currentVelocity) ||
+    ![dragCoefficient, airDensity, crossSectionArea, mass, deltaTime].every(Number.isFinite) ||
+    mass <= 0 ||
+    Math.min(dragCoefficient, airDensity, crossSectionArea, deltaTime) < 0
+  ) {
+    throw new RangeError('Drag requires finite nonnegative coefficients/time and positive mass');
+  }
   const speed = currentVelocity.length();
   if (speed < 0.001) return currentVelocity.clone();
 
-  // Drag force: F = 0.5 * Cd * ρ * A * v²
-  const dragMagnitude = 0.5 * dragCoefficient * airDensity * crossSectionArea * speed * speed;
-
-  // Drag acceleration (opposite to velocity direction)
-  const dragAcceleration = dragMagnitude / mass;
-  const dragDirection = currentVelocity.clone().normalize().multiplyScalar(-1);
-
-  // Update velocity
-  const dragDelta = dragDirection.multiplyScalar(dragAcceleration * deltaTime);
-  return currentVelocity.clone().add(dragDelta);
+  // Exact drag-only solution dv/dt = -k |v| v: dissipative for any step size.
+  const k = (0.5 * dragCoefficient * airDensity * crossSectionArea) / mass;
+  return currentVelocity.clone().multiplyScalar(1 / (1 + k * speed * deltaTime));
 }

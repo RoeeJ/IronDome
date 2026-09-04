@@ -1,3 +1,4 @@
+import { simulationClock } from '@/simulation/SimulationClock';
 import * as THREE from 'three';
 
 export const InterceptorShaderMaterial = (baseColor: number = 0x00ffff) => {
@@ -181,7 +182,7 @@ export class InterceptorShaderController {
 
   constructor(material: THREE.ShaderMaterial) {
     this.material = material;
-    this.launchTime = Date.now() / 1000;
+    this.launchTime = simulationClock.nowMs / 1000;
   }
 
   update(time: number, cameraPosition: THREE.Vector3): void {

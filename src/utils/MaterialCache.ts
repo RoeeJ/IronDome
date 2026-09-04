@@ -31,15 +31,29 @@ export class MaterialCache {
     return this.instance;
   }
 
+  private materialKey(kind: string, properties: object): string {
+    const encode = (value: unknown): unknown => {
+      if (value instanceof THREE.Texture) return { texture: value.uuid };
+      if (value instanceof THREE.Color) return { color: value.toArray() };
+      if (Array.isArray(value)) return value.map(encode);
+      if (value && typeof value === 'object')
+        return Object.fromEntries(
+          Object.entries(value)
+            .sort(([a], [b]) => a.localeCompare(b))
+            .map(([key, item]) => [key, encode(item)])
+        );
+      return value;
+    };
+    return `${kind}_${JSON.stringify(encode(properties))}`;
+  }
+
   /**
    * Get or create a MeshStandardMaterial with the given properties
    */
-  getMeshStandardMaterial(properties: {
-    color: number;
-    roughness: number;
-    metalness: number;
-  }): THREE.MeshStandardMaterial {
-    const key = `standard_${properties.color}_${properties.roughness}_${properties.metalness}`;
+  getMeshStandardMaterial(
+    properties: THREE.MeshStandardMaterialParameters
+  ): THREE.MeshStandardMaterial {
+    const key = this.materialKey('standard', properties);
 
     let material = this.materials.get(key) as THREE.MeshStandardMaterial;
     if (!material) {
@@ -53,17 +67,8 @@ export class MaterialCache {
   /**
    * Get or create a MeshBasicMaterial with the given properties
    */
-  getMeshBasicMaterial(properties: {
-    color?: number;
-    transparent?: boolean;
-    opacity?: number;
-    visible?: boolean;
-    side?: THREE.Side;
-    depthWrite?: boolean;
-    blending?: THREE.Blending;
-    map?: THREE.Texture;
-  }): THREE.MeshBasicMaterial {
-    const key = `basic_${properties.color ?? 0}_${properties.transparent ?? false}_${properties.opacity ?? 1}_${properties.visible ?? true}_${properties.side ?? THREE.FrontSide}_${properties.depthWrite ?? true}_${properties.blending ?? THREE.NormalBlending}_${properties.map ? 'textured' : 'untextured'}`;
+  getMeshBasicMaterial(properties: THREE.MeshBasicMaterialParameters): THREE.MeshBasicMaterial {
+    const key = this.materialKey('basic', properties);
 
     let material = this.materials.get(key) as THREE.MeshBasicMaterial;
     if (!material) {
@@ -77,14 +82,10 @@ export class MaterialCache {
   /**
    * Get or create a MeshStandardMaterial with emissive properties
    */
-  getMeshEmissiveMaterial(properties: {
-    color: number;
-    emissive: number;
-    emissiveIntensity: number;
-    roughness: number;
-    metalness: number;
-  }): THREE.MeshStandardMaterial {
-    const key = `emissive_${properties.color}_${properties.emissive}_${properties.emissiveIntensity}_${properties.roughness}_${properties.metalness}`;
+  getMeshEmissiveMaterial(
+    properties: THREE.MeshStandardMaterialParameters
+  ): THREE.MeshStandardMaterial {
+    const key = this.materialKey('emissive', properties);
 
     let material = this.materials.get(key) as THREE.MeshStandardMaterial;
     if (!material) {
@@ -98,15 +99,10 @@ export class MaterialCache {
   /**
    * Get or create a transparent MeshStandardMaterial
    */
-  getMeshTransparentMaterial(properties: {
-    color: number;
-    opacity: number;
-    roughness: number;
-    metalness: number;
-    emissive?: number;
-    emissiveIntensity?: number;
-  }): THREE.MeshStandardMaterial {
-    const key = `transparent_${properties.color}_${properties.opacity}_${properties.roughness}_${properties.metalness}_${properties.emissive ?? 0}_${properties.emissiveIntensity ?? 0}`;
+  getMeshTransparentMaterial(
+    properties: THREE.MeshStandardMaterialParameters
+  ): THREE.MeshStandardMaterial {
+    const key = this.materialKey('transparent', properties);
 
     let material = this.materials.get(key) as THREE.MeshStandardMaterial;
     if (!material) {
@@ -123,13 +119,8 @@ export class MaterialCache {
   /**
    * Get or create a LineBasicMaterial
    */
-  getLineMaterial(properties: {
-    color: number;
-    linewidth?: number;
-    opacity?: number;
-    transparent?: boolean;
-  }): THREE.LineBasicMaterial {
-    const key = `line_${properties.color}_${properties.linewidth ?? 1}_${properties.opacity ?? 1}_${properties.transparent ?? false}`;
+  getLineMaterial(properties: THREE.LineBasicMaterialParameters): THREE.LineBasicMaterial {
+    const key = this.materialKey('line', properties);
 
     let material = this.materials.get(key) as THREE.LineBasicMaterial;
     if (!material) {
@@ -143,17 +134,8 @@ export class MaterialCache {
   /**
    * Get or create a PointsMaterial
    */
-  getPointsMaterial(properties: {
-    color: number;
-    size: number;
-    sizeAttenuation?: boolean;
-    transparent?: boolean;
-    opacity?: number;
-    vertexColors?: boolean;
-    blending?: THREE.Blending;
-    depthWrite?: boolean;
-  }): THREE.PointsMaterial {
-    const key = `points_${properties.color}_${properties.size}_${properties.sizeAttenuation ?? true}_${properties.transparent ?? false}_${properties.opacity ?? 1}_${properties.vertexColors ?? false}_${properties.blending ?? THREE.NormalBlending}_${properties.depthWrite ?? true}`;
+  getPointsMaterial(properties: THREE.PointsMaterialParameters): THREE.PointsMaterial {
+    const key = this.materialKey('points', properties);
 
     let material = this.materials.get(key) as THREE.PointsMaterial;
     if (!material) {

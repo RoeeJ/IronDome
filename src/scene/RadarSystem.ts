@@ -1,3 +1,4 @@
+import { simulationClock } from '@/simulation/SimulationClock';
 import * as THREE from 'three';
 import { GeometryFactory } from '../utils/GeometryFactory';
 import { MaterialCache } from '../utils/MaterialCache';
@@ -203,11 +204,11 @@ export class RadarSystem {
     this.scene.add(ping);
 
     // Animate ping
-    const startTime = Date.now();
+    const startTime = simulationClock.nowMs;
     const duration = 1000;
 
     const animatePing = () => {
-      const elapsed = Date.now() - startTime;
+      const elapsed = simulationClock.nowMs - startTime;
       const progress = elapsed / duration;
 
       if (progress >= 1) {

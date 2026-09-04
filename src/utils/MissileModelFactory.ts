@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { ThreatType, ThreatConfig } from '../entities/Threat';
+import { ThreatType, ThreatConfig } from '../entities/ThreatConfig';
 import { GeometryFactory } from './GeometryFactory';
 import { MaterialCache } from './MaterialCache';
 import { ModelManager } from './ModelManager';

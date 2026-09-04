@@ -1,3 +1,4 @@
+import { simulationClock } from '@/simulation/SimulationClock';
 import * as THREE from 'three';
 import * as CANNON from 'cannon-es';
 import { IBattery } from '../entities/IBattery';
@@ -35,6 +36,7 @@ export class InterceptionSystem {
   private batteryIdMap: Map<IBattery, string> = new Map();
   private activeInterceptions: Interception[] = [];
   private interceptors: Projectile[] = [];
+  private simulationTicks = 0;
   private successfulInterceptions: number = 0;
   private failedInterceptions: number = 0;
   private totalInterceptorsFired: number = 0;
@@ -70,8 +72,26 @@ export class InterceptionSystem {
     this.interceptionOptimizer = new InterceptionOptimizer();
   }
 
+  private readonly onThreatOutcome = ({ threat, reason }: { threat: Threat; reason: string }) => {
+    this.batteryCoordinator.clearThreatAssignment(threat.id);
+    for (const battery of this.batteries)
+      if (battery instanceof IronDomeBattery) battery.cancelPendingLaunches(threat.id);
+    if (reason === 'intercepted') {
+      this.successfulInterceptions++;
+      this.gameState.recordInterception();
+      this.gameState.recordThreatDestroyed();
+    }
+    if (reason === 'reset' || reason === 'capacity-removed') {
+      for (const interceptor of [...this.interceptors]) {
+        if (interceptor.target === threat) this.removeInterceptor(interceptor);
+      }
+    } else this.repurposeInterceptors(threat);
+  };
+
   setThreatManager(threatManager: ThreatManager): void {
+    this.threatManager?.off('threatTerminated', this.onThreatOutcome);
     this.threatManager = threatManager;
+    this.threatManager.on('threatTerminated', this.onThreatOutcome);
   }
 
   addBattery(battery: IBattery, batteryId?: string): void {
@@ -99,8 +119,8 @@ export class InterceptionSystem {
     this.profiler = profiler;
   }
 
-  update(threats: Threat[], manualModeOnly: boolean = false): Projectile[] {
-    const deltaTime = 1 / 60;
+  prepareStep(threats: Threat[], manualModeOnly = false, deltaTime = 1 / 60): void {
+    this.simulationTicks++;
 
     // Store threats for repurposing
     this.currentThreats = threats;
@@ -112,7 +132,7 @@ export class InterceptionSystem {
         this.predictiveTargeting.updateThreatTracking(threat);
       });
       // Periodic cleanup
-      if (Math.random() < 0.01) {
+      if (this.simulationTicks % 60 === 0) {
         this.predictiveTargeting.cleanup();
       }
       if (this.profiler) this.profiler.endSection('Predictive Tracking');
@@ -132,7 +152,7 @@ export class InterceptionSystem {
     if (this.profiler) this.profiler.endSection('Battery Updates');
 
     // Periodic coordinator cleanup and validation
-    if (Math.random() < 0.05) {
+    if (this.simulationTicks % 20 === 0) {
       // ~3 times per second at 60fps
       this.batteryCoordinator.cleanup();
 
@@ -161,6 +181,10 @@ export class InterceptionSystem {
       });
     }
 
+    if (!manualModeOnly) this.evaluateThreats(threats);
+  }
+
+  update(threats: Threat[], _manualModeOnly = false, deltaTime = 1 / 60): Projectile[] {
     // Update fragmentation system
     if (this.profiler) this.profiler.startSection('Fragmentation System');
     const { fragmentPositions } = this.fragmentationSystem.update(deltaTime);
@@ -206,13 +230,6 @@ export class InterceptionSystem {
     }
     if (this.profiler) this.profiler.endSection('Interceptor Updates');
 
-    // Check for new threats to intercept (only in auto mode)
-    if (!manualModeOnly) {
-      if (this.profiler) this.profiler.startSection('Evaluate Threats');
-      this.evaluateThreats(threats);
-      if (this.profiler) this.profiler.endSection('Evaluate Threats');
-    }
-
     // Check for successful interceptions
     if (this.profiler) this.profiler.startSection('Check Interceptions');
     this.checkInterceptions();
@@ -236,7 +253,14 @@ export class InterceptionSystem {
 
   private evaluateThreatsImproved(threats: Threat[]): void {
     // Performance check: limit total active interceptors
-    const maxActiveInterceptors = 8;
+    const maxActiveInterceptors = this.batteries.reduce(
+      (sum, battery) =>
+        sum +
+        (battery.isOperational() && battery instanceof IronDomeBattery
+          ? (battery.getConfig().interceptorLimit ?? battery.getConfig().launcherCount)
+          : 0),
+      0
+    );
     if (this.interceptors.length >= maxActiveInterceptors) {
       return;
     }
@@ -287,7 +311,8 @@ export class InterceptionSystem {
           if (
             mapBattery === battery ||
             (mapBattery.getPosition().equals(battery.getPosition()) &&
-              mapBattery instanceof IronDomeBattery && battery instanceof IronDomeBattery &&
+              mapBattery instanceof IronDomeBattery &&
+              battery instanceof IronDomeBattery &&
               mapBattery.getInterceptorCount() === battery.getInterceptorCount())
           ) {
             batteryId = mapId;
@@ -303,49 +328,56 @@ export class InterceptionSystem {
 
       // Fire interceptors with improved targeting (only IronDomeBattery can fire interceptors)
       let interceptorsFired = 0;
-      
+
       if (battery instanceof IronDomeBattery) {
         battery.fireInterceptors(threat, allocation.interceptorCount, interceptor => {
-        interceptorsFired++;
-        // Use predictive targeting for lead calculation
-        const interceptorSpeed = (battery.getConfig?.() as any)?.interceptorSpeed || 250;
-        const leadPrediction = this.predictiveTargeting.calculateLeadPrediction(
-          threat,
-          battery.getPosition(),
-          interceptorSpeed
-        );
+          interceptorsFired++;
+          // Use predictive targeting for lead calculation
+          const interceptorSpeed = (battery.getConfig?.() as any)?.interceptorSpeed || 250;
+          const leadPrediction = this.predictiveTargeting.calculateLeadPrediction(
+            threat,
+            battery.getPosition(),
+            interceptorSpeed
+          );
 
-        // Don't use setTargetPoint - it creates a static target!
-        // The interceptor should track the actual moving threat
-        // Lead prediction is handled in the guidance system itself
+          // Don't use setTargetPoint - it creates a static target!
+          // The interceptor should track the actual moving threat
+          // Lead prediction is handled in the guidance system itself
 
-        // Set up proximity detonation callback
-        interceptor.detonationCallback = (position: THREE.Vector3, quality: number) => {
-          this.handleProximityDetonation(interceptor, threat, position, quality);
-        };
+          // Set up proximity detonation callback
+          interceptor.detonationCallback = (position, quality, targetPosition) => {
+            this.handleProximityDetonation(
+              interceptor,
+              interceptor.target instanceof Threat ? interceptor.target : threat,
+              position,
+              quality,
+              targetPosition
+            );
+          };
 
-        this.interceptors.push(interceptor);
-        this.totalInterceptorsFired++;
-        this.activeInterceptions.push({
-          interceptor,
-          threat,
-          targetPoint: leadPrediction?.aimPoint || threat.getImpactPoint() || threat.getPosition(),
-          launchTime: Date.now(),
+          this.interceptors.push(interceptor);
+          this.totalInterceptorsFired++;
+          this.activeInterceptions.push({
+            interceptor,
+            threat,
+            targetPoint:
+              leadPrediction?.aimPoint || threat.getImpactPoint() || threat.getPosition(),
+            launchTime: simulationClock.nowMs,
+          });
+
+          // Add to instanced renderer if available AND interceptor supports instancing
+          const renderer = (window as any).__instancedProjectileRenderer;
+          if (renderer && interceptor.useInstancing) {
+            renderer.addProjectile(interceptor);
+          }
+
+          // Add trail to batched renderer
+          const trailRenderer = (window as any).__instancedTrailRenderer;
+          if (trailRenderer) {
+            const trailColor = new THREE.Color(0, 1, 1); // Cyan for interceptors
+            trailRenderer.addTrail(interceptor, trailColor);
+          }
         });
-
-        // Add to instanced renderer if available AND interceptor supports instancing
-        const renderer = (window as any).__instancedProjectileRenderer;
-        if (renderer && interceptor.useInstancing) {
-          renderer.addProjectile(interceptor);
-        }
-
-        // Add trail to batched renderer
-        const trailRenderer = (window as any).__instancedTrailRenderer;
-        if (trailRenderer) {
-          const trailColor = new THREE.Color(0, 1, 1); // Cyan for interceptors
-          trailRenderer.addTrail(interceptor, trailColor);
-        }
-      });
       } // Close if (battery instanceof IronDomeBattery)
 
       // Only record assignment if interceptors were actually fired
@@ -355,7 +387,7 @@ export class InterceptionSystem {
     });
 
     // Update success rates based on results
-    if (Math.random() < 0.1) {
+    if (this.simulationTicks % 6 === 0) {
       // Periodic updates
       this.updateLearningData();
     }
@@ -363,7 +395,14 @@ export class InterceptionSystem {
 
   private evaluateThreatsLegacy(threats: Threat[]): void {
     // Original implementation
-    const maxActiveInterceptors = 8;
+    const maxActiveInterceptors = this.batteries.reduce(
+      (sum, battery) =>
+        sum +
+        (battery.isOperational() && battery instanceof IronDomeBattery
+          ? (battery.getConfig().interceptorLimit ?? battery.getConfig().launcherCount)
+          : 0),
+      0
+    );
     if (this.interceptors.length >= maxActiveInterceptors) {
       return;
     }
@@ -409,9 +448,10 @@ export class InterceptionSystem {
         continue;
       }
 
-      const interceptorsToFire = battery instanceof IronDomeBattery 
-        ? battery.calculateInterceptorCount(threat, existingInterceptors)
-        : 0;
+      const interceptorsToFire =
+        battery instanceof IronDomeBattery
+          ? battery.calculateInterceptorCount(threat, existingInterceptors)
+          : 0;
 
       if (interceptorsToFire > 0) {
         debug.category('Interception', `Firing ${interceptorsToFire} interceptor(s) at threat`);
@@ -429,24 +469,30 @@ export class InterceptionSystem {
 
         if (battery instanceof IronDomeBattery) {
           battery.fireInterceptors(threat, interceptorsToFire, interceptor => {
-          interceptor.detonationCallback = (position: THREE.Vector3, quality: number) => {
-            this.handleProximityDetonation(interceptor, threat, position, quality);
-          };
+            interceptor.detonationCallback = (position, quality, targetPosition) => {
+              this.handleProximityDetonation(
+                interceptor,
+                interceptor.target instanceof Threat ? interceptor.target : threat,
+                position,
+                quality,
+                targetPosition
+              );
+            };
 
-          this.interceptors.push(interceptor);
-          this.totalInterceptorsFired++;
-          this.activeInterceptions.push({
-            interceptor,
-            threat,
-            targetPoint: threat.getImpactPoint() || threat.getPosition(),
-            launchTime: Date.now(),
+            this.interceptors.push(interceptor);
+            this.totalInterceptorsFired++;
+            this.activeInterceptions.push({
+              interceptor,
+              threat,
+              targetPoint: threat.getImpactPoint() || threat.getPosition(),
+              launchTime: simulationClock.nowMs,
+            });
+
+            const renderer = (window as any).__instancedProjectileRenderer;
+            if (renderer && interceptor.useInstancing) {
+              renderer.addProjectile(interceptor);
+            }
           });
-
-          const renderer = (window as any).__instancedProjectileRenderer;
-          if (renderer && interceptor.useInstancing) {
-            renderer.addProjectile(interceptor);
-          }
-        });
         } // Close if (battery instanceof IronDomeBattery)
       }
     }
@@ -501,7 +547,8 @@ export class InterceptionSystem {
     interceptor: Projectile,
     threat: Threat,
     position: THREE.Vector3,
-    quality: number
+    quality: number,
+    targetPosition?: THREE.Vector3
   ): void {
     debug.category(
       'Combat',
@@ -513,6 +560,9 @@ export class InterceptionSystem {
 
     // Play explosion sound
     SoundSystem.getInstance().playExplosion('intercept', position);
+
+    // Lifetime/safety explosions are visual only; only a fuse contact supplies an event target position.
+    if (!targetPosition) return;
 
     // Check if threat is still active before counting hits/misses
     if (!threat.isActive) {
@@ -534,7 +584,7 @@ export class InterceptionSystem {
     // Use physics-based blast damage calculation with directional bonus
     const damage = BlastPhysics.calculateDamage(
       position,
-      threat.getPosition(),
+      targetPosition,
       threat.getVelocity(),
       BlastPhysics.TAMIR_CONFIG,
       interceptor.getVelocity()
@@ -546,14 +596,10 @@ export class InterceptionSystem {
     );
 
     if (damage.hit && wasMarked) {
-      this.successfulInterceptions++;
-
       // Track stats
-      this.gameState.recordInterception();
-      this.gameState.recordThreatDestroyed();
 
       // Update combo
-      const now = Date.now();
+      const now = simulationClock.nowMs;
       if (now - this.lastInterceptionTime < 5000) {
         // 5 second combo window
         this.comboCount++;
@@ -613,11 +659,7 @@ export class InterceptionSystem {
 
   private handleFragmentHit(threat: Threat): void {
     debug.category('Combat', 'Threat destroyed by fragments!');
-    this.successfulInterceptions++;
-
-    // Track stats
-    this.gameState.recordInterception();
-    this.gameState.recordThreatDestroyed();
+    if (!threat.isActive || threat.terminationReason) return;
 
     // Mark threat as intercepted in ThreatManager
     if (this.threatManager) {
@@ -683,7 +725,7 @@ export class InterceptionSystem {
 
       if (bestNewTarget) {
         // Retarget the interceptor
-        interception.interceptor.retarget(bestNewTarget.mesh);
+        interception.interceptor.retarget(bestNewTarget);
         interception.threat = bestNewTarget;
         interception.targetPoint = bestNewTarget.getImpactPoint() || bestNewTarget.getPosition();
         debug.category('Interception', 'Interceptor successfully retargeted');
@@ -697,34 +739,6 @@ export class InterceptionSystem {
         this.createExplosion(interception.interceptor.getPosition(), 0.8);
       }
     }
-  }
-
-  private handleSuccessfulInterception(interception: Interception): void {
-    this.successfulInterceptions++;
-
-    // Create explosion effect
-    this.createExplosion(
-      interception.interceptor
-        .getPosition()
-        .add(interception.threat.getPosition())
-        .multiplyScalar(0.5)
-    );
-
-    // Destroy both projectiles
-    // Remove from instanced renderer if available
-    const renderer = (window as any).__instancedProjectileRenderer;
-    if (renderer) {
-      renderer.removeProjectile(interception.interceptor.id);
-    }
-
-    // Remove from trail renderer
-    const trailRenderer = (window as any).__instancedTrailRenderer;
-    if (trailRenderer) {
-      trailRenderer.removeTrail(interception.interceptor);
-    }
-
-    interception.interceptor.destroy(this.scene, this.world);
-    interception.threat.destroy(this.scene, this.world);
   }
 
   public createExplosion(position: THREE.Vector3, quality: number = 1.0): void {
@@ -742,9 +756,9 @@ export class InterceptionSystem {
     this.scene.add(explosionSphere);
 
     // Animate expansion and fade
-    const startTime = Date.now();
+    const startTime = simulationClock.nowMs;
     const animate = () => {
-      const elapsed = (Date.now() - startTime) / 1000;
+      const elapsed = (simulationClock.nowMs - startTime) / 1000;
       if (elapsed > 0.5) {
         this.scene.remove(explosionSphere);
         geometry.dispose();
@@ -774,9 +788,9 @@ export class InterceptionSystem {
     ring.rotation.x = Math.PI / 2;
     this.scene.add(ring);
 
-    const startTime = Date.now();
+    const startTime = simulationClock.nowMs;
     const animate = () => {
-      const elapsed = (Date.now() - startTime) / 1000;
+      const elapsed = (simulationClock.nowMs - startTime) / 1000;
       if (elapsed > 2) {
         this.scene.remove(ring);
         // Don't dispose cached geometry and materials
@@ -814,7 +828,7 @@ export class InterceptionSystem {
     this.scene.add(line);
 
     // Remove after 2 seconds
-    setTimeout(() => {
+    simulationClock.setTimeout(() => {
       this.scene.remove(line);
       geometry.dispose(); // Still dispose of unique geometry
       // Don't dispose cached material
@@ -827,7 +841,7 @@ export class InterceptionSystem {
       // Check if interceptor went too low or too much time passed
       if (
         interception.interceptor.body.position.y < -5 ||
-        Date.now() - interception.launchTime > 30000
+        simulationClock.nowMs - interception.launchTime > 30000
       ) {
         this.failedInterceptions++;
         return false;
@@ -841,10 +855,7 @@ export class InterceptionSystem {
     this.activeInterceptions.forEach(interception => {
       if (!interception.interceptor.isActive) {
         // Interceptor has detonated, check if it was successful
-        const threatStillActive = this.currentThreats.find(
-          t => t.id === interception.threat.id
-        )?.isActive;
-        const wasSuccessful = !threatStillActive;
+        const wasSuccessful = interception.threat.terminationReason === 'intercepted';
 
         this.interceptorAllocation.updateSuccessRate(interception.threat.type, wasSuccessful);
       }
@@ -860,16 +871,47 @@ export class InterceptionSystem {
       totalFired: this.totalInterceptorsFired,
       active: this.interceptors.length,
       batteries: operationalBatteries.length,
-      totalInterceptors: operationalBatteries.reduce((sum, b) => 
-        sum + (b instanceof IronDomeBattery ? b.getInterceptorCount() : 0), 0),
+      totalInterceptors: operationalBatteries.reduce(
+        (sum, b) => sum + (b instanceof IronDomeBattery ? b.getInterceptorCount() : 0),
+        0
+      ),
       activeInterceptors: this.interceptors.length,
       coordination: coordinatorStats,
       algorithmMode: this.useImprovedAlgorithms ? 'improved' : 'legacy',
     };
   }
 
+  private removeInterceptor(interceptor: Projectile): void {
+    const index = this.interceptors.indexOf(interceptor);
+    if (index < 0) return;
+    interceptor.terminate('reset');
+    const renderers = window as unknown as {
+      __instancedProjectileRenderer?: { removeProjectile(id: string): void };
+      __instancedTrailRenderer?: { removeTrail(projectile: Projectile): void };
+    };
+    renderers.__instancedProjectileRenderer?.removeProjectile(interceptor.id);
+    renderers.__instancedTrailRenderer?.removeTrail(interceptor);
+    interceptor.destroy(this.scene, this.world);
+    this.interceptors.splice(index, 1);
+    this.activeInterceptions = this.activeInterceptions.filter(
+      item => item.interceptor !== interceptor
+    );
+  }
+
+  clearInterceptors(): void {
+    for (const battery of this.batteries)
+      if (battery instanceof IronDomeBattery) battery.cancelPendingLaunches();
+    for (const interceptor of [...this.interceptors]) this.removeInterceptor(interceptor);
+  }
+
+  registerManualInterceptor(interceptor: Projectile): void {
+    if (this.interceptors.includes(interceptor)) return;
+    this.interceptors.push(interceptor);
+    this.totalInterceptorsFired++;
+  }
+
   getActiveInterceptorCount(): number {
-    return this.activeInterceptions.length;
+    return this.interceptors.filter(interceptor => interceptor.isActive).length;
   }
 
   getInterceptors(): Projectile[] {

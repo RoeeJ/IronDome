@@ -1,3 +1,4 @@
+import { simulationClock } from '@/simulation/SimulationClock';
 import * as THREE from 'three';
 import { Threat } from '@/entities/Threat';
 import { IronDomeBattery } from '@/entities/IronDomeBattery';
@@ -52,13 +53,13 @@ export class EngagementController {
     }
 
     const engagement: Engagement = {
-      id: `eng_${Date.now()}_${assessment.threat.id}`,
+      id: `eng_${simulationClock.nowMs}_${assessment.threat.id}`,
       threat: assessment.threat,
       battery,
       interceptors: [],
       strategy,
       status: 'active',
-      startTime: Date.now(),
+      startTime: simulationClock.nowMs,
     };
 
     switch (strategy) {
@@ -94,7 +95,7 @@ export class EngagementController {
     const delay = 500; // ms between shots
 
     for (let i = 0; i < count; i++) {
-      setTimeout(() => {
+      simulationClock.setTimeout(() => {
         const interceptorId = this.fireInterceptor(engagement.battery, assessment.threat);
         if (interceptorId) {
           engagement.interceptors.push(interceptorId);
@@ -116,7 +117,7 @@ export class EngagementController {
 
     engagement.interceptors.push(firstInterceptor);
     engagement.status = 'assessing';
-    engagement.assessmentTime = Date.now() + this.assessmentDelay;
+    engagement.assessmentTime = simulationClock.nowMs + this.assessmentDelay;
 
     // Schedule assessment
     this.pendingAssessments.set(engagement.id, engagement);
@@ -129,7 +130,7 @@ export class EngagementController {
   }
 
   update(interceptors: any[], threats: Threat[]): void {
-    const now = Date.now();
+    const now = simulationClock.nowMs;
 
     // Process pending assessments
     this.pendingAssessments.forEach((engagement, id) => {
@@ -180,7 +181,7 @@ export class EngagementController {
         const secondInterceptor = this.fireInterceptor(engagement.battery, threat);
         if (secondInterceptor) {
           engagement.interceptors.push(secondInterceptor);
-          engagement.secondShotTime = Date.now();
+          engagement.secondShotTime = simulationClock.nowMs;
           engagement.status = 'active';
 
           debug
@@ -317,7 +318,7 @@ export class EngagementController {
   private fireInterceptor(battery: IronDomeBattery, threat: Threat): string | null {
     // This would interface with the actual battery firing mechanism
     // For now, return a mock interceptor ID
-    const interceptorId = `int_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+    const interceptorId = `int_${simulationClock.nowMs}_${Math.random().toString(36).substr(2, 9)}`;
 
     // In real implementation:
     // battery.fireInterceptor(threat, interceptorId)
@@ -356,7 +357,7 @@ export class EngagementController {
   }
 
   private cleanupEngagements(): void {
-    const now = Date.now();
+    const now = simulationClock.nowMs;
     const maxAge = 30000; // 30 seconds
 
     this.activeEngagements.forEach((engagement, id) => {

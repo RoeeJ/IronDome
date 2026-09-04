@@ -3,19 +3,19 @@ import * as THREE from 'three';
 import {
   calculateBallisticPosition,
   calculateBallisticVelocity,
-  GRAVITY
+  GRAVITY,
 } from '../../src/physics/ballistics';
 import {
   calculateBallisticInterception,
   calculateProportionalNavigation,
   checkProximityDetonation,
-  calculateKillProbability
+  calculateKillProbability,
 } from '../../src/physics/interception';
 import {
   initializeKalmanState,
   kalmanPredict,
   kalmanUpdate,
-  predictFuturePosition
+  predictFuturePosition,
 } from '../../src/physics/kalman';
 
 // Deterministic simulation parameters
@@ -43,7 +43,7 @@ function runInterceptionSimulation(
   fuseConfig = {
     armingDistance: 15,
     detonationRadius: 12,
-    optimalRadius: 6
+    optimalRadius: 6,
   }
 ): SimulationResult {
   // Calculate interception solution
@@ -62,7 +62,7 @@ function runInterceptionSimulation(
       detonationDistance: Infinity,
       killProbability: 0,
       interceptorPath: [],
-      threatPath: []
+      threatPath: [],
     };
   }
 
@@ -73,7 +73,7 @@ function runInterceptionSimulation(
   let minDistance = Infinity;
   let detonated = false;
   let detonationDistance = Infinity;
-  
+
   const interceptorPath: THREE.Vector3[] = [];
   const threatPath: THREE.Vector3[] = [];
 
@@ -82,7 +82,7 @@ function runInterceptionSimulation(
     // Update threat position
     const threatPos = calculateBallisticPosition(threatPosition, threatVelocity, t);
     const threatVel = calculateBallisticVelocity(threatVelocity, t);
-    
+
     if (threatPos.y <= 0) break; // Threat hit ground
 
     // Calculate guidance acceleration
@@ -98,13 +98,14 @@ function runInterceptionSimulation(
     // Update interceptor physics
     interceptorVel.add(acceleration.clone().multiplyScalar(SIMULATION_DT));
     interceptorVel.y -= GRAVITY * SIMULATION_DT; // Apply gravity
-    
+
     const oldPos = interceptorPos.clone();
     interceptorPos.add(interceptorVel.clone().multiplyScalar(SIMULATION_DT));
     distanceTraveled += interceptorPos.distanceTo(oldPos);
 
     // Track paths
-    if (t % 0.1 < SIMULATION_DT) { // Sample every 0.1s
+    if (t % 0.1 < SIMULATION_DT) {
+      // Sample every 0.1s
       interceptorPath.push(interceptorPos.clone());
       threatPath.push(threatPos.clone());
     }
@@ -135,8 +136,7 @@ function runInterceptionSimulation(
     if (interceptorPos.y <= 0) break;
   }
 
-  const killProbability = detonated ? 
-    calculateKillProbability(detonationDistance, 'medium') : 0;
+  const killProbability = detonated ? calculateKillProbability(detonationDistance, 'medium') : 0;
 
   return {
     intercepted: detonated,
@@ -145,7 +145,7 @@ function runInterceptionSimulation(
     detonationDistance,
     killProbability,
     interceptorPath,
-    threatPath
+    threatPath,
   };
 }
 
@@ -162,7 +162,7 @@ describe('Deterministic End-to-End Simulations', () => {
       expect(result.intercepted).toBe(true);
       expect(result.minDistance).toBeLessThan(12);
       expect(result.killProbability).toBeGreaterThan(0.3);
-      
+
       // Verify deterministic path
       expect(result.interceptorPath.length).toBeGreaterThan(10);
       expect(result.threatPath.length).toBeGreaterThan(10);
@@ -210,7 +210,14 @@ describe('Deterministic End-to-End Simulations', () => {
       // Close threats are challenging
       if (result.intercepted) {
         expect(result.timeToIntercept).toBeLessThan(3);
-        expect(result.killProbability).toBeGreaterThan(0.5);
+        // Entering the 12 m fuse radius is not a >50% kill guarantee: the
+        // declared medium-warhead curve is linear from 50% at 8 m to zero at 15 m.
+        expect(result.detonationDistance).toBeGreaterThan(8);
+        expect(result.detonationDistance).toBeLessThanOrEqual(12);
+        expect(result.killProbability).toBeCloseTo(
+          (0.5 * (15 - result.detonationDistance)) / 7,
+          10
+        );
       }
     });
 
@@ -246,23 +253,25 @@ describe('Deterministic End-to-End Simulations', () => {
       const scenario = {
         threat: {
           position: new THREE.Vector3(3000, 1500, 1000),
-          velocity: new THREE.Vector3(-180, 20, -80)
+          velocity: new THREE.Vector3(-180, 20, -80),
         },
         interceptor: {
           position: new THREE.Vector3(100, 50, 100),
-          speed: 320
-        }
+          speed: 320,
+        },
       };
 
       // Run simulation multiple times
       const results = [];
       for (let i = 0; i < 5; i++) {
-        results.push(runInterceptionSimulation(
-          scenario.threat.position,
-          scenario.threat.velocity,
-          scenario.interceptor.position,
-          scenario.interceptor.speed
-        ));
+        results.push(
+          runInterceptionSimulation(
+            scenario.threat.position,
+            scenario.threat.velocity,
+            scenario.interceptor.position,
+            scenario.interceptor.speed
+          )
+        );
       }
 
       // All results should be identical
@@ -272,7 +281,7 @@ describe('Deterministic End-to-End Simulations', () => {
         expect(results[i].minDistance).toBe(results[0].minDistance);
         expect(results[i].detonationDistance).toBe(results[0].detonationDistance);
         expect(results[i].killProbability).toBe(results[0].killProbability);
-        
+
         // Path lengths should be identical
         expect(results[i].interceptorPath.length).toBe(results[0].interceptorPath.length);
         expect(results[i].threatPath.length).toBe(results[0].threatPath.length);
@@ -285,7 +294,7 @@ describe('Deterministic End-to-End Simulations', () => {
       // Initialize threat with Kalman filter
       const threatPos = new THREE.Vector3(4000, 2000, 0);
       const threatVel = new THREE.Vector3(-200, 30, 0);
-      
+
       let kalmanState = initializeKalmanState(
         threatPos,
         threatVel,
@@ -332,7 +341,7 @@ describe('Deterministic End-to-End Simulations', () => {
 
       // Predict 5 seconds into future
       const prediction = predictFuturePosition(threatState, 5);
-      
+
       // Compare with kinematic prediction
       const kinematicPos = calculateBallisticPosition(
         threatState.position,
@@ -352,20 +361,23 @@ describe('Deterministic End-to-End Simulations', () => {
         name: 'Standard ballistic',
         threat: { pos: new THREE.Vector3(3000, 1200, 0), vel: new THREE.Vector3(-180, 10, 0) },
         interceptor: { pos: new THREE.Vector3(0, 0, 0), speed: 350 }, // Faster interceptor
-        expected: { intercepted: true, minKillProb: 0.25 }
+        expected: { intercepted: true, minKillProb: 0.25 },
       },
       {
         name: 'Fast crossing',
-        threat: { pos: new THREE.Vector3(2000, 500, 2000), vel: new THREE.Vector3(-100, -20, -100) },
+        threat: {
+          pos: new THREE.Vector3(2000, 500, 2000),
+          vel: new THREE.Vector3(-100, -20, -100),
+        },
         interceptor: { pos: new THREE.Vector3(0, 0, 0), speed: 350 },
-        expected: { intercepted: true, minKillProb: 0.5 }
+        expected: { intercepted: true, minKillProb: 0.5 },
       },
       {
         name: 'High altitude',
         threat: { pos: new THREE.Vector3(6000, 4000, 0), vel: new THREE.Vector3(-250, 50, 0) },
         interceptor: { pos: new THREE.Vector3(0, 0, 0), speed: 400 },
-        expected: { intercepted: true, minKillProb: 0.2 }
-      }
+        expected: { intercepted: true, minKillProb: 0.2 },
+      },
     ];
 
     REFERENCE_SCENARIOS.forEach(scenario => {

@@ -108,7 +108,7 @@ export class InterceptorAllocation {
     // CRITICAL: Battery proximity factor (0-100+ points)
     // Check if threat is approaching any battery
     let minDistanceToBattery = Infinity;
-    let closestBattery: IronDomeBattery | null = null;
+    let closestBattery: IBattery | null = null;
 
     for (const battery of this.batteries) {
       const batteryPos = battery.getPosition();
@@ -218,7 +218,10 @@ export class InterceptorAllocation {
     capabilities: BatteryCapability[],
     batteryIndexMap?: Map<IBattery, number>
   ): Map<string, { battery: IronDomeBattery; interceptorCount: number; batteryIndex?: number }> {
-    const allocations = new Map<string, { battery: IronDomeBattery; interceptorCount: number; batteryIndex?: number }>();
+    const allocations = new Map<
+      string,
+      { battery: IronDomeBattery; interceptorCount: number; batteryIndex?: number }
+    >();
 
     // Track remaining interceptors per battery
     const remainingInterceptors = new Map<IBattery, number>();
@@ -256,7 +259,9 @@ export class InterceptorAllocation {
 
       // Make allocation if found
       if (bestAllocation && bestAllocation.battery instanceof IronDomeBattery) {
-        const batteryIndex = batteryIndexMap ? batteryIndexMap.get(bestAllocation.battery) : undefined;
+        const batteryIndex = batteryIndexMap
+          ? batteryIndexMap.get(bestAllocation.battery)
+          : undefined;
         allocations.set(threatMetric.threat.id, {
           battery: bestAllocation.battery as IronDomeBattery,
           interceptorCount: threatMetric.requiredInterceptors,
@@ -333,7 +338,10 @@ export class InterceptorAllocation {
   }
 
   private calculateAllocationEfficiency(
-    allocations: Map<string, { battery: IronDomeBattery; interceptorCount: number; batteryIndex?: number }>,
+    allocations: Map<
+      string,
+      { battery: IronDomeBattery; interceptorCount: number; batteryIndex?: number }
+    >,
     threats: ThreatMetrics[]
   ): number {
     if (threats.length === 0) return 1;

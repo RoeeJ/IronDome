@@ -1,3 +1,4 @@
+import { simulationClock } from '@/simulation/SimulationClock';
 import * as THREE from 'three';
 import { Threat } from '@/entities/Threat';
 import { debug } from './DebugLogger';
@@ -25,7 +26,7 @@ export class PredictiveTargeting {
     history.push({
       position: threat.getPosition().clone(),
       velocity: threat.getVelocity().clone(),
-      time: Date.now() / 1000,
+      time: simulationClock.nowMs / 1000,
     });
 
     // Keep only recent history
@@ -286,7 +287,7 @@ export class PredictiveTargeting {
 
   cleanup(): void {
     // Remove old threat histories
-    const now = Date.now() / 1000;
+    const now = simulationClock.nowMs / 1000;
     const maxAge = 30; // seconds
 
     this.threatHistory.forEach((history, threatId) => {

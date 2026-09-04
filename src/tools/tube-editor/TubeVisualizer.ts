@@ -135,8 +135,6 @@ export class TubeVisualizer {
     const geometry = new THREE.SphereGeometry(size, 16, 16);
     const material = new THREE.MeshBasicMaterial({
       color,
-      emissive: color,
-      emissiveIntensity: 0.5,
     });
     return new THREE.Mesh(geometry, material);
   }

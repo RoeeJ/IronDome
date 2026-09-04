@@ -1,3 +1,5 @@
+import { cosmeticRandom, gameplayRandom } from '@/simulation/Random';
+import { simulationClock } from '@/simulation/SimulationClock';
 import * as THREE from 'three';
 import { MaterialCache } from '../utils/MaterialCache';
 
@@ -32,8 +34,6 @@ export class FragmentationSystem {
     this.fragmentGeometry = new THREE.SphereGeometry(0.05, 4, 2);
     this.fragmentMaterial = new THREE.MeshBasicMaterial({
       color: 0xffaa00,
-      emissive: 0xff6600,
-      emissiveIntensity: 0.5,
     });
   }
 
@@ -75,13 +75,13 @@ export class FragmentationSystem {
 
     for (let i = 0; i < particleCount; i++) {
       // Random position within small sphere
-      positions[i * 3] = position.x + (Math.random() - 0.5) * 0.5;
-      positions[i * 3 + 1] = position.y + (Math.random() - 0.5) * 0.5;
-      positions[i * 3 + 2] = position.z + (Math.random() - 0.5) * 0.5;
+      positions[i * 3] = position.x + (cosmeticRandom.next() - 0.5) * 0.5;
+      positions[i * 3 + 1] = position.y + (cosmeticRandom.next() - 0.5) * 0.5;
+      positions[i * 3 + 2] = position.z + (cosmeticRandom.next() - 0.5) * 0.5;
 
       // Generate velocity within cone
-      const theta = Math.random() * coneAngleRad;
-      const phi = Math.random() * Math.PI * 2;
+      const theta = cosmeticRandom.next() * coneAngleRad;
+      const phi = cosmeticRandom.next() * Math.PI * 2;
 
       // Create random direction within cone
       const dir = new THREE.Vector3(
@@ -95,12 +95,12 @@ export class FragmentationSystem {
       quaternion.setFromUnitVectors(new THREE.Vector3(0, 0, 1), config.coneDirection);
       dir.applyQuaternion(quaternion);
 
-      const speed = config.fragmentSpeed * (0.5 + Math.random() * 0.5);
+      const speed = config.fragmentSpeed * (0.5 + cosmeticRandom.next() * 0.5);
       velocities[i * 3] = dir.x * speed;
       velocities[i * 3 + 1] = dir.y * speed;
       velocities[i * 3 + 2] = dir.z * speed;
 
-      sizes[i] = Math.random() * 2 + 1;
+      sizes[i] = cosmeticRandom.next() * 2 + 1;
     }
 
     geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
@@ -120,9 +120,9 @@ export class FragmentationSystem {
     this.scene.add(this.shrapnelCloud);
 
     // Animate shrapnel cloud
-    const startTime = Date.now();
+    const startTime = simulationClock.nowMs;
     const animate = () => {
-      const elapsed = (Date.now() - startTime) / 1000;
+      const elapsed = (simulationClock.nowMs - startTime) / 1000;
 
       if (elapsed > config.fragmentLifetime) {
         this.scene.remove(this.shrapnelCloud!);
@@ -156,8 +156,8 @@ export class FragmentationSystem {
 
     for (let i = 0; i < trackedCount; i++) {
       // Generate direction within cone
-      const theta = Math.random() * coneAngleRad;
-      const phi = Math.random() * Math.PI * 2;
+      const theta = gameplayRandom.next() * coneAngleRad;
+      const phi = gameplayRandom.next() * Math.PI * 2;
 
       const dir = new THREE.Vector3(
         Math.sin(theta) * Math.cos(phi),
@@ -170,7 +170,7 @@ export class FragmentationSystem {
       quaternion.setFromUnitVectors(new THREE.Vector3(0, 0, 1), config.coneDirection);
       dir.applyQuaternion(quaternion);
 
-      const speed = config.fragmentSpeed * (0.7 + Math.random() * 0.3);
+      const speed = config.fragmentSpeed * (0.7 + gameplayRandom.next() * 0.3);
       const velocity = dir.multiplyScalar(speed);
 
       const mesh = new THREE.Mesh(this.fragmentGeometry, this.fragmentMaterial);
@@ -223,7 +223,7 @@ export class FragmentationSystem {
       requestAnimationFrame(fadeOut);
     };
 
-    setTimeout(fadeOut, 100);
+    simulationClock.setTimeout(fadeOut, 100);
   }
 
   update(deltaTime: number): { fragmentPositions: THREE.Vector3[] } {

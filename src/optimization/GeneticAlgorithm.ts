@@ -23,6 +23,7 @@ export interface FitnessFunction {
 }
 
 export interface GAConfig {
+  random: () => number;
   populationSize: number;
   generations: number;
   mutationRate: number;
@@ -51,6 +52,7 @@ export class GeneticAlgorithm {
     this.geneDefinitions = genes;
     this.fitnessFunction = fitnessFunction;
     this.config = {
+      random: Math.random,
       populationSize: 50,
       generations: 100,
       mutationRate: 0.1,
@@ -74,7 +76,7 @@ export class GeneticAlgorithm {
 
       for (const geneDef of this.geneDefinitions) {
         const range = geneDef.max - geneDef.min;
-        let value = Math.random() * range + geneDef.min;
+        let value = this.config.random() * range + geneDef.min;
 
         if (geneDef.step) {
           value = Math.round(value / geneDef.step) * geneDef.step;
@@ -110,7 +112,7 @@ export class GeneticAlgorithm {
 
     // Update best genome
     if (!this.bestGenome || this.population[0].fitness! > this.bestGenome.fitness!) {
-      this.bestGenome = { ...this.population[0] };
+      this.bestGenome = { ...this.population[0], genes: { ...this.population[0].genes } };
     }
   }
 
@@ -122,7 +124,7 @@ export class GeneticAlgorithm {
     let best: Genome | null = null;
 
     for (let i = 0; i < tournamentSize; i++) {
-      const candidate = this.population[Math.floor(Math.random() * this.population.length)];
+      const candidate = this.population[Math.floor(this.config.random() * this.population.length)];
       if (!best || candidate.fitness! > best.fitness!) {
         best = candidate;
       }
@@ -141,14 +143,14 @@ export class GeneticAlgorithm {
       const geneName = geneDef.name;
 
       // Uniform crossover
-      if (Math.random() < 0.5) {
+      if (this.config.random() < 0.5) {
         child.genes[geneName] = parent1.genes[geneName];
       } else {
         child.genes[geneName] = parent2.genes[geneName];
       }
 
       // Alternative: blend crossover for continuous values
-      // const alpha = Math.random()
+      // const alpha = this.config.random()
       // child.genes[geneName] = alpha * parent1.genes[geneName] + (1 - alpha) * parent2.genes[geneName]
     }
 
@@ -160,12 +162,12 @@ export class GeneticAlgorithm {
    */
   private mutate(genome: Genome): void {
     for (const geneDef of this.geneDefinitions) {
-      if (Math.random() < this.config.mutationRate) {
+      if (this.config.random() < this.config.mutationRate) {
         const geneName = geneDef.name;
         const range = geneDef.max - geneDef.min;
 
         // Gaussian mutation
-        const mutation = (Math.random() - 0.5) * range * 0.2;
+        const mutation = (this.config.random() - 0.5) * range * 0.2;
         let newValue = genome.genes[geneName] + mutation;
 
         // Clamp to bounds
@@ -194,12 +196,16 @@ export class GeneticAlgorithm {
     // Elitism: keep best individuals
     const eliteCount = Math.floor(this.config.populationSize * this.config.elitismRate);
     for (let i = 0; i < eliteCount; i++) {
-      newPopulation.push({ ...this.population[i], fitness: undefined });
+      newPopulation.push({
+        ...this.population[i],
+        genes: { ...this.population[i].genes },
+        fitness: undefined,
+      });
     }
 
     // Create rest through crossover and mutation
     while (newPopulation.length < this.config.populationSize) {
-      if (Math.random() < this.config.crossoverRate) {
+      if (this.config.random() < this.config.crossoverRate) {
         // Crossover
         const parent1 = this.selectParent();
         const parent2 = this.selectParent();
@@ -209,7 +215,7 @@ export class GeneticAlgorithm {
       } else {
         // Direct reproduction with mutation
         const parent = this.selectParent();
-        const child = { ...parent, fitness: undefined };
+        const child = { ...parent, genes: { ...parent.genes }, fitness: undefined };
         this.mutate(child);
         newPopulation.push(child);
       }
@@ -263,7 +269,7 @@ export class GeneticAlgorithm {
         generation: gen,
         bestFitness,
         avgFitness,
-        bestGenome: { ...this.population[0] },
+        bestGenome: { ...this.population[0], genes: { ...this.population[0].genes } },
       });
 
       // Log progress

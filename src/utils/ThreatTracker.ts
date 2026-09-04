@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import { KalmanFilter } from './KalmanFilter';
 import { Threat } from '@/entities/Threat';
 import { debug } from './DebugLogger';
+import { simulationClock } from '@/simulation/SimulationClock';
 
 interface TrackedThreat {
   threat: Threat;
@@ -27,7 +28,7 @@ export class ThreatTracker {
     this.trackedThreats.set(threat.id, {
       threat,
       kalmanFilter,
-      lastUpdateTime: Date.now(),
+      lastUpdateTime: simulationClock.nowMs,
       trackQuality: 1.0,
       predictedTrajectory: [],
       missedUpdates: 0,
@@ -48,8 +49,10 @@ export class ThreatTracker {
       return;
     }
 
-    const now = Date.now();
+    const now = simulationClock.nowMs;
     const deltaTime = (now - tracked.lastUpdateTime) / 1000;
+
+    if (deltaTime <= 0) return; // Multiple planners must not assimilate the same tick repeatedly.
 
     // Predict to current time
     const prediction = tracked.kalmanFilter.predict(deltaTime);
@@ -80,16 +83,15 @@ export class ThreatTracker {
     const tracked = this.trackedThreats.get(threatId);
     if (!tracked) return null;
 
-    const now = Date.now();
+    const now = simulationClock.nowMs;
     const deltaTime = (now - tracked.lastUpdateTime) / 1000 + futureTime;
 
-    const prediction = tracked.kalmanFilter.predict(deltaTime);
-    return prediction.position;
+    return tracked.kalmanFilter.forecast(deltaTime).position;
   }
 
   getPredictedTrajectory(threatId: string): THREE.Vector3[] {
     const tracked = this.trackedThreats.get(threatId);
-    return tracked ? [...tracked.predictedTrajectory] : [];
+    return tracked ? tracked.predictedTrajectory.map(point => point.clone()) : [];
   }
 
   getTrackQuality(threatId: string): number {
@@ -107,7 +109,7 @@ export class ThreatTracker {
   }
 
   maintainTracks(): void {
-    const now = Date.now();
+    const now = simulationClock.nowMs;
     const threatsToRemove: string[] = [];
 
     this.trackedThreats.forEach((tracked, threatId) => {
@@ -133,24 +135,10 @@ export class ThreatTracker {
 
   private updatePredictedTrajectory(tracked: TrackedThreat): void {
     tracked.predictedTrajectory = [];
-    const state = tracked.kalmanFilter.getState();
-
-    let pos = state.position.clone();
-    let vel = state.velocity.clone();
-    const acc = state.acceleration.clone();
-
-    for (let t = 0; t < this.trajectoryPredictionTime; t += this.trajectoryResolution) {
-      // Update position
-      pos = pos.add(vel.clone().multiplyScalar(this.trajectoryResolution));
-
-      // Update velocity
-      vel = vel.add(acc.clone().multiplyScalar(this.trajectoryResolution));
-
-      // Store predicted position
-      tracked.predictedTrajectory.push(pos.clone());
-
-      // Stop if below ground
-      if (pos.y <= 0) break;
+    for (let t = 0; t <= this.trajectoryPredictionTime; t += this.trajectoryResolution) {
+      const position = tracked.kalmanFilter.forecast(t).position;
+      if (position.y < 0) break;
+      tracked.predictedTrajectory.push(position);
     }
   }
 

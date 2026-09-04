@@ -1,3 +1,4 @@
+import { simulationClock } from '@/simulation/SimulationClock';
 import * as THREE from 'three';
 import { ExhaustTrailSystem } from './ExhaustTrailSystem';
 
@@ -89,7 +90,7 @@ export class ParticleSystemPool {
   }
 
   update(deltaTime: number, camera: THREE.Camera): void {
-    const currentTime = Date.now();
+    const currentTime = simulationClock.nowMs;
 
     // Emit from all active emitters
     for (const [id, emitter] of this.activeEmitters) {

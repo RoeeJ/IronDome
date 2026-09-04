@@ -3,7 +3,6 @@ import { Threat, ThreatType, THREAT_CONFIGS } from '../entities/Threat';
 import { GeometryFactory } from '../utils/GeometryFactory';
 import { MaterialCache } from '../utils/MaterialCache';
 import { debug } from '../utils/logger';
-import { SimpleLODSystem } from './SimpleLODSystem';
 
 interface ThreatMeshes {
   rocket: THREE.InstancedMesh;
@@ -17,9 +16,7 @@ type MeshCategory = 'rocket' | 'mortar' | 'drone' | 'ballistic';
 export class InstancedThreatRenderer {
   private scene: THREE.Scene;
   private maxThreatsPerType: number;
-  private camera: THREE.Camera;
-  private lodSystem: SimpleLODSystem;
-  private readonly MAX_RENDER_DISTANCE = 500; // Cull beyond this distance
+  private camera?: THREE.Camera;
 
   // Instanced meshes for each threat type
   private threatMeshes: ThreatMeshes;
@@ -38,11 +35,6 @@ export class InstancedThreatRenderer {
     this.scene = scene;
     this.maxThreatsPerType = maxThreatsPerType;
     this.camera = camera || scene.userData.camera;
-
-    // Initialize LOD system if camera available
-    if (this.camera) {
-      this.lodSystem = SimpleLODSystem.getInstance(this.camera);
-    }
 
     // Get geometries from factory for each threat type
     const rocketGeometry = GeometryFactory.getInstance().getCone(0.3, 3, 6).clone();
@@ -105,6 +97,7 @@ export class InstancedThreatRenderer {
         indices.push(i);
       }
       mesh.instanceMatrix.needsUpdate = true;
+      mesh.computeBoundingSphere();
 
       this.availableIndices.set(type as MeshCategory, indices);
       this.scene.add(mesh);
@@ -138,6 +131,7 @@ export class InstancedThreatRenderer {
   }
 
   addThreat(threat: Threat): boolean {
+    if (this.threatToIndex.has(threat.id)) return true;
     const type = threat.type;
     const meshCategory = this.getMeshCategory(type);
     const availableForType = this.availableIndices.get(meshCategory);
@@ -175,9 +169,10 @@ export class InstancedThreatRenderer {
     const zeroScale = new THREE.Matrix4().makeScale(0, 0, 0);
     this.threatMeshes[meshCategory].setMatrixAt(index, zeroScale);
     this.threatMeshes[meshCategory].instanceMatrix.needsUpdate = true;
+    this.threatMeshes[meshCategory].computeBoundingSphere();
   }
 
-  updateThreats(threats: Threat[]): void {
+  updateThreats(threats: Threat[], alpha = 1): void {
     const needsUpdate: Set<MeshCategory> = new Set();
 
     threats.forEach(threat => {
@@ -188,7 +183,7 @@ export class InstancedThreatRenderer {
       const mesh = this.threatMeshes[meshCategory];
 
       // Get threat position and velocity for orientation
-      const position = threat.getPosition();
+      const position = alpha === 1 ? threat.getPosition() : threat.getRenderPosition(alpha);
       const velocity = threat.getVelocity();
 
       // Update position
@@ -210,26 +205,10 @@ export class InstancedThreatRenderer {
 
       // Scale based on threat config and LOD
       const config = THREAT_CONFIGS[type];
-      let scale = config.radius ? config.radius * 2 : 1;
+      const scale = config.radius ? config.radius * 2 : 1;
 
-      // Apply LOD-based culling and scaling
-      if (this.camera) {
-        const distance = position.distanceTo(this.camera.position);
-
-        // Cull very distant threats
-        if (distance > this.MAX_RENDER_DISTANCE) {
-          scale = 0; // Hide by scaling to 0
-        } else if (distance > 300) {
-          // Slightly reduce scale for distant threats
-          scale *= 0.8;
-        }
-
-        // Update shadow casting based on distance
-        if (distance > 150 && mesh.castShadow) {
-          mesh.castShadow = false;
-        }
-      }
-
+      // Frustum culling uses current instance bounds. Threats remain visible throughout
+      // the camera's game-scale view; there is no unrelated 500 m gameplay cutoff.
       this.dummy.scale.set(scale, scale, scale);
 
       this.dummy.updateMatrix();
@@ -240,6 +219,7 @@ export class InstancedThreatRenderer {
     // Update only the meshes that changed
     needsUpdate.forEach(meshCategory => {
       this.threatMeshes[meshCategory].instanceMatrix.needsUpdate = true;
+      this.threatMeshes[meshCategory].computeBoundingSphere();
     });
   }
 
@@ -252,6 +232,7 @@ export class InstancedThreatRenderer {
         mesh.setMatrixAt(i, zeroScale);
       }
       mesh.instanceMatrix.needsUpdate = true;
+      mesh.computeBoundingSphere();
 
       // Reset available indices
       const indices: number[] = [];
@@ -266,9 +247,10 @@ export class InstancedThreatRenderer {
   }
 
   dispose(): void {
-    Object.values(this.threatMeshes).forEach(mesh => {
+    Object.entries(this.threatMeshes).forEach(([category, mesh]) => {
       // Dispose cloned geometries (rocket and ballistic are cloned)
-      mesh.geometry.dispose();
+      if (category === 'rocket' || category === 'ballistic') mesh.geometry.dispose();
+      mesh.dispose();
       // Don't dispose shared materials from MaterialCache
       this.scene.remove(mesh);
     });

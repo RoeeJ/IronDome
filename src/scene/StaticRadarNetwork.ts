@@ -169,8 +169,6 @@ export class StaticRadarNetwork {
     const beaconGeometry = GeometryFactory.getInstance().getSphere(1, 16, 8);
     const beaconMaterial = MaterialCache.getInstance().getMeshBasicMaterial({
       color: 0xff0000,
-      emissive: 0xff0000,
-      emissiveIntensity: 1,
     });
     const beacon = new THREE.Mesh(beaconGeometry, beaconMaterial);
     beacon.position.y = 15;

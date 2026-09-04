@@ -1,3 +1,5 @@
+import { EventEmitter } from 'events';
+import { simulationClock } from '@/simulation/SimulationClock';
 import * as THREE from 'three';
 import * as CANNON from 'cannon-es';
 import { IBattery } from './IBattery';
@@ -15,7 +17,7 @@ interface LaserTarget {
   lastDamageTime: number;
 }
 
-export class LaserBattery implements IBattery {
+export class LaserBattery extends EventEmitter implements IBattery {
   // Static tracking of which threats are being targeted by any laser
   private static targetedThreats: Set<string> = new Set();
 
@@ -31,6 +33,9 @@ export class LaserBattery implements IBattery {
   private damagePerSecond: number = 20; // 20 damage per second
   private rotationSpeed: number = 2; // Radians per second
   private operational: boolean = true;
+  private currentHealth = 100;
+  private readonly maxHealth = 100;
+  private autoRepairRate = 0;
   private resourceManagementEnabled: boolean = false;
   private energyPerSecond: number = 10; // Energy cost per second of firing
   private currentEnergy: number = 100;
@@ -38,6 +43,7 @@ export class LaserBattery implements IBattery {
   private energyRechargeRate: number = 5; // Energy per second when not firing
 
   constructor(scene: THREE.Scene, world: CANNON.World, position: THREE.Vector3) {
+    super();
     this.scene = scene;
     this.world = world;
     this.position = position.clone();
@@ -56,10 +62,10 @@ export class LaserBattery implements IBattery {
   private createTurret() {
     // Create the procedural laser turret
     this.turret = new ProceduralLaserTurret();
-    
+
     // Scale to match game scale
     this.turret.scale.setScalar(5);
-    
+
     // Add to group
     this.group.add(this.turret);
 
@@ -85,7 +91,7 @@ export class LaserBattery implements IBattery {
 
     // Filter threats within range
     const threatsInRange = threats.filter(threat => {
-      if (!threat.isActive) return false;
+      if (!this.canIntercept(threat)) return false;
       const distance = threat.getPosition().distanceTo(this.position);
       return distance <= this.maxRange;
     });
@@ -130,8 +136,17 @@ export class LaserBattery implements IBattery {
     this.turret.aimAt(target);
   }
 
+  canIntercept(threat: Threat): boolean {
+    return (
+      this.operational &&
+      threat.isActive &&
+      threat.getPosition().y > 0 &&
+      threat.getPosition().distanceTo(this.position) <= this.maxRange
+    );
+  }
+
   public fireAt(threat: Threat) {
-    if (!this.operational) return;
+    if (!this.canIntercept(threat)) return;
 
     // Check energy if resource management is enabled
     if (this.resourceManagementEnabled && this.currentEnergy <= 0) {
@@ -141,7 +156,7 @@ export class LaserBattery implements IBattery {
 
     this.currentTarget = {
       threat,
-      lastDamageTime: Date.now(),
+      lastDamageTime: simulationClock.nowMs,
     };
     this.firing = true;
 
@@ -179,6 +194,7 @@ export class LaserBattery implements IBattery {
   }
 
   public update(deltaTime: number, threats: Threat[]) {
+    if (!Number.isFinite(deltaTime) || deltaTime < 0) throw new RangeError('Invalid laser delta');
     if (!this.operational) return;
 
     // Update turret animations
@@ -186,13 +202,7 @@ export class LaserBattery implements IBattery {
       this.turret.update();
     }
 
-    // Recharge energy when not firing
-    if (!this.firing && this.resourceManagementEnabled) {
-      this.currentEnergy = Math.min(
-        this.maxEnergy,
-        this.currentEnergy + this.energyRechargeRate * deltaTime
-      );
-    }
+    this.repair(this.autoRepairRate * deltaTime);
 
     // Check if current target is still valid
     if (this.currentTarget) {
@@ -212,8 +222,14 @@ export class LaserBattery implements IBattery {
       }
     }
 
+    if (!this.firing && this.resourceManagementEnabled) {
+      this.currentEnergy = Math.min(
+        this.maxEnergy,
+        this.currentEnergy + this.energyRechargeRate * deltaTime
+      );
+    }
     // Update laser and apply damage
-    if (this.firing && this.currentTarget && this.laserBeam) {
+    if (this.firing && this.currentTarget) {
       const threat = this.currentTarget.threat;
       const targetPos = threat.getPosition();
 
@@ -223,31 +239,18 @@ export class LaserBattery implements IBattery {
       // Update laser beam position with pulse effect
       // Use the emitter position for accurate laser origin
       const emitterPos = this.turret ? this.turret.getEmitterWorldPosition() : this.position;
-      this.laserBeam.update(emitterPos, targetPos, deltaTime);
+      this.laserBeam?.update(emitterPos, targetPos, deltaTime);
 
-      // Apply DoT
-      const damageThisFrame = this.damagePerSecond * deltaTime;
-      threat.takeDamage(damageThisFrame);
-
-      // Debug logging
-      if (Math.random() < 0.1) {
-        // Log 10% of the time to avoid spam
-        const healthPercent = ((threat.getHealth() / threat.getMaxHealth()) * 100).toFixed(1);
-        debug.category(
-          'LaserBattery',
-          `Damage: ${damageThisFrame.toFixed(2)}/frame, Threat health: ${healthPercent}%, DPS: ${this.damagePerSecond}`
+      // A partially depleted battery can only fire for the energy-supported duration.
+      const firingDuration = this.resourceManagementEnabled
+        ? Math.min(deltaTime, this.currentEnergy / this.energyPerSecond)
+        : deltaTime;
+      threat.takeDamage(this.damagePerSecond * firingDuration);
+      if (this.resourceManagementEnabled)
+        this.currentEnergy = Math.max(
+          0,
+          this.currentEnergy - this.energyPerSecond * firingDuration
         );
-      }
-
-      // Consume energy if resource management is enabled
-      if (this.resourceManagementEnabled) {
-        this.currentEnergy = Math.max(0, this.currentEnergy - this.energyPerSecond * deltaTime);
-        if (this.currentEnergy <= 0) {
-          this.stopFiring();
-          debug.category('LaserBattery', 'Energy depleted, stopping fire');
-          return;
-        }
-      }
 
       // Check if threat should be destroyed
       if (threat.isDestroyed()) {
@@ -263,9 +266,12 @@ export class LaserBattery implements IBattery {
         });
 
         // Destroy the threat
+        threat.terminate('intercepted');
         threat.destroy(this.scene, this.world);
 
         // Stop firing at this target
+        this.stopFiring();
+      } else if (this.resourceManagementEnabled && this.currentEnergy <= 0) {
         this.stopFiring();
       }
     }
@@ -333,9 +339,9 @@ export class LaserBattery implements IBattery {
         percent: this.currentEnergy / this.maxEnergy,
       },
       health: {
-        current: 100,
-        max: 100,
-        percent: 1.0,
+        current: this.currentHealth,
+        max: this.maxHealth,
+        percent: this.currentHealth / this.maxHealth,
       },
       isOperational: this.operational,
       isFiring: this.firing,
@@ -350,15 +356,26 @@ export class LaserBattery implements IBattery {
   }
 
   getHealth(): { current: number; max: number } {
-    return { current: 100, max: 100 }; // Laser batteries don't have health system yet
+    return { current: this.currentHealth, max: this.maxHealth };
   }
 
   repair(amount: number): void {
-    // Laser batteries don't have health system yet
+    if (this.operational && Number.isFinite(amount) && amount > 0)
+      this.currentHealth = Math.min(this.maxHealth, this.currentHealth + amount);
   }
 
   setAutoRepairRate(rate: number): void {
-    // Laser batteries don't have auto-repair yet
+    this.autoRepairRate = Number.isFinite(rate) ? Math.max(0, rate) : 0;
+  }
+
+  takeDamage(amount: number): void {
+    if (!this.operational || !Number.isFinite(amount) || amount <= 0) return;
+    this.currentHealth = Math.max(0, this.currentHealth - amount);
+    if (this.currentHealth === 0) {
+      this.operational = false;
+      this.stopFiring();
+      this.emit('destroyed');
+    }
   }
 
   getGroup(): THREE.Group {

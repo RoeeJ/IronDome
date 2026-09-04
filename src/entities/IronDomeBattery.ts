@@ -1,8 +1,11 @@
+import { gameplayRandom } from '@/simulation/Random';
+import { calculateVacuumLaunch } from '@/physics/interception';
+import { simulationClock } from '@/simulation/SimulationClock';
 import * as THREE from 'three';
 import * as CANNON from 'cannon-es';
 import * as BufferGeometryUtils from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { Projectile } from './Projectile';
-import { Threat, THREAT_CONFIGS } from './Threat';
+import { Threat, ThreatType, THREAT_CONFIGS } from './Threat';
 import { UnifiedTrajectorySystem } from '../systems/UnifiedTrajectorySystem';
 import { StaticRadarNetwork } from '../scene/StaticRadarNetwork';
 import { InvisibleRadarSystem } from '../scene/InvisibleRadarSystem';
@@ -47,6 +50,16 @@ interface LauncherTube {
 }
 
 export class IronDomeBattery extends EventEmitter {
+  private pendingLaunches = new Map<number, { threatId: string; tube: LauncherTube }>();
+  cancelPendingLaunches(threatId?: string): void {
+    for (const [id, launch] of this.pendingLaunches) {
+      if (threatId !== undefined && launch.threatId !== threatId) continue;
+      simulationClock.cancel(id);
+      launch.tube.isLoaded = true;
+      this.pendingLaunches.delete(id);
+    }
+  }
+
   private scene: THREE.Scene;
   private world: CANNON.World;
   private config: BatteryConfig;
@@ -67,7 +80,6 @@ export class IronDomeBattery extends EventEmitter {
   private isDestroyed: boolean = false;
   private useInstancedRendering: boolean = false;
   private autoRepairRate: number = 0; // Health per second
-  private lastRepairTime: number = 0;
   private instanceManager?: any; // ProjectileInstanceManager reference
 
   constructor(scene: THREE.Scene, world: CANNON.World, config: Partial<BatteryConfig> = {}) {
@@ -554,8 +566,6 @@ export class IronDomeBattery extends EventEmitter {
       const startGeom = GeometryFactory.getInstance().getSphere(0.3, 16, 16);
       const startMat = MaterialCache.getInstance().getMeshBasicMaterial({
         color: 0x00ff00,
-        emissive: 0x00ff00,
-        emissiveIntensity: 0.5,
       });
       const startMarker = new THREE.Mesh(startGeom, startMat);
       startMarker.position.copy(tube.position);
@@ -565,8 +575,6 @@ export class IronDomeBattery extends EventEmitter {
       const endGeom = GeometryFactory.getInstance().getSphere(0.3, 16, 16);
       const endMat = MaterialCache.getInstance().getMeshBasicMaterial({
         color: 0xff0000,
-        emissive: 0xff0000,
-        emissiveIntensity: 0.5,
       });
       const endMarker = new THREE.Mesh(endGeom, endMat);
       endMarker.position.copy(tube.endPosition);
@@ -587,6 +595,7 @@ export class IronDomeBattery extends EventEmitter {
   }
 
   canIntercept(threat: Threat): boolean {
+    if (!this.isOperational() || !threat.isActive || threat.getPosition().y <= 0) return false;
     const threatConfig = THREAT_CONFIGS[threat.type];
 
     debug
@@ -741,7 +750,7 @@ export class IronDomeBattery extends EventEmitter {
 
     // Random chance for additional interceptor based on aggressiveness fractional part
     const extraChance = this.config.aggressiveness % 1;
-    if (Math.random() < extraChance) {
+    if (gameplayRandom.next() < extraChance) {
       count++;
     }
 
@@ -833,31 +842,20 @@ export class IronDomeBattery extends EventEmitter {
         const interceptor = this.launchFromTube(tube, threat);
         if (interceptor) {
           // Consume resource if enabled
-          if (this.useResources) {
-            this.resourceManager.consumeInterceptor();
-          }
           interceptors.push(interceptor);
           if (onLaunch) onLaunch(interceptor);
         }
       } else {
         // Fire subsequent ones with delay
         const delayMs = i * adjustedDelay;
-        setTimeout(() => {
-          // Check if tube hasn't been reloaded in the meantime
-          if (!tube.isLoaded && tube.lastFiredTime < Date.now() - this.config.reloadTime) {
-            tube.isLoaded = true; // Temporarily restore for launch
-            const interceptor = this.launchFromTube(tube, threat);
-            if (interceptor) {
-              // Consume resource if enabled
-              if (this.useResources) {
-                this.resourceManager.consumeInterceptor();
-              }
-              if (onLaunch) {
-                onLaunch(interceptor);
-              }
-            }
-          }
+        const eventId = simulationClock.setTimeout(() => {
+          this.pendingLaunches.delete(eventId);
+          tube.isLoaded = true;
+          if (!this.isOperational() || !threat.isActive) return;
+          const interceptor = this.launchFromTube(tube, threat);
+          if (interceptor) onLaunch?.(interceptor);
         }, delayMs);
+        this.pendingLaunches.set(eventId, { threatId: threat.id, tube });
       }
     }
 
@@ -872,6 +870,7 @@ export class IronDomeBattery extends EventEmitter {
 
   fireInterceptorManual(threat: Threat): Projectile | null {
     // Manual fire - bypasses range checks for player control
+    if (!this.isOperational() || !threat.isActive || threat.getPosition().y <= 0) return null;
     // Check if any tube is loaded
     const loadedTube = this.launcherTubes.find(tube => tube.isLoaded);
     if (!loadedTube) {
@@ -882,7 +881,7 @@ export class IronDomeBattery extends EventEmitter {
           index: t.index,
           isLoaded: t.isLoaded,
           lastFiredTime: t.lastFiredTime,
-          timeSinceFire: Date.now() - t.lastFiredTime,
+          timeSinceFire: simulationClock.nowMs - t.lastFiredTime,
         }))
       );
       return null;
@@ -893,6 +892,11 @@ export class IronDomeBattery extends EventEmitter {
       debug.warn('No interceptors in stock for manual fire!');
       return null;
     }
+
+    const tubeWorldPos = loadedTube.position
+      .clone()
+      .add(this.config.position)
+      .add(this.launchOffset);
 
     // For manual fire, aim directly at threat's current position with lead prediction
     const threatPos = threat.getPosition();
@@ -911,7 +915,7 @@ export class IronDomeBattery extends EventEmitter {
 
     // Calculate launch velocity to reach the lead point
     let launchParams = UnifiedTrajectorySystem.calculateLaunchParameters(
-      this.config.position,
+      tubeWorldPos,
       leadPoint,
       this.config.interceptorSpeed,
       true // Use lofted trajectory
@@ -919,17 +923,15 @@ export class IronDomeBattery extends EventEmitter {
 
     if (!launchParams) {
       // If can't calculate trajectory, just aim directly
-      const direction = new THREE.Vector3().subVectors(leadPoint, this.config.position).normalize();
+      const direction = new THREE.Vector3().subVectors(leadPoint, tubeWorldPos).normalize();
       launchParams = {
         angle: 45, // Default angle
-        azimuth: Math.atan2(direction.z, direction.x),
+        azimuth: THREE.MathUtils.radToDeg(Math.atan2(direction.z, direction.x)),
         velocity: this.config.interceptorSpeed,
       };
     }
 
     // Get launch position
-    const tubeWorldPos = this.config.position.clone();
-    tubeWorldPos.add(this.launchOffset);
 
     // Create interceptor with perfect success rate for manual control
     const velocity = UnifiedTrajectorySystem.getVelocityVector(launchParams);
@@ -950,7 +952,7 @@ export class IronDomeBattery extends EventEmitter {
 
     // Mark tube as reloading
     loadedTube.isLoaded = false;
-    loadedTube.lastFiredTime = Date.now();
+    loadedTube.lastFiredTime = simulationClock.nowMs;
 
     // Visual feedback
     if (loadedTube.missile) {
@@ -971,32 +973,8 @@ export class IronDomeBattery extends EventEmitter {
   }
 
   private launchFromTube(tube: LauncherTube, threat: Threat): Projectile | null {
-    // Calculate interception point
+    if (!this.isOperational() || !threat.isActive || threat.getPosition().y <= 0) return null;
     const threatConfig = THREAT_CONFIGS[threat.type];
-    const interceptionData = UnifiedTrajectorySystem.calculateInterceptionPoint(
-      threat.getPosition(),
-      threat.getVelocity(),
-      this.config.position,
-      this.config.interceptorSpeed,
-      threatConfig.isDrone || false
-    );
-
-    if (!interceptionData) {
-      return null;
-    }
-
-    // Calculate launch parameters with lofted trajectory
-    const launchParams = UnifiedTrajectorySystem.calculateLaunchParameters(
-      this.config.position,
-      interceptionData.point,
-      this.config.interceptorSpeed,
-      true // Use lofted trajectory for interceptors
-    );
-
-    if (!launchParams) {
-      return null;
-    }
-
     // Get launch position from the specific tube
     // In the tube editor, "start" is the top (where interceptors launch from)
     // "end" is the bottom (where smoke effects appear)
@@ -1009,6 +987,16 @@ export class IronDomeBattery extends EventEmitter {
     // Add offset along the actual launch direction to ensure interceptor spawns outside battery
     const launchOffset = actualLaunchDirection.clone().multiplyScalar(1.5); // 1.5m offset along launch direction
     tubeWorldPos.add(launchOffset);
+
+    const solution = calculateVacuumLaunch(
+      threat.getPosition(),
+      threat.getVelocity(),
+      tubeWorldPos,
+      this.config.interceptorSpeed,
+      threatConfig.isDrone || threat.type === ThreatType.CRUISE_MISSILE ? 0 : 9.82,
+      10
+    );
+    if (!solution) return null;
 
     // Optional debug logging (enable if needed)
     if ((window as any).__debugLaunchPositions) {
@@ -1047,18 +1035,18 @@ export class IronDomeBattery extends EventEmitter {
     let failureMode: 'none' | 'motor' | 'guidance' | 'premature' = 'none';
     let failureTime = 0;
 
-    if (Math.random() > this.config.successRate) {
+    if (gameplayRandom.next() > this.config.successRate) {
       // Interceptor will fail - determine failure mode
-      const failureRoll = Math.random();
+      const failureRoll = gameplayRandom.next();
       if (failureRoll < 0.4) {
         failureMode = 'motor';
-        failureTime = 0.5 + Math.random() * 2; // Motor fails 0.5-2.5s after launch
+        failureTime = 0.5 + gameplayRandom.next() * 2; // Motor fails 0.5-2.5s after launch
       } else if (failureRoll < 0.7) {
         failureMode = 'guidance';
-        failureTime = 1 + Math.random() * 3; // Guidance fails 1-4s after launch
+        failureTime = 1 + gameplayRandom.next() * 3; // Guidance fails 1-4s after launch
       } else {
         failureMode = 'premature';
-        failureTime = 0.2 + Math.random() * 2; // Premature detonation 0.2-2.2s after launch
+        failureTime = 0.2 + gameplayRandom.next() * 2; // Premature detonation 0.2-2.2s after launch
       }
 
       debug.category(
@@ -1067,18 +1055,11 @@ export class IronDomeBattery extends EventEmitter {
       );
     }
 
-    // Create interceptor with adjusted initial velocity based on launch direction
-    let velocity = UnifiedTrajectorySystem.getVelocityVector(launchParams);
+    // This exact launch state solves the vacuum planning model from the actual tube exit.
+    // Guidance may subsequently change it; planning confidence is not a kill probability.
+    const velocity = solution.launchVelocity;
 
-    // Blend calculated velocity with tube's launch direction for more realistic launch
-    // This ensures the missile initially follows the tube's direction
-    const launchSpeed = velocity.length();
-    const launchVelocity = actualLaunchDirection.clone().multiplyScalar(launchSpeed);
-
-    // Blend: 70% tube direction, 30% calculated direction for first moments
-    velocity = launchVelocity.multiplyScalar(0.7).add(velocity.multiplyScalar(0.3));
-    velocity.normalize().multiplyScalar(launchSpeed);
-
+    if (this.useResources && !this.resourceManager.consumeInterceptor()) return null;
     const interceptor = new Projectile(this.scene, this.world, {
       position: tubeWorldPos,
       velocity,
@@ -1098,7 +1079,7 @@ export class IronDomeBattery extends EventEmitter {
 
     // Update tube state
     tube.isLoaded = false;
-    tube.lastFiredTime = Date.now();
+    tube.lastFiredTime = simulationClock.nowMs;
 
     // Create launch effects at the tube's end position (bottom of tube)
     const effectPos = tube.endPosition.clone().add(this.config.position);
@@ -1122,7 +1103,7 @@ export class IronDomeBattery extends EventEmitter {
       const recoilOffset = tube.direction.clone().multiplyScalar(-0.15);
       tube.mesh.position.add(recoilOffset);
 
-      setTimeout(() => {
+      simulationClock.setTimeout(() => {
         tube.mesh.position.copy(originalPos);
       }, 300);
     }
@@ -1396,6 +1377,7 @@ export class IronDomeBattery extends EventEmitter {
   }
 
   resetInterceptorStock(): void {
+    this.cancelPendingLaunches();
     // Reset all launcher tubes to loaded state
     this.launcherTubes.forEach(tube => {
       tube.isLoaded = true;
@@ -1427,7 +1409,7 @@ export class IronDomeBattery extends EventEmitter {
     this.launcherTubes.forEach((tube, index) => {
       if (emptyTubeIndices.includes(index) || (emptyTubeIndices.length === 0 && !tube.isLoaded)) {
         tube.isLoaded = false;
-        tube.lastFiredTime = Date.now();
+        tube.lastFiredTime = simulationClock.nowMs;
 
         // Hide missile if it exists
         if (tube.missile) {
@@ -1542,6 +1524,7 @@ export class IronDomeBattery extends EventEmitter {
   }
 
   takeDamage(amount: number): void {
+    if (!Number.isFinite(amount) || amount <= 0) return;
     if (this.isDestroyed) return;
 
     // In sandbox mode (resources disabled), ignore damage
@@ -1554,7 +1537,7 @@ export class IronDomeBattery extends EventEmitter {
     const originalColor = (this.radarDome.material as THREE.MeshStandardMaterial).color.getHex();
     (this.radarDome.material as THREE.MeshStandardMaterial).color.setHex(0xff0000);
 
-    setTimeout(() => {
+    simulationClock.setTimeout(() => {
       if (this.radarDome && !this.isDestroyed) {
         (this.radarDome.material as THREE.MeshStandardMaterial).color.setHex(originalColor);
       }
@@ -1567,6 +1550,7 @@ export class IronDomeBattery extends EventEmitter {
   }
 
   private onDestroyed(): void {
+    this.cancelPendingLaunches();
     // Create explosion effect using ExplosionManager
     const explosionManager = ExplosionManager.getInstance(this.scene);
     explosionManager.createExplosion({
@@ -1588,6 +1572,7 @@ export class IronDomeBattery extends EventEmitter {
   }
 
   repair(amount: number): void {
+    if (!Number.isFinite(amount) || amount <= 0) return;
     if (this.isDestroyed && this.currentHealth + amount >= this.maxHealth * 0.2) {
       // Revive the battery if repaired above 20% health
       this.isDestroyed = false;
@@ -1615,8 +1600,7 @@ export class IronDomeBattery extends EventEmitter {
   }
 
   setAutoRepairRate(healthPerSecond: number): void {
-    this.autoRepairRate = healthPerSecond;
-    this.lastRepairTime = Date.now();
+    this.autoRepairRate = Math.max(0, healthPerSecond);
   }
 
   getAutoRepairRate(): number {
@@ -1720,14 +1704,7 @@ export class IronDomeBattery extends EventEmitter {
   update(deltaTime: number = 0, threats: Threat[] = []): void {
     // Apply auto-repair if enabled and battery is damaged but not destroyed
     if (this.autoRepairRate > 0 && this.currentHealth < this.maxHealth && !this.isDestroyed) {
-      const currentTime = Date.now();
-      const repairDelta = (currentTime - this.lastRepairTime) / 1000; // Convert to seconds
-
-      if (repairDelta > 0) {
-        const repairAmount = this.autoRepairRate * repairDelta;
-        this.repair(repairAmount);
-        this.lastRepairTime = currentTime;
-      }
+      this.repair(this.autoRepairRate * deltaTime);
     }
 
     // Update health bar to face camera and follow battery position
@@ -1766,9 +1743,12 @@ export class IronDomeBattery extends EventEmitter {
     const reloadTimeMultiplier = this.calculateReloadMultiplier(threats);
 
     // Reload individual tubes and manage X markers
-    const currentTime = Date.now();
+    const currentTime = simulationClock.nowMs;
     this.launcherTubes.forEach(tube => {
-      if (!tube.isLoaded) {
+      if (
+        !tube.isLoaded &&
+        ![...this.pendingLaunches.values()].some(launch => launch.tube === tube)
+      ) {
         const adjustedReloadTime = this.config.reloadTime * reloadTimeMultiplier;
         const timeSinceFire = currentTime - tube.lastFiredTime;
 
@@ -1811,6 +1791,7 @@ export class IronDomeBattery extends EventEmitter {
   }
 
   destroy(): void {
+    this.cancelPendingLaunches();
     this.isDestroyed = true;
 
     // Remove from scene

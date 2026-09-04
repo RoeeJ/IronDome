@@ -1,3 +1,4 @@
+import { simulationClock } from '@/simulation/SimulationClock';
 import * as THREE from 'three';
 import * as CANNON from 'cannon-es';
 import { IBattery } from '../entities/IBattery';
@@ -99,19 +100,32 @@ export class DomePlacementSystem {
       if (!this.loadedBatteryModel) {
         const { scene: batteryModel } = await modelManager.loadModel(MODEL_IDS.BATTERY);
         this.loadedBatteryModel = batteryModel.clone();
-        
+
         // Apply hidden parts configuration from ModelRegistry
-        const hiddenParts = ['Part24', 'Part25', 'Part26', 'Part27', 'Part299', 'Part300', 
-                           'Part301', 'Part302', 'Part303', 'Part304', 'Part305', 'Part306', 
-                           'Part307', 'Part308'];
-        
+        const hiddenParts = [
+          'Part24',
+          'Part25',
+          'Part26',
+          'Part27',
+          'Part299',
+          'Part300',
+          'Part301',
+          'Part302',
+          'Part303',
+          'Part304',
+          'Part305',
+          'Part306',
+          'Part307',
+          'Part308',
+        ];
+
         hiddenParts.forEach(partName => {
           const part = this.loadedBatteryModel!.getObjectByName(partName);
           if (part) {
             part.visible = false;
           }
         });
-        
+
         debug.log('Iron Dome model loaded for placement preview');
       }
 
@@ -119,31 +133,31 @@ export class DomePlacementSystem {
       if (!this.loadedLaserModel) {
         const { scene: laserModel } = await modelManager.loadModel(MODEL_IDS.LASER_CANNON);
         this.loadedLaserModel = laserModel.clone();
-        
+
         // Apply hidden parts configuration first
         const cylinder = this.loadedLaserModel.getObjectByName('Cylinder007_0');
         if (cylinder) {
           cylinder.visible = false;
         }
-        
+
         // Hide Cube_2 for preview (only shows when firing)
         const cube2 = this.loadedLaserModel.getObjectByName('Cube_2');
         if (cube2) {
           cube2.visible = false;
         }
-        
+
         // Calculate bounds to find center offset BEFORE scaling
         const box = new THREE.Box3().setFromObject(this.loadedLaserModel);
         const center = box.getCenter(new THREE.Vector3());
-        
+
         // Scale to match actual laser battery size
         this.loadedLaserModel.scale.setScalar(10);
-        
+
         // Center the model
         this.loadedLaserModel.position.x = -center.x * 10;
         this.loadedLaserModel.position.z = -center.z * 10;
         this.loadedLaserModel.position.y = -box.min.y * 10; // Place on ground
-        
+
         debug.log('Laser cannon model loaded for placement preview');
       }
     } catch (error) {
@@ -161,20 +175,16 @@ export class DomePlacementSystem {
     return this.selectedBatteryType;
   }
 
-  private createBattery(
-    type: BatteryType,
-    position: THREE.Vector3,
-    level: number = 1
-  ): IBattery {
+  private createBattery(type: BatteryType, position: THREE.Vector3, level: number = 1): IBattery {
     const config = BATTERY_CONFIGS[type];
-    
+
     switch (type) {
       case BatteryType.LASER:
         const laserBattery = new LaserBattery(this.scene, this.world, position);
         laserBattery.setMaxRange(config.capabilities.maxRange + (level - 1) * 50);
         laserBattery.setDamagePerSecond(config.capabilities.damagePerSecond! + (level - 1) * 10);
         return laserBattery;
-        
+
       case BatteryType.IRON_DOME:
       default:
         return new IronDomeBattery(this.scene, this.world, {
@@ -322,16 +332,22 @@ export class DomePlacementSystem {
       const initialId = 'battery_initial';
       const initialPosition = new THREE.Vector3(0, 0, 0);
       this.placeBatteryAt(initialPosition, initialId, 1);
-      this.gameState.addDomePlacement(initialId, {
-        x: initialPosition.x,
-        z: initialPosition.z,
-      }, BatteryType.IRON_DOME);
+      this.gameState.addDomePlacement(
+        initialId,
+        {
+          x: initialPosition.x,
+          z: initialPosition.z,
+        },
+        BatteryType.IRON_DOME
+      );
     } else {
       // Restore saved placements
       placements.forEach(placement => {
         const position = new THREE.Vector3(placement.position.x, 0, placement.position.z);
         // Use saved battery type or default to IRON_DOME for backwards compatibility
-        const batteryType = placement.type ? placement.type as BatteryType : BatteryType.IRON_DOME;
+        const batteryType = placement.type
+          ? (placement.type as BatteryType)
+          : BatteryType.IRON_DOME;
         this.placeBatteryAt(position, placement.id, placement.level, batteryType);
       });
     }
@@ -366,7 +382,7 @@ export class DomePlacementSystem {
 
     // Select the appropriate model based on battery type
     let modelToUse: THREE.Object3D | undefined;
-    
+
     if (this.selectedBatteryType === BatteryType.LASER) {
       modelToUse = this.loadedLaserModel;
     } else {
@@ -466,10 +482,12 @@ export class DomePlacementSystem {
     }
     return false;
   }
-  
+
   private isPartOfLoadedModels(child: THREE.Mesh): boolean {
-    return (this.loadedBatteryModel && this.isChildOfModel(child, this.loadedBatteryModel)) ||
-           (this.loadedLaserModel && this.isChildOfModel(child, this.loadedLaserModel));
+    return (
+      (this.loadedBatteryModel && this.isChildOfModel(child, this.loadedBatteryModel)) ||
+      (this.loadedLaserModel && this.isChildOfModel(child, this.loadedLaserModel))
+    );
   }
 
   private showNearbyDomeRanges(position: THREE.Vector3): void {
@@ -546,10 +564,14 @@ export class DomePlacementSystem {
     this.placeBatteryAt(position, batteryId);
 
     // Save placement (even in sandbox mode for persistence)
-    this.gameState.addDomePlacement(batteryId, {
-      x: position.x,
-      z: position.z,
-    }, this.selectedBatteryType);
+    this.gameState.addDomePlacement(
+      batteryId,
+      {
+        x: position.x,
+        z: position.z,
+      },
+      this.selectedBatteryType
+    );
 
     // Auto-exit placement mode if we've reached the limit (game mode only)
     if (!this.isSandboxMode && !this.canPlaceNewDome()) {
@@ -559,7 +581,12 @@ export class DomePlacementSystem {
     return true;
   }
 
-  placeBatteryAt(position: THREE.Vector3, batteryId: string, level: number = 1, type?: BatteryType): void {
+  placeBatteryAt(
+    position: THREE.Vector3,
+    batteryId: string,
+    level: number = 1,
+    type?: BatteryType
+  ): void {
     const batteryType = type || this.selectedBatteryType;
     // Adjust position to raise the battery so legs are visible
     const adjustedPosition = position.clone();
@@ -574,7 +601,7 @@ export class DomePlacementSystem {
       `Configuring battery ${batteryId}: type=${batteryType}, isSandboxMode=${this.isSandboxMode}, setting resourceManagement=${!this.isSandboxMode}`
     );
     battery.setResourceManagement(!this.isSandboxMode);
-    
+
     // Configure IronDome-specific settings
     if (battery instanceof IronDomeBattery) {
       battery.setLaunchOffset(new THREE.Vector3(-2, 14.5, -0.1));
@@ -590,7 +617,7 @@ export class DomePlacementSystem {
     if (!this.isSandboxMode) {
       battery.on('destroyed', () => {
         // Remove the destroyed battery after a delay for the explosion animation
-        setTimeout(() => {
+        simulationClock.setTimeout(() => {
           this.removeBattery(batteryId, true);
         }, 2000);
       });
@@ -617,10 +644,14 @@ export class DomePlacementSystem {
     // Register in game state FIRST before other operations
     const existingPlacement = this.gameState.getDomePlacements().find(p => p.id === batteryId);
     if (!existingPlacement) {
-      this.gameState.addDomePlacement(batteryId, {
-        x: position.x,
-        z: position.z,
-      }, batteryType);
+      this.gameState.addDomePlacement(
+        batteryId,
+        {
+          x: position.x,
+          z: position.z,
+        },
+        batteryType
+      );
     }
 
     // Register with threat manager
@@ -952,12 +983,15 @@ export class DomePlacementSystem {
     if (!this.instancedRenderer) return;
 
     // Convert map to format expected by renderer
-    const batteriesData = new Map<string, { battery: IBattery; level: number; type: BatteryType }>();
+    const batteriesData = new Map<
+      string,
+      { battery: IBattery; level: number; type: BatteryType }
+    >();
     this.placedDomes.forEach((dome, id) => {
-      batteriesData.set(id, { 
-        battery: dome.battery, 
+      batteriesData.set(id, {
+        battery: dome.battery,
         level: dome.level,
-        type: dome.type
+        type: dome.type,
       });
     });
 

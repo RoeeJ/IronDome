@@ -1,3 +1,4 @@
+import { simulationClock } from '@/simulation/SimulationClock';
 import * as THREE from 'three';
 import { Threat } from '@/entities/Threat';
 import { UnifiedTrajectorySystem as TrajectoryCalculator } from '@/systems/UnifiedTrajectorySystem';
@@ -313,7 +314,7 @@ export class ThreatAnalyzer {
     }
 
     return {
-      id: `cluster_${Date.now()}`,
+      id: `cluster_${simulationClock.nowMs}`,
       threats,
       center,
       radius: maxDistance,

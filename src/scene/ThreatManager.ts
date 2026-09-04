@@ -1,3 +1,6 @@
+import { stepEvents } from '@/simulation/StepEvents';
+import { simulationClock } from '@/simulation/SimulationClock';
+import { gameplayRandom, cosmeticRandom } from '@/simulation/Random';
 import * as THREE from 'three';
 import * as CANNON from 'cannon-es';
 import { EventEmitter } from 'events';
@@ -31,6 +34,22 @@ export interface ThreatSpawnConfig {
 }
 
 export class ThreatManager extends EventEmitter {
+  private pendingSpawns = new Set<number>();
+  private scheduleSpawn(delaySeconds: number, callback: () => void): void {
+    if (delaySeconds <= 0) {
+      callback();
+      return;
+    }
+    const id = simulationClock.schedule(delaySeconds, () => {
+      this.pendingSpawns.delete(id);
+      callback();
+    });
+    this.pendingSpawns.add(id);
+  }
+  private cancelPendingSpawns(): void {
+    for (const id of this.pendingSpawns) simulationClock.cancel(id);
+    this.pendingSpawns.clear();
+  }
   private scene: THREE.Scene;
   private world: CANNON.World;
   private threats: Threat[] = [];
@@ -47,28 +66,12 @@ export class ThreatManager extends EventEmitter {
   private static readonly MAX_IMPACT_MARKERS = 25;
 
   private cleanupOldestThreat(): void {
-    if (this.threats.length >= ThreatManager.MAX_THREATS) {
-      const oldestThreat = this.threats.shift();
-      if (oldestThreat) {
-        debug.warn(
-          `[ThreatManager] Removing oldest threat to prevent memory overflow (${this.threats.length} active)`
-        );
-        this.instancedRenderer.removeThreat(oldestThreat.id);
-        oldestThreat.destroy(this.scene, this.world);
-      }
-    }
+    if (this.threats.length >= ThreatManager.MAX_THREATS) this.removeThreat(0, 'capacity-removed');
   }
 
   clearOldestThreats(count: number): void {
     const toRemove = Math.min(count, this.threats.length);
-    for (let i = 0; i < toRemove; i++) {
-      const threat = this.threats.shift();
-      if (threat) {
-        this.instancedRenderer.removeThreat(threat.id);
-        threat.destroy(this.scene, this.world);
-      }
-    }
-    debug.warn(`[ThreatManager] Cleared ${toRemove} oldest threats for memory management`);
+    for (let i = 0; i < toRemove; i++) this.removeThreat(0, 'capacity-removed');
   }
 
   private cleanupOldestImpactMarker(): void {
@@ -91,7 +94,7 @@ export class ThreatManager extends EventEmitter {
     {
       mesh: THREE.Mesh;
       position: THREE.Vector3;
-      timeout: NodeJS.Timeout | null;
+      timeout: number | null;
       animationId: number | null;
       material: THREE.Material;
     }
@@ -204,13 +207,14 @@ export class ThreatManager extends EventEmitter {
   }
 
   stopSpawning(): void {
+    this.cancelPendingSpawns();
     this.isSpawning = false;
   }
 
   private scheduleNextSpawn(): void {
     if (this.spawnConfigs.length === 0) {
       // If no spawn configs available, schedule a check in 5 seconds
-      this.nextSpawnTime = Date.now() + 5000;
+      this.nextSpawnTime = simulationClock.nowMs + 5000;
       return;
     }
 
@@ -220,13 +224,21 @@ export class ThreatManager extends EventEmitter {
       const intervals = AttackParameterConverter.getSpawnIntervals(
         this.currentAttackParameters.intensity
       );
-      interval = intervals.min + Math.random() * (intervals.max - intervals.min);
+      interval = intervals.min + gameplayRandom.next() * (intervals.max - intervals.min);
     } else {
-      const config = this.spawnConfigs[Math.floor(Math.random() * this.spawnConfigs.length)];
-      interval = config.minInterval + Math.random() * (config.maxInterval - config.minInterval);
+      const config =
+        this.spawnConfigs[Math.floor(gameplayRandom.next() * this.spawnConfigs.length)];
+      interval =
+        config.minInterval + gameplayRandom.next() * (config.maxInterval - config.minInterval);
     }
 
-    this.nextSpawnTime = Date.now() + interval;
+    this.nextSpawnTime = simulationClock.nowMs + interval;
+  }
+
+  renderFrame(alpha: number): void {
+    const threats = this.getActiveThreats();
+    for (const threat of threats) threat.renderFrame(alpha);
+    this.instancedRenderer.updateThreats(threats, alpha);
   }
 
   update(deltaTime: number): void {
@@ -234,10 +246,9 @@ export class ThreatManager extends EventEmitter {
     this.launchEffects.update();
 
     // Update explosion manager
-    this.explosionManager.update(1 / 60);
+    this.explosionManager.update(deltaTime);
 
     // Update instanced renderer with active threats
-    this.instancedRenderer.updateThreats(this.threats.filter(t => t.isActive));
 
     // Update all threats
     for (let i = this.threats.length - 1; i >= 0; i--) {
@@ -255,63 +266,45 @@ export class ThreatManager extends EventEmitter {
 
       threat.update(deltaTime);
 
-      // NEW: Building collision detection
-      const buildingSystem = (window as any).__buildingSystem;
-      if (buildingSystem && threat.getPosition().y < 100) {
-        // Only check for low-altitude threats
-        const buildings = buildingSystem.getAllBuildings();
-        for (const building of buildings) {
-          // Assuming buildings are axis-aligned boxes for simplicity
-          // And that building.position is the center of the base.
-          // Using a rough estimate for building dimensions.
-          const buildingHalfWidth = 12;
-          const buildingHalfDepth = 12;
-          const buildingHeight = 80;
-
-          const threatPos = threat.getPosition();
-          const buildingPos = building.position;
-
-          const box = new THREE.Box3(
-            new THREE.Vector3(
-              buildingPos.x - buildingHalfWidth,
-              0,
-              buildingPos.z - buildingHalfDepth
-            ),
-            new THREE.Vector3(
-              buildingPos.x + buildingHalfWidth,
-              buildingHeight,
-              buildingPos.z + buildingHalfDepth
-            )
-          );
-
-          if (box.containsPoint(threatPos)) {
-            debug.category('Combat', `Threat ${threat.id} collided with a building.`);
-            const impactNormal = this.getImpactNormal(threatPos, box);
-
-            buildingSystem.damageBuilding(building.id, this.getThreatDamage(threat.type));
-
-            this.explosionManager.createExplosion({
-              type: ExplosionType.GROUND_IMPACT,
-              position: threatPos,
-              radius: 15,
-              normal: impactNormal,
-            });
-
-            SoundSystem.getInstance().playExplosion('ground', threatPos);
-            this.threatsToRemove.add(threat);
-            break; // Move to next threat
-          }
-        }
-        if (this.threatsToRemove.has(threat)) continue; // Threat was removed, skip rest of its update
+      const buildingSystem = (
+        window as unknown as { __buildingSystem?: import('@/world/BuildingSystem').BuildingSystem }
+      ).__buildingSystem;
+      const collision = buildingSystem?.findFirstCollision(
+        threat.previousPosition,
+        threat.getPosition(),
+        threat.getCollisionRadius()
+      );
+      if (collision && buildingSystem) {
+        stepEvents.add(collision.fraction, 0, () => {
+          if (!threat.isActive) return;
+          const { building, position } = collision;
+          const normal = this.getImpactNormal(position, building.bounds);
+          buildingSystem.damageBuilding(building.id, this.getThreatDamage(threat.type));
+          this.explosionManager.createExplosion({
+            type: ExplosionType.GROUND_IMPACT,
+            position,
+            radius: 15,
+            normal,
+          });
+          SoundSystem.getInstance().playExplosion('ground', position);
+          threat.terminate('impact');
+          this.threatsToRemove.add(threat);
+        });
+        continue;
       }
 
       // Check for payload deployment from ballistic missiles
       if (threat.shouldDeployPayload) {
-        const threatConfig = THREAT_CONFIGS[threat.type];
-        if (threatConfig.payload) {
-          this.deployPayload(threat, threatConfig.payload);
-        }
-        this.threatsToRemove.add(threat);
+        stepEvents.add(1, 3, () => {
+          if (!threat.isActive) return;
+          const threatConfig = THREAT_CONFIGS[threat.type];
+          if (threatConfig.payload) {
+            this.deployPayload(threat, threatConfig.payload);
+          }
+          threat.terminate('payload-deployed');
+          this.threatsToRemove.add(threat);
+        });
+        continue;
       }
 
       // Check if threat has hit ground or reached target
@@ -334,7 +327,7 @@ export class ThreatManager extends EventEmitter {
           // If close to target horizontally, start descending
           if (horizontalDistance < 20) {
             // Spiral descent pattern
-            const angle = (Date.now() / 1000) * 2; // 2 radians per second
+            const angle = (simulationClock.nowMs / 1000) * 2; // 2 radians per second
             const radius = Math.max(5, horizontalDistance);
 
             const targetX = threat.targetPosition.x + Math.cos(angle) * radius;
@@ -359,7 +352,7 @@ export class ThreatManager extends EventEmitter {
         }
 
         const distanceToTarget = threat.getPosition().distanceTo(threat.targetPosition);
-        const timeSinceLaunch = (Date.now() - threat.launchTime) / 1000;
+        const timeSinceLaunch = (simulationClock.nowMs - threat.launchTime) / 1000;
 
         // Check if drone is close to any battery
         const closestBattery = this.batteries.reduce(
@@ -386,126 +379,138 @@ export class ThreatManager extends EventEmitter {
           timeSinceLaunch > 60; // Timeout after 60 seconds
 
         if (shouldExplode) {
-          // Check for battery hit (within explosion radius)
-          const explosionRadius = 10; // Drone explosion affects 10m radius
-          const nearbyBatteries = this.batteries.filter(
-            battery =>
-              battery.isOperational() &&
-              battery.getPosition().distanceTo(threat.getPosition()) <= explosionRadius
-          );
-
-          // Damage all batteries in explosion radius
-          nearbyBatteries.forEach(battery => {
-            const distance = battery.getPosition().distanceTo(threat.getPosition());
-            const damageFalloff = 1 - distance / explosionRadius; // More damage closer to explosion
-            const baseDamage = this.getThreatDamage(threat.type);
-            const actualDamage = Math.ceil(baseDamage * damageFalloff);
-
-            if (battery instanceof IronDomeBattery) {
-              battery.takeDamage(actualDamage);
-            }
-            this.emit('batteryHit', { battery, damage: actualDamage });
-            debug.category(
-              'Combat',
-              `Drone explosion damaged battery at ${distance.toFixed(1)}m for ${actualDamage} damage`
+          stepEvents.add(1, 0, () => {
+            if (!threat.isActive) return;
+            // Check for battery hit (within explosion radius)
+            const explosionRadius = 10; // Drone explosion affects 10m radius
+            const nearbyBatteries = this.batteries.filter(
+              battery =>
+                battery.isOperational() &&
+                battery.getPosition().distanceTo(threat.getPosition()) <= explosionRadius
             );
+
+            // Damage all batteries in explosion radius
+            nearbyBatteries.forEach(battery => {
+              const distance = battery.getPosition().distanceTo(threat.getPosition());
+              const damageFalloff = 1 - distance / explosionRadius; // More damage closer to explosion
+              const baseDamage = this.getThreatDamage(threat.type);
+              const actualDamage = Math.ceil(baseDamage * damageFalloff);
+
+              battery.takeDamage(actualDamage);
+              this.emit('batteryHit', { battery, damage: actualDamage });
+              debug.category(
+                'Combat',
+                `Drone explosion damaged battery at ${distance.toFixed(1)}m for ${actualDamage} damage`
+              );
+            });
+
+            // Create explosion (in air if still flying)
+            if (threat.getPosition().y > 5) {
+              this.explosionManager.createExplosion({
+                type: ExplosionType.DRONE_DESTRUCTION,
+                position: threat.getPosition(),
+                radius: 10,
+              });
+            } else {
+              this.explosionManager.createExplosion({
+                type: ExplosionType.GROUND_IMPACT,
+                position: threat.getPosition(),
+                radius: 15,
+              });
+            }
+
+            // Add to removal queue instead of removing immediately
+            threat.terminate('impact');
+            this.threatsToRemove.add(threat);
           });
-
-          // Create explosion (in air if still flying)
-          if (threat.getPosition().y > 5) {
-            this.explosionManager.createExplosion({
-              type: ExplosionType.DRONE_DESTRUCTION,
-              position: threat.getPosition(),
-              radius: 10,
-            });
-          } else {
-            this.explosionManager.createExplosion({
-              type: ExplosionType.GROUND_IMPACT,
-              position: threat.getPosition(),
-              radius: 15,
-            });
-          }
-
-          // Add to removal queue instead of removing immediately
-          this.threatsToRemove.add(threat);
         }
       } else {
         // For other threats, check ground impact
         if (threat.body.position.y <= 0.5 && threat.isActive) {
-          // Check if hit a battery or building
-          const impactPosition = threat.getPosition();
-          const hitBattery = this.checkBatteryHit(impactPosition);
+          const startY = threat.previousPosition.y;
+          const endY = threat.getPosition().y;
+          const fraction = startY > 0.5 && endY < startY ? (startY - 0.5) / (startY - endY) : 0;
+          stepEvents.add(fraction, 0, () => {
+            if (!threat.isActive) return;
+            // Check if hit a battery or building
+            const impactPosition = threat.previousPosition
+              .clone()
+              .lerp(threat.getPosition(), fraction);
+            const hitBattery = this.checkBatteryHit(impactPosition);
 
-          if (hitBattery) {
-            // Deal damage to battery
-            const damageAmount = this.getThreatDamage(threat.type);
-            hitBattery.takeDamage(damageAmount);
-            this.emit('batteryHit', { battery: hitBattery, damage: damageAmount });
-          } else {
-            // Check if hit a building
-            const buildingSystem = (window as any).__buildingSystem;
-            if (buildingSystem) {
-              const hitBuilding = buildingSystem.getBuildingAt(impactPosition, 15);
-              if (hitBuilding) {
-                const damageAmount = this.getThreatDamage(threat.type);
-                buildingSystem.damageBuilding(hitBuilding.id, damageAmount);
+            if (hitBattery) {
+              // Deal damage to battery
+              const damageAmount = this.getThreatDamage(threat.type);
+              hitBattery.takeDamage(damageAmount);
+              this.emit('batteryHit', { battery: hitBattery, damage: damageAmount });
+            } else {
+              // Check if hit a building
+              const buildingSystem = (window as any).__buildingSystem;
+              if (buildingSystem) {
+                const hitBuilding = buildingSystem.getBuildingAt(impactPosition, 15);
+                if (hitBuilding) {
+                  const damageAmount = this.getThreatDamage(threat.type);
+                  buildingSystem.damageBuilding(hitBuilding.id, damageAmount);
+                  debug.category(
+                    'Combat',
+                    `Threat hit building ${hitBuilding.id} for ${damageAmount} damage`
+                  );
+                }
+              }
+            }
+
+            // Check for shockwave damage to nearby batteries
+            const shockwaveRadius = this.getShockwaveRadius(threat.type);
+            const nearbyBatteries = this.batteries.filter(battery => {
+              const distance = battery.getPosition().distanceTo(impactPosition);
+              return (
+                battery.isOperational() && distance <= shockwaveRadius && battery !== hitBattery
+              );
+            });
+
+            // Apply shockwave damage with falloff
+            nearbyBatteries.forEach(battery => {
+              const distance = battery.getPosition().distanceTo(impactPosition);
+              const damageFalloff = 1 - distance / shockwaveRadius;
+              const baseDamage = this.getThreatDamage(threat.type);
+              const shockwaveDamage = Math.ceil(baseDamage * 0.5 * damageFalloff); // 50% of base damage for shockwave
+
+              if (shockwaveDamage > 0) {
+                battery.takeDamage(shockwaveDamage);
+                this.emit('batteryHit', { battery, damage: shockwaveDamage, isShockwave: true });
                 debug.category(
                   'Combat',
-                  `Threat hit building ${hitBuilding.id} for ${damageAmount} damage`
+                  `Shockwave damaged battery at ${distance.toFixed(1)}m for ${shockwaveDamage} damage`
                 );
               }
+            });
+
+            // Apply shockwave damage to buildings
+            const buildingSystem = (window as any).__buildingSystem;
+            if (buildingSystem) {
+              buildingSystem.checkExplosionDamage(impactPosition, shockwaveRadius);
             }
-          }
 
-          // Check for shockwave damage to nearby batteries
-          const shockwaveRadius = this.getShockwaveRadius(threat.type);
-          const nearbyBatteries = this.batteries.filter(battery => {
-            const distance = battery.getPosition().distanceTo(impactPosition);
-            return battery.isOperational() && distance <= shockwaveRadius && battery !== hitBattery;
+            // Create explosion at impact point
+            this.explosionManager.createExplosion({
+              type: ExplosionType.GROUND_IMPACT,
+              position: impactPosition,
+              radius: 15,
+            });
+
+            // Create crater decal at impact point
+            this.createCraterDecal(impactPosition);
+
+            // Play ground impact sound
+            SoundSystem.getInstance().playExplosion('ground', impactPosition);
+            // Add to removal queue instead of removing immediately
+            threat.terminate('impact');
+            this.threatsToRemove.add(threat);
           });
-
-          // Apply shockwave damage with falloff
-          nearbyBatteries.forEach(battery => {
-            const distance = battery.getPosition().distanceTo(impactPosition);
-            const damageFalloff = 1 - distance / shockwaveRadius;
-            const baseDamage = this.getThreatDamage(threat.type);
-            const shockwaveDamage = Math.ceil(baseDamage * 0.5 * damageFalloff); // 50% of base damage for shockwave
-
-            if (shockwaveDamage > 0) {
-              if (battery instanceof IronDomeBattery) {
-                battery.takeDamage(shockwaveDamage);
-              }
-              this.emit('batteryHit', { battery, damage: shockwaveDamage, isShockwave: true });
-              debug.category(
-                'Combat',
-                `Shockwave damaged battery at ${distance.toFixed(1)}m for ${shockwaveDamage} damage`
-              );
-            }
-          });
-
-          // Apply shockwave damage to buildings
-          const buildingSystem = (window as any).__buildingSystem;
-          if (buildingSystem) {
-            buildingSystem.checkExplosionDamage(impactPosition, shockwaveRadius);
-          }
-
-          // Create explosion at impact point
-          this.explosionManager.createExplosion({
-            type: ExplosionType.GROUND_IMPACT,
-            position: impactPosition,
-            radius: 15,
-          });
-
-          // Create crater decal at impact point
-          this.createCraterDecal(impactPosition);
-
-          // Play ground impact sound
-          SoundSystem.getInstance().playExplosion('ground', impactPosition);
-          // Add to removal queue instead of removing immediately
-          this.threatsToRemove.add(threat);
         } else if (threat.body.position.y < -5) {
           // Remove if somehow went too far below ground
           // Add to removal queue instead of removing immediately
+          threat.terminate('impact');
           this.threatsToRemove.add(threat);
         }
       }
@@ -522,6 +527,11 @@ export class ThreatManager extends EventEmitter {
     // Update launcher site visuals
     this.updateLauncherSiteVisuals();
 
+    this.finalizeTerminations();
+  }
+
+  finalizeTerminations(): void {
+    for (const threat of this.threats) if (!threat.isActive) this.threatsToRemove.add(threat);
     // Process removal queue - safe to do after main update loop
     if (this.threatsToRemove.size > 0) {
       // Convert to array and sort by index (descending) to avoid index shift issues
@@ -541,8 +551,8 @@ export class ThreatManager extends EventEmitter {
       // Now remove them safely
       for (const data of removalData) {
         // Check if this was an interception (threat was marked but not at ground level)
-        const wasIntercepted = data.threat.isActive && data.threat.getPosition().y > 5;
-        this.removeThreat(data.index, wasIntercepted);
+        const reason = data.threat.terminationReason ?? 'expired';
+        this.removeThreat(data.index, reason);
       }
 
       this.threatsToRemove.clear();
@@ -611,7 +621,11 @@ export class ThreatManager extends EventEmitter {
       const buildings = buildingSystem.getAllBuildings();
       if (buildings.length > 0) {
         // Shuffle buildings and pick some as targets
-        const shuffled = buildings.sort(() => 0.5 - Math.random());
+        const shuffled = [...buildings];
+        for (let i = shuffled.length - 1; i > 0; i--) {
+          const j = Math.floor(gameplayRandom.next() * (i + 1));
+          [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
+        }
         buildingTargets = shuffled.slice(0, payloadConfig.count).map(b => b.position.clone());
       }
     }
@@ -619,9 +633,9 @@ export class ThreatManager extends EventEmitter {
     for (let i = 0; i < payloadConfig.count; i++) {
       // Add random spread to velocity
       const spreadVector = new THREE.Vector3(
-        (Math.random() - 0.5) * 2,
-        (Math.random() - 0.5) * 2,
-        (Math.random() - 0.5) * 2
+        (gameplayRandom.next() - 0.5) * 2,
+        (gameplayRandom.next() - 0.5) * 2,
+        (gameplayRandom.next() - 0.5) * 2
       )
         .normalize()
         .multiplyScalar(payloadConfig.spread);
@@ -638,9 +652,9 @@ export class ThreatManager extends EventEmitter {
         // Fallback to original logic if no buildings or not enough buildings
         const originalTarget = parentThreat.targetPosition;
         const targetSpread = new THREE.Vector3(
-          (Math.random() - 0.5) * 2,
+          (gameplayRandom.next() - 0.5) * 2,
           0,
-          (Math.random() - 0.5) * 2
+          (gameplayRandom.next() - 0.5) * 2
         )
           .normalize()
           .multiplyScalar(1000); // 1km spread for submunitions
@@ -660,13 +674,14 @@ export class ThreatManager extends EventEmitter {
       if (!this.instancedRenderer.addThreat(threat)) {
         threat.mesh.visible = true;
       }
+      threat.waveId = parentThreat.waveId;
       this.threats.push(threat);
       this.emit('threatSpawned', threat);
     }
   }
 
   private checkAndFireLaunchers(): void {
-    const currentTime = Date.now();
+    const currentTime = simulationClock.nowMs;
     const readyLaunchers = this.launcherSystem.getReadyLaunchers(currentTime);
 
     readyLaunchers.forEach(({ launcher, site }) => {
@@ -682,7 +697,7 @@ export class ThreatManager extends EventEmitter {
     // Determine volley size with scenario multiplier
     const baseSize =
       launcher.volleySize.min +
-      Math.floor(Math.random() * (launcher.volleySize.max - launcher.volleySize.min + 1));
+      Math.floor(gameplayRandom.next() * (launcher.volleySize.max - launcher.volleySize.min + 1));
 
     // Apply scenario volley size multiplier if active
     let desiredSize = baseSize;
@@ -699,12 +714,12 @@ export class ThreatManager extends EventEmitter {
 
     // Fire the volley with staggered timing
     for (let i = 0; i < volleySize; i++) {
-      setTimeout(() => {
+      this.scheduleSpawn((i * launcher.volleyDelay) / 1000, () => {
         // Double-check limit before each spawn
         if (this.threats.length < 50) {
           this.spawnThreatFromLauncher(launcher, site);
         }
-      }, i * launcher.volleyDelay);
+      });
     }
   }
 
@@ -721,21 +736,21 @@ export class ThreatManager extends EventEmitter {
 
     if (operationalBatteries.length > 0) {
       const targetBattery =
-        operationalBatteries[Math.floor(Math.random() * operationalBatteries.length)];
+        operationalBatteries[Math.floor(gameplayRandom.next() * operationalBatteries.length)];
       targetPosition = targetBattery.getPosition().clone();
 
       // Add spread
-      const spreadAngle = Math.random() * Math.PI * 2;
-      const spreadDistance = Math.random() * launcher.spread;
+      const spreadAngle = gameplayRandom.next() * Math.PI * 2;
+      const spreadDistance = gameplayRandom.next() * launcher.spread;
       targetPosition.x += Math.cos(spreadAngle) * spreadDistance;
       targetPosition.z += Math.sin(spreadAngle) * spreadDistance;
       targetPosition.y = 0;
     } else {
       // Target city center with spread
       targetPosition = new THREE.Vector3(
-        (Math.random() - 0.5) * 100,
+        (gameplayRandom.next() - 0.5) * 100,
         0,
-        (Math.random() - 0.5) * 100
+        (gameplayRandom.next() - 0.5) * 100
       );
     }
 
@@ -748,7 +763,7 @@ export class ThreatManager extends EventEmitter {
     if (threatStats.isMortar) {
       // Mortars use high angle
       const distance = spawnPosition.distanceTo(targetPosition);
-      const mortarAngle = 80 + Math.random() * 5; // 80-85 degrees
+      const mortarAngle = 80 + gameplayRandom.next() * 5; // 80-85 degrees
       const angleRad = (mortarAngle * Math.PI) / 180;
 
       const g = 9.82;
@@ -756,7 +771,9 @@ export class ThreatManager extends EventEmitter {
 
       const launchParams = {
         angle: mortarAngle,
-        azimuth: Math.atan2(targetPosition.z - spawnPosition.z, targetPosition.x - spawnPosition.x),
+        azimuth: THREE.MathUtils.radToDeg(
+          Math.atan2(targetPosition.z - spawnPosition.z, targetPosition.x - spawnPosition.x)
+        ),
         velocity: Math.min(mortarVelocity, threatStats.velocity),
       };
       velocity = TrajectoryCalculator.getVelocityVector(launchParams);
@@ -774,7 +791,7 @@ export class ThreatManager extends EventEmitter {
         // Force a very high angle for a true ballistic trajectory.
         const minAngle = 75;
         const maxAngle = 85;
-        launchParams.angle = minAngle + Math.random() * (maxAngle - minAngle);
+        launchParams.angle = minAngle + gameplayRandom.next() * (maxAngle - minAngle);
 
         // Recalculate velocity needed for this angle and distance.
         const distance = spawnPosition.distanceTo(targetPosition);
@@ -804,7 +821,7 @@ export class ThreatManager extends EventEmitter {
         // Force high angle for ballistic trajectory
         const minAngle = 65;
         const maxAngle = 80;
-        launchParams.angle = minAngle + Math.random() * (maxAngle - minAngle);
+        launchParams.angle = minAngle + gameplayRandom.next() * (maxAngle - minAngle);
 
         // Recalculate velocity for the high angle
         const distance = spawnPosition.distanceTo(targetPosition);
@@ -857,18 +874,7 @@ export class ThreatManager extends EventEmitter {
     // Create launch effects
     this.launchEffects.createLaunchEffect(spawnPosition, velocity.clone().normalize());
 
-    // Calculate and show impact prediction
-    const trajectory = TrajectoryCalculator.predictTrajectory(
-      threat.body.position.clone(),
-      threat.body.velocity.clone()
-    );
-
-    if (trajectory.length > 0) {
-      const impactPoint = trajectory[trajectory.length - 1];
-      if (Math.abs(impactPoint.y) < 1) {
-        this.addImpactMarker(impactPoint);
-      }
-    }
+    this.addImpactMarker(threat);
 
     // Emit threat spawned event
     this.emit('threatSpawned', threat);
@@ -881,7 +887,7 @@ export class ThreatManager extends EventEmitter {
     }
 
     // Chance to spawn multiple threats simultaneously (salvo)
-    let isSalvo = Math.random() < this.salvoChance;
+    let isSalvo = gameplayRandom.next() < this.salvoChance;
     let salvoSize = 1;
 
     if (this.currentAttackParameters) {
@@ -889,15 +895,15 @@ export class ThreatManager extends EventEmitter {
       const salvoConfig = AttackParameterConverter.getSalvoConfig(
         this.currentAttackParameters.intensity
       );
-      isSalvo = Math.random() < salvoConfig.chance;
+      isSalvo = gameplayRandom.next() < salvoConfig.chance;
       if (isSalvo) {
         salvoSize =
           salvoConfig.minSize +
-          Math.floor(Math.random() * (salvoConfig.maxSize - salvoConfig.minSize + 1));
+          Math.floor(gameplayRandom.next() * (salvoConfig.maxSize - salvoConfig.minSize + 1));
       }
     } else {
       // Default salvo behavior
-      salvoSize = isSalvo ? 2 + Math.floor(Math.random() * 4) : 1; // 2-5 threats in salvo
+      salvoSize = isSalvo ? 2 + Math.floor(gameplayRandom.next() * 4) : 1; // 2-5 threats in salvo
     }
 
     for (let i = 0; i < salvoSize; i++) {
@@ -905,17 +911,17 @@ export class ThreatManager extends EventEmitter {
     }
   }
 
-  private spawnSingleThreat(delay: number = 0): void {
-    setTimeout(() => {
-      const config = this.spawnConfigs[Math.floor(Math.random() * this.spawnConfigs.length)];
-
+  spawnSingleThreat(delay: number = 0, waveId: number | null = null): void {
+    const config = this.spawnConfigs[Math.floor(gameplayRandom.next() * this.spawnConfigs.length)];
+    if (!config) return;
+    this.scheduleSpawn(delay, () => {
       // Use patterned spawn position if scenario is active
       let spawnPosition: THREE.Vector3;
       if (this.currentAttackParameters) {
         spawnPosition = this.getPatternedSpawnPosition(config.spawnRadius);
       } else {
         // Default random spawn
-        const spawnAngle = Math.random() * Math.PI * 2;
+        const spawnAngle = gameplayRandom.next() * Math.PI * 2;
         const spawnX = Math.cos(spawnAngle) * config.spawnRadius;
         const spawnZ = Math.sin(spawnAngle) * config.spawnRadius;
         spawnPosition = new THREE.Vector3(spawnX, 5, spawnZ);
@@ -938,19 +944,19 @@ export class ThreatManager extends EventEmitter {
       if (operationalBatteries.length > 0) {
         // Pick a random operational battery as target
         const targetBattery =
-          operationalBatteries[Math.floor(Math.random() * operationalBatteries.length)];
+          operationalBatteries[Math.floor(gameplayRandom.next() * operationalBatteries.length)];
         targetPosition = targetBattery.getPosition().clone();
 
         // Add some spread around the battery
-        const spread = 10 + Math.random() * 20;
-        const spreadAngle = Math.random() * Math.PI * 2;
+        const spread = 10 + gameplayRandom.next() * 20;
+        const spreadAngle = gameplayRandom.next() * Math.PI * 2;
         targetPosition.x += Math.cos(spreadAngle) * spread;
         targetPosition.z += Math.sin(spreadAngle) * spread;
         targetPosition.y = 0;
       } else {
         // Fallback to random target
-        const targetAngle = Math.random() * Math.PI * 2;
-        const targetDistance = Math.random() * config.targetRadius;
+        const targetAngle = gameplayRandom.next() * Math.PI * 2;
+        const targetDistance = gameplayRandom.next() * config.targetRadius;
         const targetX = Math.cos(targetAngle) * targetDistance;
         const targetZ = Math.sin(targetAngle) * targetDistance;
         targetPosition = new THREE.Vector3(targetX, 0, targetZ);
@@ -973,7 +979,7 @@ export class ThreatManager extends EventEmitter {
       } else if (threatStats.isMortar) {
         // Mortars use very high angle
         const distance = spawnPosition.distanceTo(targetPosition);
-        const mortarAngle = 80 + Math.random() * 5; // 80-85 degrees
+        const mortarAngle = 80 + gameplayRandom.next() * 5; // 80-85 degrees
         const angleRad = (mortarAngle * Math.PI) / 180;
 
         // Calculate velocity for mortar trajectory
@@ -982,9 +988,8 @@ export class ThreatManager extends EventEmitter {
 
         launchParams = {
           angle: mortarAngle,
-          azimuth: Math.atan2(
-            targetPosition.z - spawnPosition.z,
-            targetPosition.x - spawnPosition.x
+          azimuth: THREE.MathUtils.radToDeg(
+            Math.atan2(targetPosition.z - spawnPosition.z, targetPosition.x - spawnPosition.x)
           ),
           velocity: Math.min(mortarVelocity, threatStats.velocity),
         };
@@ -1021,7 +1026,8 @@ export class ThreatManager extends EventEmitter {
 
         // Force high angle for ballistic trajectory
         launchParams.angle =
-          threatConfig.minAngle + Math.random() * (threatConfig.maxAngle - threatConfig.minAngle);
+          threatConfig.minAngle +
+          gameplayRandom.next() * (threatConfig.maxAngle - threatConfig.minAngle);
 
         // Recalculate velocity to hit target with the high angle
         const distance = spawnPosition.distanceTo(targetPosition);
@@ -1056,7 +1062,9 @@ export class ThreatManager extends EventEmitter {
         threat.mesh.visible = true;
       }
 
+      threat.waveId = waveId;
       this.threats.push(threat);
+      this.emit('threatSpawned', threat);
       this.addImpactMarker(threat);
 
       // Play threat incoming sound
@@ -1074,10 +1082,13 @@ export class ThreatManager extends EventEmitter {
         dustRadius: 3, // Reduced for more realistic size
         scorchMarkRadius: 4,
       });
-    }, delay * 1000);
+    });
   }
 
-  private removeThreat(index: number, wasIntercepted: boolean = false): void {
+  private removeThreat(
+    index: number,
+    reason: NonNullable<Threat['terminationReason']> = 'expired'
+  ): void {
     // Safety check to ensure threat exists
     if (index < 0 || index >= this.threats.length) {
       debug.warn(`Attempted to remove threat at invalid index ${index}`);
@@ -1105,9 +1116,11 @@ export class ThreatManager extends EventEmitter {
     this.threats.splice(index, 1);
 
     // Emit event based on whether it was intercepted or missed
-    if (wasIntercepted) {
+    threat.terminationReason = reason;
+    this.emit('threatTerminated', { threat, reason });
+    if (reason === 'intercepted') {
       this.emit('threatDestroyed', { threat });
-    } else {
+    } else if (reason === 'impact' || reason === 'expired') {
       this.emit('threatMissed', { threat });
     }
   }
@@ -1135,7 +1148,7 @@ export class ThreatManager extends EventEmitter {
     marker.rotation.x = -Math.PI / 2;
     marker.position.copy(impactPoint);
     marker.position.y = 0.1;
-    marker.userData = { threat, createdAt: Date.now() };
+    marker.userData = { threat, createdAt: simulationClock.nowMs };
 
     this.scene.add(marker);
     this.cleanupOldestImpactMarker();
@@ -1143,7 +1156,7 @@ export class ThreatManager extends EventEmitter {
   }
 
   private updateImpactMarkers(): void {
-    const now = Date.now();
+    const now = simulationClock.nowMs;
 
     for (let i = this.impactMarkers.length - 1; i >= 0; i--) {
       const marker = this.impactMarkers[i];
@@ -1189,13 +1202,10 @@ export class ThreatManager extends EventEmitter {
   }
 
   clearAll(): void {
+    this.cancelPendingSpawns();
     // Remove all threats
-    while (this.threats.length > 0) {
-      const threat = this.threats[0];
-      threat.destroy(this.scene, this.world);
-      this.threats.splice(0, 1);
-      // Don't emit events when clearing all
-    }
+    while (this.threats.length > 0) this.removeThreat(0, 'reset');
+    this.threatsToRemove.clear();
 
     // Remove all impact markers
     this.impactMarkers.forEach(marker => {
@@ -1204,24 +1214,7 @@ export class ThreatManager extends EventEmitter {
     });
     this.impactMarkers = [];
 
-    // Clean up all active craters
-    for (const [id, craterData] of this.activeCraters) {
-      // Clear the timeout
-      if (craterData.timeout) {
-        clearTimeout(craterData.timeout);
-      }
-      // Cancel animation frame
-      if (craterData.animationId) {
-        cancelAnimationFrame(craterData.animationId);
-      }
-      // Remove the mesh
-      this.scene.remove(craterData.mesh);
-      // Dispose the cloned material
-      if (craterData.material) {
-        craterData.material.dispose();
-      }
-    }
-    this.activeCraters.clear();
+    for (const id of [...this.activeCraters.keys()]) this.removeCrater(id);
   }
 
   registerBattery(battery: IBattery): void {
@@ -1335,6 +1328,8 @@ export class ThreatManager extends EventEmitter {
 
   // Called when a threat is intercepted by defense system
   markThreatIntercepted(threat: Threat): void {
+    if (threat.terminationReason) return;
+    threat.terminate('intercepted');
     // Add to removal queue instead of removing immediately
     this.threatsToRemove.add(threat);
   }
@@ -1350,7 +1345,7 @@ export class ThreatManager extends EventEmitter {
 
     // Clear timeout if still pending
     if (craterData.timeout) {
-      clearTimeout(craterData.timeout);
+      simulationClock.cancel(craterData.timeout);
     }
 
     // Cancel animation frame
@@ -1363,7 +1358,7 @@ export class ThreatManager extends EventEmitter {
       this.scene.remove(craterData.mesh);
     }
 
-    // Don't dispose material - it's shared from MaterialCache
+    craterData.material?.dispose();
 
     debug.category(
       'Visual',
@@ -1395,27 +1390,29 @@ export class ThreatManager extends EventEmitter {
 
     // Add crater decal (simple dark circle on ground)
     const craterGeometry = GeometryFactory.getInstance().getCircle(3, 32);
-    // Use shared material - no need to clone
-    const craterMaterial = MaterialCache.getInstance().getMeshBasicMaterial({
-      color: 0x222222,
-      opacity: 0.7,
-      transparent: true,
-    });
+    // Each crater fades independently; own the material, share only geometry.
+    const craterMaterial = MaterialCache.getInstance()
+      .getMeshBasicMaterial({
+        color: 0x222222,
+        opacity: 0.7,
+        transparent: true,
+      })
+      .clone();
 
     const crater = new THREE.Mesh(craterGeometry, craterMaterial);
     crater.rotation.x = -Math.PI / 2;
     crater.position.copy(position);
-    crater.position.y = 0.02 + Math.random() * 0.02; // Higher offset to prevent Z-fighting with shockwaves
+    crater.position.y = 0.02 + cosmeticRandom.next() * 0.02; // Higher offset to prevent Z-fighting with shockwaves
     this.scene.add(crater);
 
     // Create unique ID for this crater
-    const craterId = `crater_${Date.now()}_${Math.random()}`;
+    const craterId = `crater_${simulationClock.nowMs}_${cosmeticRandom.next()}`;
 
     // Store crater data
     const craterData = {
       mesh: crater,
       position: position.clone(),
-      timeout: null as NodeJS.Timeout | null,
+      timeout: null as number | null,
       animationId: null as number | null,
       material: craterMaterial,
     };
@@ -1428,9 +1425,9 @@ export class ThreatManager extends EventEmitter {
     );
 
     // Fade out crater over time
-    const fadeDelay = setTimeout(() => {
+    const fadeDelay = simulationClock.setTimeout(() => {
       debug.category('Visual', `Starting fade for crater ${craterId}`);
-      const fadeStart = Date.now();
+      const fadeStart = simulationClock.nowMs;
       const fadeDuration = 5000;
 
       const fadeCrater = () => {
@@ -1441,7 +1438,7 @@ export class ThreatManager extends EventEmitter {
           return;
         }
 
-        const elapsed = Date.now() - fadeStart;
+        const elapsed = simulationClock.nowMs - fadeStart;
         const progress = elapsed / fadeDuration;
 
         if (progress >= 1) {
@@ -1454,7 +1451,7 @@ export class ThreatManager extends EventEmitter {
         // Update opacity
         if (currentCraterData.material) {
           const newOpacity = 0.7 * (1 - progress);
-          (currentCraterData.material as any).opacity = newOpacity;
+          currentCraterData.material.opacity = newOpacity;
 
           // Log progress every second
           if (Math.floor(elapsed / 1000) !== Math.floor((elapsed - 16) / 1000)) {
@@ -1664,7 +1661,7 @@ export class ThreatManager extends EventEmitter {
           ThreatType.QASSAM_1,
           ThreatType.GRAD_ROCKET,
         ];
-        threatType = rocketTypes[Math.floor(Math.random() * rocketTypes.length)];
+        threatType = rocketTypes[Math.floor(gameplayRandom.next() * rocketTypes.length)];
         break;
       }
       // Add specific rocket types
@@ -1687,7 +1684,7 @@ export class ThreatManager extends EventEmitter {
       case 'drone': {
         // Pick a random drone type
         const droneTypes = [ThreatType.DRONE_SLOW, ThreatType.DRONE_FAST];
-        threatType = droneTypes[Math.floor(Math.random() * droneTypes.length)];
+        threatType = droneTypes[Math.floor(gameplayRandom.next() * droneTypes.length)];
         break;
       }
       case 'ballistic':
@@ -1743,9 +1740,6 @@ export class ThreatManager extends EventEmitter {
 
     if (actualSize <= 0) return;
 
-    // Performance optimization: batch spawn threats without individual timers
-    const startTime = Date.now();
-
     // Determine which threat types to use
     let possibleTypes: ThreatType[] = [];
 
@@ -1782,56 +1776,38 @@ export class ThreatManager extends EventEmitter {
     // Pre-allocate threat configs
     const salvoThreats: Array<{ type: ThreatType; delay: number }> = [];
     for (let i = 0; i < actualSize; i++) {
-      const threatType = possibleTypes[Math.floor(Math.random() * possibleTypes.length)];
+      const threatType = possibleTypes[Math.floor(gameplayRandom.next() * possibleTypes.length)];
       salvoThreats.push({
         type: threatType,
         delay: i * 0.5, // 500ms delay between each (increased from 200ms)
       });
     }
 
-    // Use a single timer to spawn all threats
-    let currentIndex = 0;
-    const spawnNext = () => {
-      const elapsed = (Date.now() - startTime) / 1000;
+    for (const threat of salvoThreats) {
+      const config = {
+        type: threat.type,
+        spawnRadius: 2500,
+        targetRadius: 100,
+        minInterval: 0,
+        maxInterval: 0,
+      };
 
-      // Spawn all threats whose delay has passed
-      while (currentIndex < salvoThreats.length && salvoThreats[currentIndex].delay <= elapsed) {
-        const threat = salvoThreats[currentIndex];
-        const config = {
-          type: threat.type,
-          spawnRadius: 2500,
-          targetRadius: 100,
-          minInterval: 0,
-          maxInterval: 0,
-        };
-
-        // Adjust spawn radius based on threat type
-        const threatStats = THREAT_CONFIGS[threat.type];
-        if (threatStats.isDrone) {
-          config.spawnRadius = 2700;
-        } else if (threatStats.isMortar) {
-          config.spawnRadius = 500;
-        } else if (threat.type === ThreatType.CRUISE_MISSILE) {
-          config.spawnRadius = 3000;
-        }
-
-        // Temporarily set config and spawn
-        const originalConfigs = this.spawnConfigs;
-        this.spawnConfigs = [config];
-        this.spawnSingleThreat(0);
-        this.spawnConfigs = originalConfigs;
-
-        currentIndex++;
+      // Adjust spawn radius based on threat type
+      const threatStats = THREAT_CONFIGS[threat.type];
+      if (threatStats.isDrone) {
+        config.spawnRadius = 2700;
+      } else if (threatStats.isMortar) {
+        config.spawnRadius = 500;
+      } else if (threat.type === ThreatType.CRUISE_MISSILE) {
+        config.spawnRadius = 3000;
       }
 
-      // Continue if more threats to spawn
-      if (currentIndex < salvoThreats.length) {
-        requestAnimationFrame(spawnNext);
-      }
-    };
-
-    // Start spawning
-    requestAnimationFrame(spawnNext);
+      // Temporarily set config and spawn
+      const originalConfigs = this.spawnConfigs;
+      this.spawnConfigs = [config];
+      this.spawnSingleThreat(threat.delay);
+      this.spawnConfigs = originalConfigs;
+    }
   }
 
   // ==================== SCENARIO SUPPORT ====================
@@ -1944,11 +1920,11 @@ export class ThreatManager extends EventEmitter {
   private getPatternedSpawnPosition(baseRadius: number): THREE.Vector3 {
     if (!this.currentAttackParameters) {
       // Default random spawn
-      const angle = Math.random() * Math.PI * 2;
+      const angle = gameplayRandom.next() * Math.PI * 2;
       const distance = baseRadius;
       return new THREE.Vector3(
         Math.cos(angle) * distance,
-        50 + Math.random() * 100,
+        50 + gameplayRandom.next() * 100,
         Math.sin(angle) * distance
       );
     }
@@ -1967,7 +1943,7 @@ export class ThreatManager extends EventEmitter {
           angle =
             this.baseSpawnAngle +
             radiusConfig.angleRange.min +
-            Math.random() * (radiusConfig.angleRange.max - radiusConfig.angleRange.min);
+            gameplayRandom.next() * (radiusConfig.angleRange.max - radiusConfig.angleRange.min);
         } else {
           angle = this.baseSpawnAngle;
         }
@@ -1975,22 +1951,22 @@ export class ThreatManager extends EventEmitter {
 
       case AttackPattern.WAVES:
         // Alternate between sectors
-        const waveIndex = Math.floor(Date.now() / 10000) % 3; // Change every 10 seconds
-        angle = (waveIndex * 2 * Math.PI) / 3 + ((Math.random() - 0.5) * Math.PI) / 3;
+        const waveIndex = Math.floor(simulationClock.nowMs / 10000) % 3; // Change every 10 seconds
+        angle = (waveIndex * 2 * Math.PI) / 3 + ((gameplayRandom.next() - 0.5) * Math.PI) / 3;
         break;
 
       case AttackPattern.SURROUND:
       case AttackPattern.SPREAD:
       default:
         // Random angle
-        angle = Math.random() * Math.PI * 2;
+        angle = gameplayRandom.next() * Math.PI * 2;
         break;
     }
 
-    const distance = adjustedRadius + (Math.random() - 0.5) * 50;
+    const distance = adjustedRadius + (gameplayRandom.next() - 0.5) * 50;
     return new THREE.Vector3(
       Math.cos(angle) * distance,
-      50 + Math.random() * 100,
+      50 + gameplayRandom.next() * 100,
       Math.sin(angle) * distance
     );
   }
@@ -2043,7 +2019,7 @@ export class ThreatManager extends EventEmitter {
 
       // Pulse effect for active sites
       if (marker.visible) {
-        const time = Date.now() * 0.001;
+        const time = simulationClock.nowMs * 0.001;
         const material = marker.material as THREE.MeshStandardMaterial;
         material.emissiveIntensity = 0.3 + Math.sin(time * 3) * 0.2;
       }
@@ -2083,10 +2059,7 @@ export class ThreatManager extends EventEmitter {
     // Remove oldest 50% of threats
     const threatsToRemove = Math.floor(this.threats.length * 0.5);
     for (let i = 0; i < threatsToRemove; i++) {
-      const threat = this.threats.shift();
-      if (threat) {
-        threat.destroy(this.scene, this.world);
-      }
+      this.removeThreat(0, 'capacity-removed');
     }
 
     // Remove oldest 50% of impact markers
@@ -2095,24 +2068,14 @@ export class ThreatManager extends EventEmitter {
       const marker = this.impactMarkers.shift();
       if (marker) {
         this.scene.remove(marker);
-        if (marker.geometry) marker.geometry.dispose();
+        // Marker geometry belongs to the shared cache.
       }
     }
 
     // Clear old craters (keep only 5 newest)
     const craterKeys = Array.from(this.activeCraters.keys());
     const cratersToRemove = craterKeys.slice(0, -5);
-    cratersToRemove.forEach(key => {
-      const crater = this.activeCraters.get(key);
-      if (crater) {
-        this.scene.remove(crater.mesh);
-        if (crater.timeout) clearTimeout(crater.timeout);
-        if (crater.animationId) cancelAnimationFrame(crater.animationId);
-        if (crater.mesh.geometry) crater.mesh.geometry.dispose();
-        // Don't dispose material - it's shared from MaterialCache
-        this.activeCraters.delete(key);
-      }
-    });
+    cratersToRemove.forEach(key => this.removeCrater(key));
 
     debug.warn(
       `[ThreatManager] Emergency cleanup complete: ${this.threats.length} threats, ${this.impactMarkers.length} markers, ${this.activeCraters.size} craters remaining`

@@ -12,15 +12,21 @@ export class ProceduralLaserTurret extends THREE.Group {
   private plasmaField?: THREE.Mesh;
   private lightningBolts: THREE.Line[] = [];
   private clock = new THREE.Clock();
-  
+
   // Particle system components
   private orbitalParticles: THREE.Points;
   private magneticParticles: THREE.Points;
   private sparkleParticles: THREE.Points;
   private particleData: {
-    orbital: Array<{position: THREE.Vector3, velocity: THREE.Vector3, radius: number, speed: number, phase: number}>;
-    magnetic: Array<{position: THREE.Vector3, t: number, fieldLine: number, speed: number}>;
-    sparkles: Array<{position: THREE.Vector3, life: number, maxLife: number, size: number}>;
+    orbital: Array<{
+      position: THREE.Vector3;
+      velocity: THREE.Vector3;
+      radius: number;
+      speed: number;
+      phase: number;
+    }>;
+    magnetic: Array<{ position: THREE.Vector3; t: number; fieldLine: number; speed: number }>;
+    sparkles: Array<{ position: THREE.Vector3; life: number; maxLife: number; size: number }>;
   };
   public materials: {
     metal: THREE.MeshStandardMaterial;
@@ -36,12 +42,12 @@ export class ProceduralLaserTurret extends THREE.Group {
   constructor() {
     super();
     this.name = 'ProceduralLaserTurret';
-    
+
     // Initialize particle data
     this.particleData = {
       orbital: [],
       magnetic: [],
-      sparkles: []
+      sparkles: [],
     };
 
     // Create materials with better visual quality
@@ -100,8 +106,6 @@ export class ProceduralLaserTurret extends THREE.Group {
         opacity: 0.3,
         blending: THREE.AdditiveBlending,
         side: THREE.DoubleSide,
-        emissive: 0x00ff88,
-        emissiveIntensity: 2,
       }),
       lightning: new THREE.LineBasicMaterial({
         color: 0x00ffff, // Brighter cyan
@@ -134,7 +138,7 @@ export class ProceduralLaserTurret extends THREE.Group {
     // Add the ball housing to yaw group
     const housing = this.createBallHousing();
     this.yawGroup.add(housing);
-    
+
     // Add energy effects to the housing so they don't rotate with the turret
     housing.add(this.energyEffects);
   }
@@ -163,7 +167,7 @@ export class ProceduralLaserTurret extends THREE.Group {
       const y = (1 - Math.cos(angle)) * 0.8 + baseHeight; // Height curve
       cradlePoints.push(new THREE.Vector2(x, y));
     }
-    
+
     const cradleGeometry = new THREE.LatheGeometry(cradlePoints, 32);
     const cradle = new THREE.Mesh(cradleGeometry, this.materials.metal);
     base.add(cradle);
@@ -371,7 +375,7 @@ export class ProceduralLaserTurret extends THREE.Group {
 
     // Create lightning bolt geometry (we'll animate these later)
     this.createLightningBolts(effectsGroup);
-    
+
     // Create particle systems
     this.createParticleSystems(effectsGroup);
 
@@ -643,10 +647,10 @@ export class ProceduralLaserTurret extends THREE.Group {
   private createParticleSystems(parent: THREE.Group): void {
     // Create orbital particles
     this.createOrbitalParticles(parent);
-    
+
     // Create magnetic field particles
     this.createMagneticParticles(parent);
-    
+
     // Create sparkle particles
     this.createSparkleParticles(parent);
   }
@@ -657,50 +661,50 @@ export class ProceduralLaserTurret extends THREE.Group {
     const positions = new Float32Array(particleCount * 3);
     const colors = new Float32Array(particleCount * 3);
     const sizes = new Float32Array(particleCount);
-    
+
     // Initialize orbital particles
     for (let i = 0; i < particleCount; i++) {
       // Random orbital parameters
       const orbitRadius = 0.9 + Math.random() * 0.5;
       const orbitSpeed = 0.3 + Math.random() * 0.7;
       const phase = Math.random() * Math.PI * 2;
-      
+
       this.particleData.orbital.push({
         position: new THREE.Vector3(),
         velocity: new THREE.Vector3(),
         radius: orbitRadius,
         speed: orbitSpeed,
-        phase: phase
+        phase: phase,
       });
-      
+
       // Initial position
       positions[i * 3] = Math.cos(phase) * orbitRadius;
       positions[i * 3 + 1] = 0;
       positions[i * 3 + 2] = Math.sin(phase) * orbitRadius;
-      
+
       // Colors - cyan to green
       const colorMix = Math.random();
       colors[i * 3] = 0;
       colors[i * 3 + 1] = 1;
       colors[i * 3 + 2] = colorMix;
-      
+
       // Sizes
       sizes[i] = 0.02 + Math.random() * 0.03;
     }
-    
+
     geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
     geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));
     geometry.setAttribute('size', new THREE.BufferAttribute(sizes, 1));
-    
+
     const material = new THREE.PointsMaterial({
       size: 0.05,
       vertexColors: true,
       blending: THREE.AdditiveBlending,
       transparent: true,
       opacity: 0.8,
-      sizeAttenuation: true
+      sizeAttenuation: true,
     });
-    
+
     this.orbitalParticles = new THREE.Points(geometry, material);
     this.orbitalParticles.renderOrder = -1;
     parent.add(this.orbitalParticles);
@@ -712,47 +716,47 @@ export class ProceduralLaserTurret extends THREE.Group {
     const positions = new Float32Array(particleCount * 3);
     const colors = new Float32Array(particleCount * 3);
     const sizes = new Float32Array(particleCount);
-    
+
     // Initialize magnetic field particles
     for (let i = 0; i < particleCount; i++) {
       const fieldLine = Math.floor(Math.random() * 8); // 8 different field lines
       const t = Math.random(); // Position along field line
       const speed = 0.5 + Math.random() * 0.5;
-      
+
       this.particleData.magnetic.push({
         position: new THREE.Vector3(),
         t: t,
         fieldLine: fieldLine,
-        speed: speed
+        speed: speed,
       });
-      
+
       // Initial positions will be set in update
       positions[i * 3] = 0;
       positions[i * 3 + 1] = 0;
       positions[i * 3 + 2] = 0;
-      
+
       // Colors - electric blue
       colors[i * 3] = 0.2;
       colors[i * 3 + 1] = 0.6;
       colors[i * 3 + 2] = 1;
-      
+
       // Sizes
       sizes[i] = 0.015 + Math.random() * 0.01;
     }
-    
+
     geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
     geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));
     geometry.setAttribute('size', new THREE.BufferAttribute(sizes, 1));
-    
+
     const material = new THREE.PointsMaterial({
       size: 0.03,
       vertexColors: true,
       blending: THREE.AdditiveBlending,
       transparent: true,
       opacity: 0.6,
-      sizeAttenuation: true
+      sizeAttenuation: true,
     });
-    
+
     this.magneticParticles = new THREE.Points(geometry, material);
     this.magneticParticles.renderOrder = -1;
     parent.add(this.magneticParticles);
@@ -764,48 +768,48 @@ export class ProceduralLaserTurret extends THREE.Group {
     const positions = new Float32Array(particleCount * 3);
     const colors = new Float32Array(particleCount * 3);
     const sizes = new Float32Array(particleCount);
-    
+
     // Initialize sparkle particles
     for (let i = 0; i < particleCount; i++) {
       this.particleData.sparkles.push({
         position: new THREE.Vector3(),
         life: 0,
         maxLife: 0.1 + Math.random() * 0.4,
-        size: 0.005 + Math.random() * 0.01
+        size: 0.005 + Math.random() * 0.01,
       });
-      
+
       // Random positions within sphere
       const r = Math.random() * 1.3;
       const theta = Math.random() * Math.PI * 2;
       const phi = Math.acos(2 * Math.random() - 1);
-      
+
       positions[i * 3] = r * Math.sin(phi) * Math.cos(theta);
       positions[i * 3 + 1] = r * Math.sin(phi) * Math.sin(theta);
       positions[i * 3 + 2] = r * Math.cos(phi);
-      
+
       // Colors - bright cyan to white
       const whiteness = Math.random() * 0.5;
       colors[i * 3] = whiteness;
       colors[i * 3 + 1] = 1;
       colors[i * 3 + 2] = 1;
-      
+
       // Sizes
       sizes[i] = this.particleData.sparkles[i].size;
     }
-    
+
     geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
     geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));
     geometry.setAttribute('size', new THREE.BufferAttribute(sizes, 1));
-    
+
     const material = new THREE.PointsMaterial({
       size: 0.02,
       vertexColors: true,
       blending: THREE.AdditiveBlending,
       transparent: true,
       opacity: 1,
-      sizeAttenuation: true
+      sizeAttenuation: true,
     });
-    
+
     this.sparkleParticles = new THREE.Points(geometry, material);
     this.sparkleParticles.renderOrder = -1;
     parent.add(this.sparkleParticles);
@@ -826,101 +830,102 @@ export class ProceduralLaserTurret extends THREE.Group {
 
     // Animate lightning bolts
     this.animateLightning(time);
-    
+
     // Animate particle systems
     this.animateParticles(time);
   }
-  
+
   private animateParticles(time: number): void {
     const deltaTime = this.clock.getDelta();
-    
+
     // Update orbital particles
     if (this.orbitalParticles) {
       const positions = this.orbitalParticles.geometry.attributes.position as THREE.BufferAttribute;
-      
+
       this.particleData.orbital.forEach((particle, i) => {
         // Update orbital position
         const angle = particle.phase + time * particle.speed;
         const tiltAngle = Math.sin(time * 0.3 + i) * 0.3; // Varying tilt for each orbit
-        
+
         // Calculate position with tilted orbit
         const x = Math.cos(angle) * particle.radius;
         const y = Math.sin(tiltAngle) * particle.radius * 0.5;
         const z = Math.sin(angle) * particle.radius;
-        
+
         positions.setXYZ(i, x, y, z);
-        
+
         // Occasional quantum jump
         if (Math.random() < 0.001) {
           particle.radius = 0.9 + Math.random() * 0.5;
           particle.speed = 0.3 + Math.random() * 0.7;
         }
       });
-      
+
       positions.needsUpdate = true;
     }
-    
+
     // Update magnetic field particles
     if (this.magneticParticles) {
-      const positions = this.magneticParticles.geometry.attributes.position as THREE.BufferAttribute;
-      
+      const positions = this.magneticParticles.geometry.attributes
+        .position as THREE.BufferAttribute;
+
       this.particleData.magnetic.forEach((particle, i) => {
         // Update position along toroidal field line
         particle.t += deltaTime * particle.speed * 0.2;
         if (particle.t > 1) particle.t -= 1;
-        
+
         // Calculate toroidal coordinates
         const majorRadius = 1.0;
         const minorRadius = 0.3;
         const fieldAngle = (particle.fieldLine / 8) * Math.PI * 2;
-        
+
         const u = particle.t * Math.PI * 2;
         const v = fieldAngle + Math.sin(u * 3) * 0.3; // Add some twist
-        
+
         const x = (majorRadius + minorRadius * Math.cos(u)) * Math.cos(v);
         const y = minorRadius * Math.sin(u);
         const z = (majorRadius + minorRadius * Math.cos(u)) * Math.sin(v);
-        
+
         positions.setXYZ(i, x, y, z);
       });
-      
+
       positions.needsUpdate = true;
     }
-    
+
     // Update sparkle particles
     if (this.sparkleParticles) {
       const positions = this.sparkleParticles.geometry.attributes.position as THREE.BufferAttribute;
       const sizes = this.sparkleParticles.geometry.attributes.size as THREE.BufferAttribute;
-      
+
       this.particleData.sparkles.forEach((particle, i) => {
         // Update life
         particle.life += deltaTime;
-        
+
         // Respawn if dead
         if (particle.life > particle.maxLife) {
           particle.life = 0;
           particle.maxLife = 0.1 + Math.random() * 0.4;
-          
+
           // New position weighted toward center
           const r = Math.pow(Math.random(), 2) * 1.3; // Square for center weighting
           const theta = Math.random() * Math.PI * 2;
           const phi = Math.acos(2 * Math.random() - 1);
-          
+
           particle.position.set(
             r * Math.sin(phi) * Math.cos(theta),
             r * Math.sin(phi) * Math.sin(theta),
             r * Math.cos(phi)
           );
-          
+
           positions.setXYZ(i, particle.position.x, particle.position.y, particle.position.z);
         }
-        
+
         // Fade in/out
         const lifeFraction = particle.life / particle.maxLife;
         const fade = Math.sin(lifeFraction * Math.PI);
         sizes.setX(i, particle.size * fade);
       });
-      
+
       positions.needsUpdate = true;
       sizes.needsUpdate = true;
     }

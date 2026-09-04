@@ -1,3 +1,4 @@
+import { simulationClock } from '@/simulation/SimulationClock';
 import * as THREE from 'three';
 import { MaterialCache } from '../utils/MaterialCache';
 import { GeometryFactory } from '../utils/GeometryFactory';
@@ -78,7 +79,7 @@ export class UnifiedTrailSystem {
       id,
       type: config.type,
       config,
-      lastUpdateTime: Date.now(),
+      lastUpdateTime: simulationClock.nowMs,
     };
 
     if (config.type === TrailType.LINE) {
@@ -182,7 +183,7 @@ export class UnifiedTrailSystem {
     const trail = this.trails.get(id);
     if (!trail) return;
 
-    const currentTime = Date.now();
+    const currentTime = simulationClock.nowMs;
     const deltaTime = (currentTime - trail.lastUpdateTime) / 1000;
     trail.lastUpdateTime = currentTime;
 
@@ -352,7 +353,7 @@ export class UnifiedTrailSystem {
    * Update all particle trails (call in animation loop)
    */
   update(deltaTime: number, camera?: THREE.Camera): void {
-    const currentTime = Date.now();
+    const currentTime = simulationClock.nowMs;
 
     for (const trail of this.trails.values()) {
       if (trail.type === TrailType.PARTICLE && trail.particleTrail) {

@@ -9,10 +9,11 @@ interface KalmanState {
 
 export class KalmanFilter {
   private state: KalmanState;
-  private F: number[][]; // State transition matrix
-  private H: number[][]; // Measurement matrix
-  private Q: number[][]; // Process noise covariance
-  private R: number[][]; // Measurement noise covariance
+  private F: number[][] = []; // State transition matrix
+  private H: number[][] = []; // Measurement matrix
+  private Q: number[][] = [];
+  private processNoiseIntensity = 0; // Process noise covariance
+  private R: number[][] = []; // Measurement noise covariance
   private I: number[][]; // Identity matrix
 
   constructor() {
@@ -56,19 +57,23 @@ export class KalmanFilter {
       velocity.y,
       velocity.z,
       0,
-      -9.81,
+      /drone|cruise/i.test(threatType) ? 0 : -9.82,
       0, // Initial acceleration (gravity for ballistic)
     ];
 
     // Adjust process noise based on threat type
     const processNoise = this.getProcessNoiseForThreatType(threatType);
-    this.Q = this.createProcessNoiseMatrix(processNoise);
+    this.processNoiseIntensity = processNoise;
+    this.Q = this.createProcessNoiseMatrix(processNoise, 0);
 
     // Reset covariance
     this.state.P = this.createIdentityMatrix(9, 100);
   }
 
   predict(deltaTime: number): { position: THREE.Vector3; velocity: THREE.Vector3 } {
+    if (!Number.isFinite(deltaTime) || deltaTime < 0)
+      throw new RangeError('Invalid prediction duration');
+    this.Q = this.createProcessNoiseMatrix(this.processNoiseIntensity, deltaTime);
     // Create state transition matrix for this time step
     this.F = this.createStateTransitionMatrix(deltaTime);
 
@@ -110,7 +115,11 @@ export class KalmanFilter {
     // Update covariance: P = (I - K * H) * P
     const KH = this.matrixMultiply(K, this.H);
     const IminusKH = this.matrixSubtract(this.I, KH);
-    this.state.P = this.matrixMultiply(IminusKH, this.state.P);
+    // Joseph form preserves symmetry and positive semidefiniteness under rounding.
+    this.state.P = this.matrixAdd(
+      this.matrixMultiply(this.matrixMultiply(IminusKH, this.state.P), this.transpose(IminusKH)),
+      this.matrixMultiply(this.matrixMultiply(K, this.R), this.transpose(K))
+    );
   }
 
   getState(): { position: THREE.Vector3; velocity: THREE.Vector3; acceleration: THREE.Vector3 } {
@@ -144,7 +153,8 @@ export class KalmanFilter {
 
   private getProcessNoiseForThreatType(type: string): number {
     // Different threat types have different maneuverability
-    switch (type) {
+    if (/drone/i.test(type)) return 5.0;
+    switch (type.toLowerCase()) {
       case 'drone':
         return 5.0; // High maneuverability
       case 'cruise_missile':
@@ -156,13 +166,33 @@ export class KalmanFilter {
     }
   }
 
-  private createProcessNoiseMatrix(noise: number): number[][] {
+  /** Continuous white jerk noise integrated over the prediction interval. */
+  private createProcessNoiseMatrix(noise: number, dt: number): number[][] {
     const Q = this.createZeroMatrix(9, 9);
-    // Add noise to acceleration components
-    Q[6][6] = noise;
-    Q[7][7] = noise;
-    Q[8][8] = noise;
+    const block = [
+      [dt ** 5 / 20, dt ** 4 / 8, dt ** 3 / 6],
+      [dt ** 4 / 8, dt ** 3 / 3, dt ** 2 / 2],
+      [dt ** 3 / 6, dt ** 2 / 2, dt],
+    ];
+    for (let axis = 0; axis < 3; axis++) {
+      for (let row = 0; row < 3; row++) {
+        for (let col = 0; col < 3; col++)
+          Q[axis + row * 3][axis + col * 3] = noise * block[row][col];
+      }
+    }
     return Q;
+  }
+
+  /** Read-only constant-acceleration forecast from the current filtered state. */
+  forecast(deltaTime: number): { position: THREE.Vector3; velocity: THREE.Vector3 } {
+    if (!Number.isFinite(deltaTime) || deltaTime < 0)
+      throw new RangeError('Invalid forecast duration');
+    const { position, velocity, acceleration } = this.getState();
+    position
+      .addScaledVector(velocity, deltaTime)
+      .addScaledVector(acceleration, 0.5 * deltaTime ** 2);
+    velocity.addScaledVector(acceleration, deltaTime);
+    return { position, velocity };
   }
 
   // Matrix operations

@@ -12,73 +12,80 @@ export interface WaveConfig {
   salvoChance?: number; // chance of salvo attacks
 }
 
+/** Wave progression advances only by executed simulation steps. Duration is a pacing
+ * estimate; completion additionally requires all scheduled threats and payloads to resolve. */
 export class WaveManager extends EventEmitter {
-  private currentWave: number = 0;
-  private isWaveActive: boolean = false;
-  private threatsSpawnedInWave: number = 0;
-  private threatsDestroyedInWave: number = 0;
-  private waveStartTime: number = 0;
-  private spawnTimer: NodeJS.Timeout | null = null;
-  private waveTimer: NodeJS.Timeout | null = null;
-  private threatManager: ThreatManager;
+  private currentWave = 0;
+  private isWaveActive = false;
+  private threatsSpawnedInWave = 0;
+  private threatsDestroyedInWave = 0;
+  private elapsed = 0;
+  private failedResolutions = 0;
+  private isPaused = false;
+  private phase: 'idle' | 'preparing' | 'active' | 'intermission' = 'idle';
+  private remaining = 0;
+  private spawnRemaining = 0;
+  private config: WaveConfig | null = null;
+  private readonly preparationTime = 15;
   private gameState: GameState;
-  private isPaused: boolean = false;
+  private readonly onOutcome = ({
+    threat,
+    reason,
+  }: {
+    threat: { waveId: number | null };
+    reason: string;
+  }) => {
+    if (!this.isWaveActive || threat.waveId !== this.currentWave) return;
+    if (reason === 'intercepted') this.threatsDestroyedInWave++;
+    if (reason === 'impact' || reason === 'expired' || reason === 'capacity-removed')
+      this.failedResolutions++;
+  };
 
-  // Wave preparation phase
-  private preparationTime: number = 15000; // 15 seconds between waves
-  private preparationTimer: NodeJS.Timeout | null = null;
-  private nextWaveTimer: NodeJS.Timeout | null = null;
-
-  constructor(threatManager: ThreatManager) {
+  constructor(
+    private threatManager: ThreatManager,
+    gameState = GameState.getInstance()
+  ) {
     super();
-    this.threatManager = threatManager;
-    this.gameState = GameState.getInstance();
-
-    // Listen to threat destruction
-    this.threatManager.on('threatDestroyed', () => {
-      if (this.isWaveActive) {
-        this.threatsDestroyedInWave++;
-        this.checkWaveCompletion();
-      }
-    });
-
-    this.threatManager.on('threatMissed', () => {
-      if (this.isWaveActive) {
-        this.checkWaveCompletion();
-      }
-    });
+    this.gameState = gameState;
+    this.threatManager.on('threatTerminated', this.onOutcome);
   }
 
   startGame(): void {
-    // Clear any existing threats first
-    this.threatManager.clearAll();
-
-    // Reset wave state
-    this.currentWave = 0;
+    this.phase = 'idle';
     this.isWaveActive = false;
-    this.threatsSpawnedInWave = 0;
-    this.threatsDestroyedInWave = 0;
-
-    // Clear any existing timers
-    if (this.spawnTimer) {
-      clearInterval(this.spawnTimer);
-      this.spawnTimer = null;
-    }
-    if (this.waveTimer) {
-      clearTimeout(this.waveTimer);
-      this.waveTimer = null;
-    }
-    if (this.preparationTimer) {
-      clearTimeout(this.preparationTimer);
-      this.preparationTimer = null;
-    }
-    if (this.nextWaveTimer) {
-      clearTimeout(this.nextWaveTimer);
-      this.nextWaveTimer = null;
-    }
-
-    // Start first wave
+    this.threatManager.clearAll();
+    this.currentWave = 0;
+    this.isPaused = false;
     this.nextWave();
+  }
+
+  update(deltaTime: number): void {
+    if (!Number.isFinite(deltaTime) || deltaTime < 0) throw new RangeError('Invalid wave delta');
+    if (this.isPaused || this.phase === 'idle') return;
+    if (this.phase === 'preparing' || this.phase === 'intermission') {
+      this.remaining = Math.max(0, this.remaining - deltaTime);
+      if (this.phase === 'preparing')
+        this.emit('preparationProgress', { remaining: this.remaining });
+      if (this.remaining <= 1e-9) {
+        if (this.phase === 'preparing') this.startWave(this.generateWaveConfig(this.currentWave));
+        else this.nextWave();
+      }
+      return;
+    }
+    const config = this.config!;
+    this.elapsed += deltaTime;
+    this.spawnRemaining -= deltaTime;
+    while (this.spawnRemaining <= 1e-9 && this.threatsSpawnedInWave < config.threatCount) {
+      // Preserve configured categories (including duplicate weights) instead of selecting only index zero.
+      const type = config.threatTypes[this.threatsSpawnedInWave % config.threatTypes.length];
+      this.threatManager.setThreatMix(
+        type === 'rockets' || type === 'mortars' || type === 'drones' ? type : 'all'
+      );
+      this.threatManager.spawnSingleThreat(0, this.currentWave);
+      this.threatsSpawnedInWave++;
+      this.spawnRemaining += 1 / config.spawnRate;
+    }
+    this.checkWaveCompletion();
   }
 
   private generateWaveConfig(waveNumber: number): WaveConfig {
@@ -135,207 +142,105 @@ export class WaveManager extends EventEmitter {
   }
 
   private nextWave(): void {
-    // Clear any existing preparation timer
-    if (this.preparationTimer) {
-      clearTimeout(this.preparationTimer);
-      this.preparationTimer = null;
-    }
-
     this.currentWave++;
     this.gameState.setCurrentWave(this.currentWave);
-
-    const waveConfig = this.generateWaveConfig(this.currentWave);
-
-    // Emit wave preparation event
+    this.phase = 'preparing';
+    this.remaining = this.preparationTime;
     this.emit('wavePreparation', {
       waveNumber: this.currentWave,
-      preparationTime: this.preparationTime / 1000,
-      waveConfig,
+      preparationTime: this.preparationTime,
+      waveConfig: this.generateWaveConfig(this.currentWave),
     });
-
-    // Start preparation phase
-    this.preparationTimer = setTimeout(() => {
-      this.startWave(waveConfig);
-    }, this.preparationTime);
   }
 
   private startWave(config: WaveConfig): void {
+    this.config = config;
+    this.phase = 'active';
     this.isWaveActive = true;
     this.threatsSpawnedInWave = 0;
     this.threatsDestroyedInWave = 0;
-    this.waveStartTime = Date.now();
-
-    // Stop any existing threat spawning
+    this.failedResolutions = 0;
+    this.elapsed = 0;
+    this.spawnRemaining = 1 / config.spawnRate;
     this.threatManager.stopSpawning();
-
-    // Configure threat manager for this wave
-    if (config.threatTypes.includes('mixed')) {
-      this.threatManager.setThreatMix('all');
-    } else {
-      this.threatManager.setThreatMix(config.threatTypes[0] as any);
-    }
-
-    // Set salvo chance if specified
-    if (config.salvoChance !== undefined) {
-      this.threatManager.setSalvoChance(config.salvoChance);
-    }
-
+    this.threatManager.setSalvoChance(config.salvoChance ?? 0);
     this.emit('waveStarted', {
       waveNumber: this.currentWave,
       totalThreats: config.threatCount,
       duration: config.duration,
     });
-
-    // Start spawning threats
-    const spawnInterval = 1000 / config.spawnRate;
-    let threatsToSpawn = config.threatCount;
-
-    this.spawnTimer = setInterval(() => {
-      if (!this.isPaused && threatsToSpawn > 0) {
-        this.threatManager['spawnSingleThreat']();
-        threatsToSpawn--;
-        this.threatsSpawnedInWave++;
-
-        this.emit('waveProgress', {
-          spawned: this.threatsSpawnedInWave,
-          destroyed: this.threatsDestroyedInWave,
-          total: config.threatCount,
-        });
-
-        if (threatsToSpawn === 0) {
-          clearInterval(this.spawnTimer!);
-          this.spawnTimer = null;
-        }
-      }
-    }, spawnInterval);
-
-    // End wave after duration
-    this.waveTimer = setTimeout(() => {
-      this.endWave();
-    }, config.duration * 1000);
   }
 
   private checkWaveCompletion(): void {
-    const activeThreats = this.threatManager.getActiveThreats().length;
-    const allSpawned =
-      this.threatsSpawnedInWave >= this.generateWaveConfig(this.currentWave).threatCount;
-
+    if (!this.isWaveActive || !this.config || this.isPaused) return;
+    const active = this.threatManager
+      .getActiveThreats()
+      .filter(threat => threat.waveId === this.currentWave).length;
     this.emit('waveProgress', {
       spawned: this.threatsSpawnedInWave,
       destroyed: this.threatsDestroyedInWave,
-      total: this.generateWaveConfig(this.currentWave).threatCount,
-      active: activeThreats,
+      total: this.config.threatCount,
+      active,
     });
-
-    // Check if wave is complete (all threats spawned and dealt with)
-    if (allSpawned && activeThreats === 0) {
-      this.endWave();
-    }
+    if (this.threatsSpawnedInWave >= this.config.threatCount && active === 0) this.endWave();
   }
 
   private endWave(): void {
-    // Guard against multiple calls
-    if (!this.isWaveActive) {
-      return;
-    }
-
+    if (!this.isWaveActive || !this.config || this.isPaused) return;
     this.isWaveActive = false;
-
-    // Clear timers
-    if (this.spawnTimer) {
-      clearInterval(this.spawnTimer);
-      this.spawnTimer = null;
-    }
-    if (this.waveTimer) {
-      clearTimeout(this.waveTimer);
-      this.waveTimer = null;
-    }
-
-    // Stop threat spawning
+    this.phase = 'intermission';
+    this.remaining = 3;
     this.threatManager.stopSpawning();
-
-    // Calculate wave results
-    const waveConfig = this.generateWaveConfig(this.currentWave);
-    const destroyedRatio = this.threatsDestroyedInWave / waveConfig.threatCount;
-    const isPerfectWave = destroyedRatio === 1.0;
-
-    // Award credits based on performance
-    const baseCredits = 100 * this.currentWave;
-    const performanceBonus = Math.floor(baseCredits * destroyedRatio);
-    const perfectBonus = isPerfectWave ? baseCredits * 0.5 : 0;
-    const totalCredits = baseCredits + performanceBonus + perfectBonus;
-
-    this.gameState.addCredits(totalCredits);
-
-    if (isPerfectWave) {
-      this.gameState.recordPerfectWave();
-    }
-
-    // Calculate score
-    const waveScore = Math.floor(
-      this.threatsDestroyedInWave * 100 * this.currentWave * (isPerfectWave ? 1.5 : 1.0)
+    const total = this.config.threatCount;
+    // Payload kills may exceed parent launches; rewards stay bounded by the configured wave budget.
+    const ratio = Math.min(1, this.threatsDestroyedInWave / total);
+    const perfect = ratio === 1 && this.failedResolutions === 0;
+    const base = 100 * this.currentWave;
+    const credits = base + Math.floor(base * ratio) + (perfect ? base * 0.5 : 0);
+    const score = Math.floor(
+      Math.min(total, this.threatsDestroyedInWave) * 100 * this.currentWave * (perfect ? 1.5 : 1)
     );
-    this.gameState.addScore(waveScore);
-
+    this.gameState.addCredits(credits);
+    this.gameState.addScore(score);
+    if (perfect) this.gameState.recordPerfectWave();
     this.emit('waveCompleted', {
       waveNumber: this.currentWave,
       threatsDestroyed: this.threatsDestroyedInWave,
-      totalThreats: waveConfig.threatCount,
-      creditsEarned: totalCredits,
-      scoreEarned: waveScore,
-      isPerfect: isPerfectWave,
+      totalThreats: total,
+      creditsEarned: credits,
+      scoreEarned: score,
+      isPerfect: perfect,
     });
-
-    // Clear any existing next wave timer
-    if (this.nextWaveTimer) {
-      clearTimeout(this.nextWaveTimer);
-      this.nextWaveTimer = null;
-    }
-
-    // Start next wave after delay
-    this.nextWaveTimer = setTimeout(() => {
-      this.nextWave();
-      this.nextWaveTimer = null;
-    }, 3000); // 3 second delay before preparation phase
   }
 
   pauseWave(): void {
     this.isPaused = true;
-    this.threatManager.stopSpawning();
     this.emit('wavePaused');
   }
-
   resumeWave(): void {
     this.isPaused = false;
     this.emit('waveResumed');
   }
-
   skipPreparation(): void {
-    if (this.preparationTimer) {
-      clearTimeout(this.preparationTimer);
-      this.preparationTimer = null;
-      const waveConfig = this.generateWaveConfig(this.currentWave);
-      this.startWave(waveConfig);
-    }
+    if (this.phase === 'preparing' && !this.isPaused)
+      this.startWave(this.generateWaveConfig(this.currentWave));
   }
-
   getCurrentWaveInfo() {
-    const config = this.generateWaveConfig(this.currentWave);
     return {
       waveNumber: this.currentWave,
       isActive: this.isWaveActive,
       threatsSpawned: this.threatsSpawnedInWave,
       threatsDestroyed: this.threatsDestroyedInWave,
-      totalThreats: config.threatCount,
-      timeElapsed: this.isWaveActive ? (Date.now() - this.waveStartTime) / 1000 : 0,
+      totalThreats:
+        this.config?.threatCount ?? this.generateWaveConfig(this.currentWave).threatCount,
+      timeElapsed: this.elapsed,
+      preparationRemaining: this.phase === 'preparing' ? this.remaining : 0,
     };
   }
-
   destroy(): void {
-    if (this.spawnTimer) clearInterval(this.spawnTimer);
-    if (this.waveTimer) clearTimeout(this.waveTimer);
-    if (this.preparationTimer) clearTimeout(this.preparationTimer);
-    if (this.nextWaveTimer) clearTimeout(this.nextWaveTimer);
+    this.phase = 'idle';
+    this.isWaveActive = false;
+    this.threatManager.off('threatTerminated', this.onOutcome);
     this.removeAllListeners();
   }
 }

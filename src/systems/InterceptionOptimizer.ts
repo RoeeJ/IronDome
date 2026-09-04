@@ -1,3 +1,4 @@
+import { simulationClock } from '@/simulation/SimulationClock';
 import * as THREE from 'three';
 import { Threat } from '@/entities/Threat';
 import { IronDomeBattery } from '@/entities/IronDomeBattery';
@@ -212,7 +213,7 @@ export class InterceptionOptimizer {
 
     if (!cached) return null;
 
-    const age = Date.now() - cached.timestamp;
+    const age = simulationClock.nowMs - cached.timestamp;
     if (age > this.cacheTimeout) {
       this.calculationCache.delete(key);
       return null;
@@ -232,7 +233,7 @@ export class InterceptionOptimizer {
       threatId,
       batteryId,
       solution,
-      timestamp: Date.now(),
+      timestamp: simulationClock.nowMs,
     });
 
     // Limit cache size

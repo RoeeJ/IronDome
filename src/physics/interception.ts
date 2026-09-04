@@ -1,5 +1,6 @@
 import * as THREE from 'three';
-import { calculateBallisticPosition, calculateBallisticVelocity, GRAVITY } from './ballistics';
+import { isFiniteVector, polynomialRoots } from '@/physics/numerics';
+import { calculateBallisticPosition, calculateTimeToImpact, GRAVITY } from './ballistics';
 
 /**
  * Pure interception algorithms used by both game and tests
@@ -19,6 +20,57 @@ export interface ProximityResult {
   distance: number;
 }
 
+/** Vacuum launch state with interceptor gravity included; target may be ballistic or level. */
+export function calculateVacuumLaunch(
+  targetPosition: THREE.Vector3,
+  targetVelocity: THREE.Vector3,
+  origin: THREE.Vector3,
+  speed: number,
+  targetGravity = GRAVITY,
+  maxTime = 30
+): InterceptionSolution | null {
+  if (
+    ![targetPosition, targetVelocity, origin].every(isFiniteVector) ||
+    !Number.isFinite(speed) ||
+    speed <= 0 ||
+    !Number.isFinite(targetGravity) ||
+    targetGravity < 0 ||
+    !Number.isFinite(maxTime) ||
+    maxTime <= 0 ||
+    targetPosition.y <= 0
+  )
+    return null;
+  const p = targetPosition.clone().sub(origin);
+  const a = new THREE.Vector3(0, (GRAVITY - targetGravity) / 2, 0);
+  const ground = calculateTimeToImpact(targetPosition, targetVelocity, targetGravity);
+  const horizon = Math.min(maxTime, ground ?? maxTime);
+  const roots = polynomialRoots(
+    [
+      p.lengthSq(),
+      2 * p.dot(targetVelocity),
+      targetVelocity.lengthSq() + 2 * p.dot(a) - speed * speed,
+      2 * targetVelocity.dot(a),
+      a.lengthSq(),
+    ],
+    0,
+    horizon
+  );
+  for (const time of roots) {
+    if (time <= 1e-9 || (ground !== null && time >= ground)) continue;
+    const point = calculateBallisticPosition(targetPosition, targetVelocity, time, targetGravity);
+    const launchVelocity = p
+      .clone()
+      .addScaledVector(targetVelocity, time)
+      .addScaledVector(a, time * time)
+      .divideScalar(time);
+    const interceptorGround = calculateTimeToImpact(origin, launchVelocity);
+    if (point.y <= 0 || (interceptorGround !== null && interceptorGround <= time)) continue;
+    if (Math.abs(launchVelocity.length() - speed) > 1e-5) continue;
+    return { interceptPoint: point, timeToIntercept: time, launchVelocity, probability: 0.95 };
+  }
+  return null;
+}
+
 /**
  * Calculate optimal interception point for a ballistic threat
  */
@@ -31,41 +83,64 @@ export function calculateBallisticInterception(
   timeStep: number = 0.1,
   maxTime: number = 30
 ): InterceptionSolution | null {
-  // Iterative solution
-  for (let t = 0; t <= maxTime; t += timeStep) {
-    // Predict threat position at time t
-    const futurePosition = calculateBallisticPosition(threatPosition, threatVelocity, t, gravity);
+  if (!Number.isFinite(timeStep) || timeStep <= 0 || !Number.isFinite(gravity) || gravity < 0)
+    return null;
+  return solveInterception(
+    threatPosition,
+    threatVelocity,
+    interceptorPosition,
+    interceptorSpeed,
+    gravity,
+    maxTime
+  );
+}
 
-    // Check if threat has impacted ground
-    if (futurePosition.y <= 0) break;
-
-    // Calculate interceptor travel time to this position
-    const distance = futurePosition.distanceTo(interceptorPosition);
-    const interceptorTime = distance / interceptorSpeed;
-
-    // Check if times match (within tolerance)
-    if (Math.abs(t - interceptorTime) < timeStep / 2) {
-      // Calculate launch velocity vector
-      const launchDirection = futurePosition.clone().sub(interceptorPosition).normalize();
-      const launchVelocity = launchDirection.multiplyScalar(interceptorSpeed);
-
-      // Calculate interception probability based on various factors
-      const probability = calculateInterceptionProbability(
-        distance,
-        t,
-        threatVelocity.length(),
-        interceptorSpeed
-      );
-
-      return {
-        interceptPoint: futurePosition,
-        timeToIntercept: t,
-        launchVelocity,
-        probability,
-      };
-    }
+/** Constant-speed reachability of a vacuum/constant-velocity target; not a guided-flight guarantee. */
+function solveInterception(
+  position: THREE.Vector3,
+  velocity: THREE.Vector3,
+  origin: THREE.Vector3,
+  speed: number,
+  gravity: number,
+  maxTime: number
+): InterceptionSolution | null {
+  if (
+    ![position, velocity, origin].every(isFiniteVector) ||
+    !Number.isFinite(speed) ||
+    speed <= 0 ||
+    !Number.isFinite(maxTime) ||
+    maxTime <= 0 ||
+    position.y <= 0
+  )
+    return null;
+  const groundTime = calculateTimeToImpact(position, velocity, gravity);
+  const horizon = Math.min(maxTime, groundTime ?? maxTime);
+  const p = position.clone().sub(origin);
+  const halfAcceleration = new THREE.Vector3(0, -0.5 * gravity, 0);
+  const roots = polynomialRoots(
+    [
+      p.lengthSq(),
+      2 * p.dot(velocity),
+      velocity.lengthSq() + 2 * p.dot(halfAcceleration) - speed * speed,
+      2 * velocity.dot(halfAcceleration),
+      halfAcceleration.lengthSq(),
+    ],
+    0,
+    horizon
+  );
+  for (const time of roots) {
+    if (time <= 0 || (groundTime !== null && time >= groundTime)) continue;
+    const point = calculateBallisticPosition(position, velocity, time, gravity);
+    const distance = point.distanceTo(origin);
+    if (!isFiniteVector(point) || point.y <= 0 || Math.abs(distance - speed * time) > 1e-5)
+      continue;
+    return {
+      interceptPoint: point,
+      timeToIntercept: time,
+      launchVelocity: point.clone().sub(origin).normalize().multiplyScalar(speed),
+      probability: calculateInterceptionProbability(distance, time, velocity.length(), speed),
+    };
   }
-
   return null;
 }
 
@@ -79,43 +154,14 @@ export function calculateConstantVelocityInterception(
   interceptorSpeed: number,
   maxTime: number = 30
 ): InterceptionSolution | null {
-  // Use quadratic formula to solve for interception time
-  const relativePosition = targetPosition.clone().sub(interceptorPosition);
-  const a = targetVelocity.lengthSq() - interceptorSpeed * interceptorSpeed;
-  const b = 2 * relativePosition.dot(targetVelocity);
-  const c = relativePosition.lengthSq();
-
-  const discriminant = b * b - 4 * a * c;
-  if (discriminant < 0) return null;
-
-  const sqrtDisc = Math.sqrt(discriminant);
-  const t1 = (-b - sqrtDisc) / (2 * a);
-  const t2 = (-b + sqrtDisc) / (2 * a);
-
-  // Choose the earliest positive time
-  const validTimes = [t1, t2].filter(t => t > 0 && t <= maxTime);
-  if (validTimes.length === 0) return null;
-
-  const t = Math.min(...validTimes);
-  const interceptPoint = targetPosition.clone().add(targetVelocity.clone().multiplyScalar(t));
-
-  const launchDirection = interceptPoint.clone().sub(interceptorPosition).normalize();
-  const launchVelocity = launchDirection.multiplyScalar(interceptorSpeed);
-
-  const distance = interceptorPosition.distanceTo(interceptPoint);
-  const probability = calculateInterceptionProbability(
-    distance,
-    t,
-    targetVelocity.length(),
-    interceptorSpeed
+  return solveInterception(
+    targetPosition,
+    targetVelocity,
+    interceptorPosition,
+    interceptorSpeed,
+    0,
+    maxTime
   );
-
-  return {
-    interceptPoint,
-    timeToIntercept: t,
-    launchVelocity,
-    probability,
-  };
 }
 
 /**

@@ -1,3 +1,4 @@
+import { simulationClock } from '@/simulation/SimulationClock';
 import * as THREE from 'three';
 import { GeometryFactory } from '@/utils/GeometryFactory';
 import { MaterialCache } from '@/utils/MaterialCache';
@@ -35,7 +36,7 @@ export class LaunchEffectsSystem {
     config: Partial<LaunchEffectConfig> = {}
   ): void {
     // Throttle effects to prevent performance drops
-    const now = Date.now();
+    const now = simulationClock.nowMs;
     const timeSinceLastEffect = now - this.lastEffectTime;
 
     const fullConfig: LaunchEffectConfig = {
@@ -100,10 +101,10 @@ export class LaunchEffectsSystem {
     this.scene.add(flashMesh);
 
     // Animate flash
-    const startTime = Date.now();
+    const startTime = simulationClock.nowMs;
     const effect = {
       update: () => {
-        const elapsed = Date.now() - startTime;
+        const elapsed = simulationClock.nowMs - startTime;
         if (elapsed > config.flashDuration) {
           this.scene.remove(flashLight);
           this.scene.remove(flashMesh);
@@ -199,10 +200,10 @@ export class LaunchEffectsSystem {
     this.scene.add(points);
 
     // Animate smoke
-    const startTime = Date.now();
+    const startTime = simulationClock.nowMs;
     const effect = {
       update: () => {
-        const elapsed = (Date.now() - startTime) / 1000;
+        const elapsed = (simulationClock.nowMs - startTime) / 1000;
         if (elapsed > config.smokeDuration / 1000) {
           this.scene.remove(points);
           geometry.dispose();
@@ -295,10 +296,10 @@ export class LaunchEffectsSystem {
     this.scene.add(dustPoints);
 
     // Animate dust
-    const startTime = Date.now();
+    const startTime = simulationClock.nowMs;
     const effect = {
       update: () => {
-        const elapsed = (Date.now() - startTime) / 1000;
+        const elapsed = (simulationClock.nowMs - startTime) / 1000;
         if (elapsed > 1.5) {
           this.scene.remove(ring);
           this.scene.remove(dustPoints);
@@ -349,7 +350,7 @@ export class LaunchEffectsSystem {
     this.scene.add(scorch);
 
     // Create unique ID for tracking
-    const scorchId = `scorch_${Date.now()}_${Math.random()}`;
+    const scorchId = `scorch_${simulationClock.nowMs}_${Math.random()}`;
     this.activeScorchMarks.set(scorchId, { mesh: scorch, material });
 
     // debug.category('LaunchEffects',
@@ -359,10 +360,10 @@ export class LaunchEffectsSystem {
     // );
 
     // Fade in then slowly fade out
-    const startTime = Date.now();
+    const startTime = simulationClock.nowMs;
     const effect = {
       update: () => {
-        const elapsed = (Date.now() - startTime) / 1000;
+        const elapsed = (simulationClock.nowMs - startTime) / 1000;
         if (elapsed > 10) {
           this.scene.remove(scorch);
           // Don't dispose shared material

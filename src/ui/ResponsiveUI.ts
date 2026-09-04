@@ -62,13 +62,20 @@ export class ResponsiveUI {
     const deviceInfo = this.deviceCaps.getDeviceInfo();
 
     // Base styles
-    guiElement.style.position = 'absolute';
-    guiElement.style.opacity = this.layout.opacity.toString();
+    guiElement.style.position = 'fixed';
+    // Avoid opaque clipped-overlay occlusion artifacts over the WebGL canvas.
+    guiElement.style.opacity = Math.min(this.layout.opacity, 0.99).toString();
     guiElement.style.fontSize = `${this.layout.fontSize}px`;
-    guiElement.style.transform = `scale(${this.layout.scale})`;
-    guiElement.style.transformOrigin = 'top right';
+    guiElement.style.transform = 'none';
+    guiElement.style.transformOrigin = 'top left';
     guiElement.style.maxHeight = '90vh';
-    guiElement.style.overflowY = 'auto';
+    guiElement.style.overflow = 'hidden';
+    guiElement.style.contain = 'paint';
+    const children = guiElement.querySelector<HTMLElement>(':scope > .children');
+    if (children) {
+      children.style.minHeight = '0';
+      children.style.flex = '1 1 auto';
+    }
     guiElement.style.zIndex = '999';
 
     // Position based on layout
