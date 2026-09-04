@@ -95,17 +95,13 @@ A production-ready 3D defense system simulator featuring realistic physics, proc
 ## 🚀 Getting Started
 
 ### Prerequisites
-- Node.js 18+ or Bun runtime
+- Bun 1.2.16 (pinned in `.bun-version` and used by CI)
 - Modern web browser with WebGL support
 
 ### Installation
 
 ```bash
-# Using Bun (recommended)
-bun install
-
-# Or using npm
-npm install
+bun install --frozen-lockfile
 ```
 
 ### Development
@@ -117,9 +113,58 @@ bun dev
 # Build for production
 bun run build
 
-# Start production server
-bun start
+# Preview the built static site
+bun run preview
 ```
+
+### GitHub Pages
+
+The project builds into a self-contained `dist/` directory, including the models,
+textures, and sounds from `assets/`. No application server is required.
+
+1. In the repository's **Settings → Pages → Build and deployment**, select
+   **GitHub Actions** as the source.
+2. Push these changes to `main`, or run **Deploy GitHub Pages** manually from the
+   Actions tab after the workflow is on `main`.
+3. The expected project URL is <https://roeej.github.io/IronDome/>. The deployment
+   job reports the actual URL, including any configured custom domain.
+
+The workflow installs the locked dependencies, builds and verifies the static site,
+then deploys `dist/` using the
+[official GitHub Pages actions](https://docs.github.com/en/pages/getting-started-with-github-pages/using-custom-workflows-with-github-pages).
+Pull requests run the build and asset checks without deploying. The existing Docker
+workflow runs independently.
+
+To reproduce the project URL locally:
+
+```bash
+BASE_PATH=/IronDome/ bun run build
+bun run check:build
+bun run preview
+# Open http://localhost:3000/IronDome/
+```
+
+`BASE_PATH` must begin and end with `/`. It defaults to `/` for ordinary static
+hosting. CI derives it from the Pages configuration, so custom domains also work.
+The preview uses the base path saved by the build; set `PORT=3001` if needed.
+Rebuild before previewing source changes.
+
+The tools are available at `model-viewer/`, `tube-editor/`, and `rigger/` beneath
+the site URL. Directory index pages support direct links and reloads.
+
+GitHub Pages does not run the optional Seq logging proxy or the development server's
+sample API routes. Remote logging is disabled by default. The build does not inline
+environment variables; keep credentials out of browser configuration.
+
+For the legacy test suite, preload its existing browser mock:
+
+```bash
+bun test --preload ./tests/setup.ts
+```
+
+Plain `bun test` currently has order-dependent browser-global failures, and the
+repository has existing lint/typecheck errors. The Pages workflow checks the
+production build and static assets independently of that cleanup.
 
 ### Debug Mode
 Add `?debug=true` to the URL for enhanced logging and debugging features.

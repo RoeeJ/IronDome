@@ -1,3 +1,4 @@
+import { assetUrl } from '@/utils/assetUrl';
 import * as THREE from 'three';
 import { OBJLoader } from 'three/examples/jsm/loaders/OBJLoader.js';
 import { debug } from '../utils/logger';
@@ -197,7 +198,7 @@ export class StaticRadarNetwork {
   private loadRadarModel(radar: RadarStation, index: number): void {
     const loader = new OBJLoader();
     loader.load(
-      '/assets/Radar.obj',
+      assetUrl('assets/Radar.obj'),
       object => {
         // Log what we loaded
         let meshCount = 0;

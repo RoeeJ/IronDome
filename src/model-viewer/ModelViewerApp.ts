@@ -1,3 +1,4 @@
+import { assetUrl } from '@/utils/assetUrl';
 import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { ModelLoader } from './ModelLoader';
@@ -43,51 +44,57 @@ export class ModelViewerApp {
     {
       id: 'battery',
       name: 'Iron Dome Battery',
-      path: '/assets/Battery.obj',
+      path: assetUrl('assets/Battery.obj'),
       type: 'obj',
       scale: 0.01,
     },
-    { id: 'radar', name: 'Radar System', path: '/assets/Radar.obj', type: 'obj', scale: 0.01 },
+    {
+      id: 'radar',
+      name: 'Radar System',
+      path: assetUrl('assets/Radar.obj'),
+      type: 'obj',
+      scale: 0.01,
+    },
     {
       id: 'laser-cannon',
       name: 'Laser Cannon',
-      path: '/assets/laser_cannon/scene.gltf',
+      path: assetUrl('assets/laser_cannon/scene.gltf'),
       type: 'gltf',
     },
     {
       id: 'tamir-original',
       name: 'Tamir Original',
-      path: '/assets/tamir/scene.gltf',
+      path: assetUrl('assets/tamir/scene.gltf'),
       type: 'gltf',
     },
     {
       id: 'tamir-optimized',
       name: 'Tamir Optimized',
-      path: '/assets/tamir/scene_optimized.glb',
+      path: assetUrl('assets/tamir/scene_optimized.glb'),
       type: 'glb',
     },
     {
       id: 'tamir-simple',
       name: 'Tamir Simple',
-      path: '/assets/tamir/scene_simple.glb',
+      path: assetUrl('assets/tamir/scene_simple.glb'),
       type: 'glb',
     },
     {
       id: 'tamir-ultra',
       name: 'Tamir Ultra Simple',
-      path: '/assets/tamir/scene_ultra_simple.glb',
+      path: assetUrl('assets/tamir/scene_ultra_simple.glb'),
       type: 'glb',
     },
     {
       id: 'arrow-1',
       name: 'Arrow-3 System',
-      path: '/assets/arrow/israels_arrow-3_missile_defense_system.glb',
+      path: assetUrl('assets/arrow/israels_arrow-3_missile_defense_system.glb'),
       type: 'glb',
     },
     {
       id: 'arrow-2',
       name: 'Arrow-3 Alt',
-      path: '/assets/arrow/israels_arrow-3_missile_defense_system (1).glb',
+      path: assetUrl('assets/arrow/israels_arrow-3_missile_defense_system (1).glb'),
       type: 'glb',
     },
   ];

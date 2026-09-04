@@ -1,3 +1,4 @@
+import { assetUrl } from '@/utils/assetUrl';
 import * as THREE from 'three';
 
 export interface ModelConfig {
@@ -42,7 +43,7 @@ export const MODEL_CONFIGS: Record<ModelId, ModelConfig> = {
   [MODEL_IDS.BATTERY]: {
     id: MODEL_IDS.BATTERY,
     name: 'Iron Dome Battery',
-    path: '/assets/Battery.obj',
+    path: assetUrl('assets/Battery.obj'),
     type: 'obj',
     scale: 0.01,
     hiddenParts: [
@@ -68,7 +69,7 @@ export const MODEL_CONFIGS: Record<ModelId, ModelConfig> = {
   [MODEL_IDS.RADAR]: {
     id: MODEL_IDS.RADAR,
     name: 'Radar System',
-    path: '/assets/Radar.obj',
+    path: assetUrl('assets/Radar.obj'),
     type: 'obj',
     scale: 0.01,
     hiddenParts: [],
@@ -79,7 +80,7 @@ export const MODEL_CONFIGS: Record<ModelId, ModelConfig> = {
   [MODEL_IDS.LASER_CANNON]: {
     id: MODEL_IDS.LASER_CANNON,
     name: 'Laser Cannon',
-    path: '/assets/laser_cannon/scene.gltf',
+    path: assetUrl('assets/laser_cannon/scene.gltf'),
     type: 'gltf',
     hiddenParts: ['Cylinder007_0'], // Hide this specific part
     category: 'defense',
@@ -90,7 +91,7 @@ export const MODEL_CONFIGS: Record<ModelId, ModelConfig> = {
   [MODEL_IDS.TAMIR_ORIGINAL]: {
     id: MODEL_IDS.TAMIR_ORIGINAL,
     name: 'Tamir Original',
-    path: '/assets/tamir/scene.gltf',
+    path: assetUrl('assets/tamir/scene.gltf'),
     type: 'gltf',
     hiddenParts: [],
     category: 'interceptor',
@@ -100,7 +101,7 @@ export const MODEL_CONFIGS: Record<ModelId, ModelConfig> = {
   [MODEL_IDS.TAMIR_OPTIMIZED]: {
     id: MODEL_IDS.TAMIR_OPTIMIZED,
     name: 'Tamir Optimized',
-    path: '/assets/tamir/scene_optimized.glb',
+    path: assetUrl('assets/tamir/scene_optimized.glb'),
     type: 'glb',
     hiddenParts: [],
     category: 'interceptor',
@@ -110,7 +111,7 @@ export const MODEL_CONFIGS: Record<ModelId, ModelConfig> = {
   [MODEL_IDS.TAMIR_SIMPLE]: {
     id: MODEL_IDS.TAMIR_SIMPLE,
     name: 'Tamir Simple',
-    path: '/assets/tamir/scene_simple.glb',
+    path: assetUrl('assets/tamir/scene_simple.glb'),
     type: 'glb',
     hiddenParts: [],
     category: 'interceptor',
@@ -120,7 +121,7 @@ export const MODEL_CONFIGS: Record<ModelId, ModelConfig> = {
   [MODEL_IDS.TAMIR_ULTRA]: {
     id: MODEL_IDS.TAMIR_ULTRA,
     name: 'Tamir Ultra Simple',
-    path: '/assets/tamir/scene_ultra_simple.glb',
+    path: assetUrl('assets/tamir/scene_ultra_simple.glb'),
     type: 'glb',
     hiddenParts: [],
     category: 'interceptor',
@@ -131,7 +132,7 @@ export const MODEL_CONFIGS: Record<ModelId, ModelConfig> = {
   [MODEL_IDS.ARROW_1]: {
     id: MODEL_IDS.ARROW_1,
     name: 'Arrow-3 System',
-    path: '/assets/arrow/israels_arrow-3_missile_defense_system.glb',
+    path: assetUrl('assets/arrow/israels_arrow-3_missile_defense_system.glb'),
     type: 'glb',
     hiddenParts: [],
     category: 'defense',
@@ -141,7 +142,7 @@ export const MODEL_CONFIGS: Record<ModelId, ModelConfig> = {
   [MODEL_IDS.ARROW_2]: {
     id: MODEL_IDS.ARROW_2,
     name: 'Arrow-3 (Alt)',
-    path: '/assets/arrow/israels_arrow-3_missile_defense_system (1).glb',
+    path: assetUrl('assets/arrow/israels_arrow-3_missile_defense_system (1).glb'),
     type: 'glb',
     hiddenParts: [],
     category: 'defense',

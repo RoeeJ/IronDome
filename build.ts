@@ -1,12 +1,12 @@
 #!/usr/bin/env bun
-import { build, type BuildConfig } from "bun";
-import plugin from "bun-plugin-tailwind";
-import { existsSync } from "fs";
-import { rm, mkdir, copyFile } from "fs/promises";
-import path from "path";
+import { build, type BuildConfig } from 'bun';
+import plugin from 'bun-plugin-tailwind';
+import { existsSync } from 'fs';
+import { rm, mkdir, copyFile, cp } from 'fs/promises';
+import path from 'path';
 
 // Print help text if requested
-if (process.argv.includes("--help") || process.argv.includes("-h")) {
+if (process.argv.includes('--help') || process.argv.includes('-h')) {
   console.log(`
 🏗️  Bun Build Script
 
@@ -43,15 +43,15 @@ const toCamelCase = (str: string): string => {
 // Helper function to parse a value into appropriate type
 const parseValue = (value: string): any => {
   // Handle true/false strings
-  if (value === "true") return true;
-  if (value === "false") return false;
+  if (value === 'true') return true;
+  if (value === 'false') return false;
 
   // Handle numbers
   if (/^\d+$/.test(value)) return parseInt(value, 10);
   if (/^\d*\.\d+$/.test(value)) return parseFloat(value);
 
   // Handle arrays (comma-separated)
-  if (value.includes(",")) return value.split(",").map(v => v.trim());
+  if (value.includes(',')) return value.split(',').map(v => v.trim());
 
   // Default to string
   return value;
@@ -64,17 +64,17 @@ function parseArgs(): Partial<BuildConfig> {
 
   for (let i = 0; i < args.length; i++) {
     const arg = args[i];
-    if (!arg.startsWith("--")) continue;
+    if (!arg.startsWith('--')) continue;
 
     // Handle --no-* flags
-    if (arg.startsWith("--no-")) {
+    if (arg.startsWith('--no-')) {
       const key = toCamelCase(arg.slice(5));
       config[key] = false;
       continue;
     }
 
     // Handle --flag (boolean true)
-    if (!arg.includes("=") && (i === args.length - 1 || args[i + 1].startsWith("--"))) {
+    if (!arg.includes('=') && (i === args.length - 1 || args[i + 1].startsWith('--'))) {
       const key = toCamelCase(arg.slice(2));
       config[key] = true;
       continue;
@@ -84,8 +84,8 @@ function parseArgs(): Partial<BuildConfig> {
     let key: string;
     let value: string;
 
-    if (arg.includes("=")) {
-      [key, value] = arg.slice(2).split("=", 2);
+    if (arg.includes('=')) {
+      [key, value] = arg.slice(2).split('=', 2);
     } else {
       key = arg.slice(2);
       value = args[++i];
@@ -95,8 +95,8 @@ function parseArgs(): Partial<BuildConfig> {
     key = toCamelCase(key);
 
     // Handle nested properties (e.g. --minify.whitespace)
-    if (key.includes(".")) {
-      const [parentKey, childKey] = key.split(".");
+    if (key.includes('.')) {
+      const [parentKey, childKey] = key.split('.');
       config[parentKey] = config[parentKey] || {};
       config[parentKey][childKey] = parseValue(value);
     } else {
@@ -109,7 +109,7 @@ function parseArgs(): Partial<BuildConfig> {
 
 // Helper function to format file sizes
 const formatFileSize = (bytes: number): string => {
-  const units = ["B", "KB", "MB", "GB"];
+  const units = ['B', 'KB', 'MB', 'GB'];
   let size = bytes;
   let unitIndex = 0;
 
@@ -121,11 +121,16 @@ const formatFileSize = (bytes: number): string => {
   return `${size.toFixed(2)} ${units[unitIndex]}`;
 };
 
-console.log("\n🚀 Starting build process...\n");
+console.log('\n🚀 Starting build process...\n');
 
 // Parse CLI arguments with our magical parser
 const cliConfig = parseArgs();
-const outdir = cliConfig.outdir || path.join(process.cwd(), "dist");
+const outdir = cliConfig.outdir || path.join(process.cwd(), 'dist');
+// GitHub project pages live under /<repository>/; custom domains use /.
+const basePath = process.env.BASE_PATH || '/';
+if (!/^\/(?:[^\s?#]*\/)?$/.test(basePath) || basePath.startsWith('//')) {
+  throw new Error('BASE_PATH must start and end with / (for example /IronDome/).');
+}
 
 if (existsSync(outdir)) {
   console.log(`🗑️ Cleaning previous build at ${outdir}`);
@@ -135,10 +140,12 @@ if (existsSync(outdir)) {
 const start = performance.now();
 
 // Scan for all HTML files in the project
-const entrypoints = [...new Bun.Glob("**/*.html").scanSync("src")]
-  .map(a => path.resolve("src", a))
-  .filter(dir => !dir.includes("node_modules"));
-console.log(`📄 Found ${entrypoints.length} HTML ${entrypoints.length === 1 ? "file" : "files"} to process\n`);
+const entrypoints = [...new Bun.Glob('**/*.html').scanSync('src')]
+  .map(a => path.resolve('src', a))
+  .filter(dir => !dir.includes('node_modules'));
+console.log(
+  `📄 Found ${entrypoints.length} HTML ${entrypoints.length === 1 ? 'file' : 'files'} to process\n`
+);
 
 // Build all the HTML files
 const result = await build({
@@ -146,21 +153,35 @@ const result = await build({
   outdir,
   plugins: [plugin],
   minify: true,
-  target: "browser",
-  sourcemap: "linked",
+  target: 'browser',
+  sourcemap: 'linked',
+  publicPath: './',
+  env: 'disable',
+  ...cliConfig,
   define: {
-    "process.env.NODE_ENV": JSON.stringify("production"),
+    'process.env.NODE_ENV': JSON.stringify('production'),
+    ...cliConfig.define,
+    __BASE_PATH__: JSON.stringify(basePath),
   },
-  ...cliConfig, // Merge in any CLI-provided options
 });
+
+if (!result.success) {
+  for (const log of result.logs) console.error(log);
+  process.exit(1);
+}
+
+// These files are loaded at runtime by Three.js, so the bundler cannot discover them.
+await cp('assets', path.join(outdir, 'assets'), { recursive: true });
+await Bun.write(path.join(outdir, '.nojekyll'), '');
+await Bun.write(path.join(outdir, 'build-info.json'), JSON.stringify({ basePath }));
 
 // Print the results
 const end = performance.now();
 
 const outputTable = result.outputs.map(output => ({
-  "File": path.relative(process.cwd(), output.path),
-  "Type": output.kind,
-  "Size": formatFileSize(output.size),
+  File: path.relative(process.cwd(), output.path),
+  Type: output.kind,
+  Size: formatFileSize(output.size),
 }));
 
 console.table(outputTable);
@@ -168,54 +189,32 @@ const buildTime = (end - start).toFixed(2);
 
 console.log(`\n✅ Build completed in ${buildTime}ms\n`);
 
-// Create route-specific directory structure
-
-console.log('🔗 Creating route-specific directory structure...');
-
-// Helper function to fix asset paths in HTML
-async function fixAssetPaths(htmlPath: string, targetDepth: number = 1) {
-  const content = await Bun.file(htmlPath).text();
-  // Convert all relative paths to point to root with correct depth
-  const prefix = '../'.repeat(targetDepth);
-  const fixedContent = content
-    // Fix ./path patterns
-    .replace(/src="\.\/([^"]+)"/g, `src="${prefix}$1"`)
-    .replace(/href="\.\/([^"]+)"/g, `href="${prefix}$1"`)
-    // Fix ../path and ../../path patterns by replacing them with correct depth
-    .replace(/src="(?:\.\.\/)+([^"]+)"/g, `src="${prefix}$1"`)
-    .replace(/href="(?:\.\.\/)+([^"]+)"/g, `href="${prefix}$1"`);
-  
-  await Bun.write(htmlPath, fixedContent);
+// Resolve bundled references while each HTML file is still at its original depth.
+// Bun 1.2 emits ../../chunk.js for nested entrypoints; aliases must keep the same URL.
+for (const output of result.outputs.filter(output => output.path.endsWith('.html'))) {
+  const relativeHtml = path.relative(outdir, output.path).split(path.sep).join('/');
+  const pageUrl = `https://build.invalid${basePath}${relativeHtml}`;
+  const html = await Bun.file(output.path).text();
+  const fixedHtml = html.replace(
+    /(src|href)="([^"#]+)"/g,
+    (match, attribute: string, reference: string) => {
+      if (/^(?:[a-z]+:|\/)/i.test(reference)) return match;
+      return `${attribute}="${new URL(reference, pageUrl).pathname}"`;
+    }
+  );
+  await Bun.write(output.path, fixedHtml);
 }
 
-// Create model-viewer route
-const modelViewerDir = path.join(outdir, 'model-viewer');
-const modelViewerHtml = path.join(outdir, 'model-viewer.html');
-if (existsSync(modelViewerHtml)) {
-  await mkdir(modelViewerDir, { recursive: true });
-  await copyFile(modelViewerHtml, path.join(modelViewerDir, 'index.html'));
-  await fixAssetPaths(path.join(modelViewerDir, 'index.html'), 1);
-  console.log('✓ Created /model-viewer/index.html with fixed asset paths');
+// Directory indexes work on GitHub Pages without server-side route rewrites.
+const routes = {
+  'model-viewer': 'model-viewer.html',
+  'tube-editor': 'tools/tube-editor/index.html',
+  rigger: 'rigger.html',
+};
+for (const [route, source] of Object.entries(routes)) {
+  const routeDir = path.join(outdir, route);
+  await mkdir(routeDir, { recursive: true });
+  await copyFile(path.join(outdir, source), path.join(routeDir, 'index.html'));
 }
 
-// Create tube-editor route
-const tubeEditorDir = path.join(outdir, 'tube-editor');
-const builtTubeEditorHtml = path.join(outdir, 'tools', 'tube-editor', 'index.html');
-if (existsSync(builtTubeEditorHtml)) {
-  await mkdir(tubeEditorDir, { recursive: true });
-  await copyFile(builtTubeEditorHtml, path.join(tubeEditorDir, 'index.html'));
-  await fixAssetPaths(path.join(tubeEditorDir, 'index.html'), 1);
-  console.log('✓ Created /tube-editor/index.html with fixed asset paths');
-}
-
-// Create rigger route
-const riggerDir = path.join(outdir, 'rigger');
-const riggerHtml = path.join(outdir, 'rigger.html');
-if (existsSync(riggerHtml)) {
-  await mkdir(riggerDir, { recursive: true });
-  await copyFile(riggerHtml, path.join(riggerDir, 'index.html'));
-  await fixAssetPaths(path.join(riggerDir, 'index.html'), 1);
-  console.log('✓ Created /rigger/index.html with fixed asset paths');
-}
-
-console.log('🎯 Route structure ready for production');
+console.log('🎯 Static site ready for production');

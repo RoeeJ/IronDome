@@ -1,3 +1,4 @@
+import { assetUrl } from '@/utils/assetUrl';
 import * as THREE from 'three';
 import { debug } from '../utils/logger';
 
@@ -138,7 +139,7 @@ export class SoundSystem {
       // Only load files that exist (our normalized sounds)
       if (path.includes('normalized/')) {
         this.audioLoader.load(
-          path,
+          assetUrl(path),
           buffer => {
             this.sounds.set(key, buffer);
             debug.log(`Sound loaded: ${key}`);

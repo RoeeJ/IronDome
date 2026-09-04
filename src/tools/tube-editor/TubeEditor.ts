@@ -1,3 +1,4 @@
+import { assetUrl } from '@/utils/assetUrl';
 import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { OBJLoader } from 'three/examples/jsm/loaders/OBJLoader.js';
@@ -148,7 +149,7 @@ export class TubeEditor {
     try {
       const object = await new Promise<THREE.Group>((resolve, reject) => {
         loader.load(
-          '/assets/Battery.obj',
+          assetUrl('assets/Battery.obj'),
           obj => resolve(obj),
           progress => {
             const percent = (progress.loaded / progress.total) * 100;
